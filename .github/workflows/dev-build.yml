@@ -1,0 +1,79 @@
+name: Development Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sigma-modern-dev-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build client
+        run: mvn -B -DskipTests package dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/dependency
+
+      - name: Prepare launcher package
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          DIST="target/sigma-modern-${SHORT_SHA}"
+          mkdir -p "$DIST/libs"
+          cp target/minecraft-26.2-source-1.0-SNAPSHOT.jar "$DIST/client.jar"
+          cp target/dependency/*.jar "$DIST/libs/"
+          cat > "$DIST/launch.properties" <<EOF
+          channel=modern
+          commit=${GITHUB_SHA}
+          shortCommit=${SHORT_SHA}
+          java=25
+          mainClass=Start
+          minecraft=26.2
+          EOF
+          cd target
+          zip -qr "sigma-modern-${SHORT_SHA}.zip" "sigma-modern-${SHORT_SHA}"
+          sha256sum "sigma-modern-${SHORT_SHA}.zip" > "sigma-modern-${SHORT_SHA}.zip.sha256"
+
+      - name: Publish development prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAG="dev-${GITHUB_SHA}"
+          TITLE="Development build ${SHORT_SHA}"
+          BODY=$(cat <<EOF
+          Automated development build from commit ${GITHUB_SHA}.
+
+          Commit: ${GITHUB_SHA}
+          Message: ${GITHUB_HEAD_REF:-${{ github.event.head_commit.message }}}
+
+          This is a development build and may be unstable. The Sigma Jello Bootstrap can select older successful builds from History.
+          EOF
+          )
+          gh release create "$TAG" \
+            "target/sigma-modern-${SHORT_SHA}.zip" \
+            "target/sigma-modern-${SHORT_SHA}.zip.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "$TITLE" \
+            --notes "$BODY" \
+            --prerelease
