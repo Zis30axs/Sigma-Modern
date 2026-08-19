@@ -55,21 +55,14 @@ jobs:
       - name: Publish development prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         shell: bash
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA::7}"
           TAG="dev-${GITHUB_SHA}"
           TITLE="Development build ${SHORT_SHA}"
-          BODY=$(cat <<EOF
-          Automated development build from commit ${GITHUB_SHA}.
-
-          Commit: ${GITHUB_SHA}
-          Message: ${GITHUB_HEAD_REF:-${{ github.event.head_commit.message }}}
-
-          This is a development build and may be unstable. The Sigma Jello Bootstrap can select older successful builds from History.
-          EOF
-          )
+          BODY=$(printf 'Automated development build from commit %s.\n\nCommit: %s\nMessage: %s\n\nThis is a development build and may be unstable. The Sigma Jello Bootstrap can select older successful builds from History.\n' "$GITHUB_SHA" "$GITHUB_SHA" "${COMMIT_MESSAGE:-manual workflow run}")
           gh release create "$TAG" \
             "target/sigma-modern-${SHORT_SHA}.zip" \
             "target/sigma-modern-${SHORT_SHA}.zip.sha256" \
