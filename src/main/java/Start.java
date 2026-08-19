@@ -15,25 +15,15 @@ public final class Start {
 
     public static void main(String[] args) {
         File rootDirectory = new File(System.getProperty("user.dir"));
-
         File runDirectory = new File(rootDirectory, "run");
-        File assetsDirectory = new File(runDirectory, "assets");
-
 
         if (!runDirectory.exists() && !runDirectory.mkdirs()) {
             throw new IllegalStateException(
-                    "Could not create run directory: "
-                            + runDirectory.getAbsolutePath()
+                    "Could not create run directory: " + runDirectory.getAbsolutePath()
             );
         }
 
-        if (!assetsDirectory.isDirectory()) {
-            throw new IllegalStateException(
-                    "Minecraft assets directory does not exist: "
-                            + assetsDirectory.getAbsolutePath()
-            );
-        }
-
+        File assetsDirectory = resolveAssetsDirectory(runDirectory);
         String assetIndex = findAssetIndex(assetsDirectory);
 
         System.out.println("Minecraft " + VERSION);
@@ -51,45 +41,65 @@ public final class Start {
         }
 
         List<String> launchArgs = new ArrayList<>();
-
         launchArgs.add("--gameDir");
         launchArgs.add(runDirectory.getAbsolutePath());
-
         launchArgs.add("--version");
         launchArgs.add(VERSION);
-
         launchArgs.add("--assetsDir");
         launchArgs.add(assetsDirectory.getAbsolutePath());
-
         launchArgs.add("--assetIndex");
         launchArgs.add(assetIndex);
-
         launchArgs.add("--accessToken");
         launchArgs.add("0");
-
         launchArgs.addAll(Arrays.asList(args));
 
         Main.main(launchArgs.toArray(String[]::new));
     }
 
-    private static String findAssetIndex(File assetsDirectory) {
-        File indexesDirectory = new File(assetsDirectory, "indexes");
+    private static File resolveAssetsDirectory(File runDirectory) {
+        List<File> candidates = new ArrayList<>();
+        candidates.add(new File(runDirectory, "assets"));
 
-        if (!indexesDirectory.isDirectory()) {
-            throw new IllegalStateException(
-                    "Minecraft asset indexes directory does not exist: "
-                            + indexesDirectory.getAbsolutePath()
-            );
+        String appData = System.getenv("APPDATA");
+        if (appData != null && !appData.isEmpty()) {
+            candidates.add(new File(new File(appData, ".minecraft"), "assets"));
         }
 
+        String userHome = System.getProperty("user.home");
+        if (userHome != null && !userHome.isEmpty()) {
+            candidates.add(new File(new File(userHome, ".minecraft"), "assets"));
+            candidates.add(new File(new File(new File(userHome, "AppData"), "Roaming\\.minecraft"), "assets"));
+        }
+
+        for (File candidate : candidates) {
+            if (new File(candidate, "indexes").isDirectory()) {
+                return candidate;
+            }
+        }
+
+        StringBuilder checked = new StringBuilder();
+        for (File candidate : candidates) {
+            if (checked.length() > 0) {
+                checked.append(System.lineSeparator());
+            }
+            checked.append(" - ").append(candidate.getAbsolutePath());
+        }
+
+        throw new IllegalStateException(
+                "Minecraft assets directory was not found. Checked:" +
+                        System.lineSeparator() + checked
+        );
+    }
+
+    private static String findAssetIndex(File assetsDirectory) {
+        File indexesDirectory = new File(assetsDirectory, "indexes");
         File[] indexes = indexesDirectory.listFiles(
                 (directory, name) -> name.endsWith(".json")
         );
 
         if (indexes == null || indexes.length == 0) {
             throw new IllegalStateException(
-                    "No Minecraft asset index found in: "
-                            + indexesDirectory.getAbsolutePath()
+                    "No Minecraft asset index found in: " + indexesDirectory.getAbsolutePath()
             );
         }
 
@@ -98,10 +108,6 @@ public final class Start {
                 .orElseThrow();
 
         String name = newest.getName();
-
-        return name.substring(
-                0,
-                name.length() - ".json".length()
-        );
+        return name.substring(0, name.length() - ".json".length());
     }
 }
