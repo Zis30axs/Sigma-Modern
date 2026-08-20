@@ -13,7 +13,6 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Stream;
-import java.util.zip.ZipFile;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -22,13 +21,12 @@ public final class ShaderPackManager {
     private static final String CONFIG_FILE = "optionsshaders.txt";
     private static final String SELECTED_PACK_KEY = "shaderPack";
     private static final String OPENGL_BACKEND = "OpenGL";
-    private static final String SHADER_ROOT = "shaders/";
     private final Path shaderPackDirectory;
     private final Path configFile;
     private @Nullable String selectedPack;
 
     public ShaderPackManager(final Path gameDirectory) {
-        this.shaderPackDirectory = gameDirectory.resolve("shaderpacks");
+        this.shaderPackDirectory = gameDirectory.resolve("shaderpacks").normalize();
         this.configFile = gameDirectory.resolve(CONFIG_FILE);
         this.ensureDirectory();
         this.load();
@@ -61,8 +59,43 @@ public final class ShaderPackManager {
             return Optional.empty();
         }
 
-        Path selected = this.shaderPackDirectory.resolve(this.selectedPack);
-        return this.isValidShaderPack(selected) ? Optional.of(selected) : Optional.empty();
+        return this.resolvePackPath(this.selectedPack).filter(this::isValidShaderPack);
+    }
+
+    public Optional<ShaderPackSource> openSelectedPack() {
+        if (this.selectedPack == null) {
+            return Optional.empty();
+        }
+
+        return this.openPack(this.selectedPack);
+    }
+
+    public Optional<ShaderPackSource> openPack(final String packName) {
+        Optional<Path> packPath = this.resolvePackPath(packName);
+        if (packPath.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(ShaderPackSource.open(packPath.get()));
+        } catch (IOException exception) {
+            LOGGER.warn("Failed to open shader pack {}", packPath.get(), exception);
+            return Optional.empty();
+        }
+    }
+
+    public Optional<ShaderPackProgramSet> inspectPrograms(final String packName) {
+        Optional<Path> packPath = this.resolvePackPath(packName);
+        if (packPath.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try (ShaderPackSource source = ShaderPackSource.open(packPath.get())) {
+            return Optional.of(ShaderPackProgramSet.discover(source));
+        } catch (IOException exception) {
+            LOGGER.warn("Failed to inspect shader programs in {}", packPath.get(), exception);
+            return Optional.empty();
+        }
     }
 
     public boolean isSelected(final String packName) {
@@ -80,7 +113,7 @@ public final class ShaderPackManager {
     }
 
     public boolean isValidShaderPack(final String packName) {
-        return this.isValidShaderPack(this.shaderPackDirectory.resolve(packName));
+        return this.resolvePackPath(packName).filter(this::isValidShaderPack).isPresent();
     }
 
     public boolean select(final @Nullable String packName) {
@@ -94,8 +127,8 @@ public final class ShaderPackManager {
             return false;
         }
 
-        Path packPath = this.shaderPackDirectory.resolve(packName);
-        if (!this.isValidShaderPack(packPath)) {
+        Optional<Path> packPath = this.resolvePackPath(packName);
+        if (packPath.isEmpty() || !this.isValidShaderPack(packPath.get())) {
             return false;
         }
 
@@ -112,19 +145,15 @@ public final class ShaderPackManager {
         }
     }
 
+    private Optional<Path> resolvePackPath(final String packName) {
+        Path resolved = this.shaderPackDirectory.resolve(packName).normalize();
+        return resolved.startsWith(this.shaderPackDirectory) && !resolved.equals(this.shaderPackDirectory) ? Optional.of(resolved) : Optional.empty();
+    }
+
     private boolean isValidShaderPack(final Path path) {
-        if (Files.isDirectory(path)) {
-            return Files.isDirectory(path.resolve("shaders"));
-        }
-
-        if (!Files.isRegularFile(path) || !path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip")) {
-            return false;
-        }
-
-        try (ZipFile zip = new ZipFile(path.toFile())) {
-            return zip.stream().anyMatch(entry -> entry.getName().startsWith(SHADER_ROOT) && entry.getName().length() > SHADER_ROOT.length());
+        try (ShaderPackSource ignored = ShaderPackSource.open(path)) {
+            return true;
         } catch (IOException exception) {
-            LOGGER.warn("Failed to inspect shader pack {}", path, exception);
             return false;
         }
     }
