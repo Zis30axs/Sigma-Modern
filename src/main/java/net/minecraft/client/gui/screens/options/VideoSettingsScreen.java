@@ -198,9 +198,8 @@ public class VideoSettingsScreen extends OptionsSubScreen {
 
     private void addShaderOptions() {
         this.list.addHeader(Component.literal("Shaders"));
-        String selected = this.shaderPackManager.selectedPack().orElse("Off");
         this.list.addBig(
-            Button.builder(Component.literal("Shader Packs: " + selected), button -> this.minecraft.gui.setScreen(new ShaderPackScreen(this, this.shaderPackManager)))
+            Button.builder(Component.literal("Shader Pack Selection"), button -> this.minecraft.gui.setScreen(new ShaderPackScreen(this, this.shaderPackManager)))
                 .build()
         );
         this.list.addBig(
@@ -234,6 +233,9 @@ public class VideoSettingsScreen extends OptionsSubScreen {
     }
 
     private void rebuildPage() {
+        if (this.list != null) {
+            this.list.applyUnsavedChanges();
+        }
         this.layout.removeChildren();
         this.rebuildWidgets();
     }
