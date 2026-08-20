@@ -3,6 +3,7 @@ package net.minecraft.client.renderer;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.ResourceHandle;
 import java.util.Set;
+import net.minecraft.client.renderer.shaderpack.ShaderPackCompositeRuntime;
 import net.minecraft.client.renderer.shaderpack.ShaderPackRuntime;
 import net.minecraft.resources.Identifier;
 import net.minecraftforge.api.distmarker.Dist;
@@ -74,6 +75,7 @@ public class LevelTargetBundle implements PostChain.TargetBundle {
     }
 
     public void clear() {
+        ShaderPackCompositeRuntime.apply();
         ShaderPackRuntime.applyFinalPass();
         this.main = ResourceHandle.invalid();
         this.translucent = null;

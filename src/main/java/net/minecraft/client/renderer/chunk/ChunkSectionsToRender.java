@@ -45,7 +45,7 @@ public record ChunkSectionsToRender(
         for (ChunkSectionLayer layer : layers) {
             RenderPipeline pipeline = wireframe ? RenderPipelines.WIREFRAME : ShaderPackRuntime.terrainPipeline(layer);
             pipelines.put(layer, pipeline);
-            if (!wireframe && ShaderPackRuntime.terrainColorAttachmentCount(layer) > 1) {
+            if (!wireframe && pipeline != layer.pipeline()) {
                 requiresSeparatePasses = true;
             }
         }
