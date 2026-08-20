@@ -18,11 +18,10 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -43,6 +42,7 @@ final class ShaderPackCompositePasses {
     private boolean missing;
     private @Nullable String failureReason;
     private List<Pass> passes = List.of();
+    private Map<Integer, Boolean> preFlips = Map.of();
     private Set<Integer> requiredColorTargets = Set.of();
     private Set<Integer> requiredDepthSamplers = Set.of();
 
@@ -62,6 +62,7 @@ final class ShaderPackCompositePasses {
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
         try {
             renderTargets.prepare(encoder, mainTarget.width, mainTarget.height, this.requiredColorTargets);
+            applyTrueFlips(renderTargets, this.preFlips);
             for (Pass screenPass : this.passes) {
                 RenderPassDescriptor descriptor = RenderPassDescriptor.create(() -> "Sigma shader " + screenPass.name());
                 for (int colorTarget : screenPass.transformed().colorTargets()) {
@@ -97,8 +98,11 @@ final class ShaderPackCompositePasses {
                 }
 
                 for (int colorTarget : screenPass.transformed().colorTargets()) {
-                    renderTargets.flip(colorTarget);
+                    if (screenPass.explicitFlips().get(colorTarget) != Boolean.FALSE) {
+                        renderTargets.flip(colorTarget);
+                    }
                 }
+                applyTrueFlips(renderTargets, screenPass.explicitFlips());
             }
             return Outcome.COMPLETE;
         } catch (RuntimeException exception) {
@@ -155,6 +159,14 @@ final class ShaderPackCompositePasses {
             return;
         }
 
+        Optional<ShaderPackDirectives> packDirectives = this.manager.inspectDirectives(this.packName);
+        if (packDirectives.isEmpty()) {
+            this.fail("could not read shaders.properties directives", null);
+            return;
+        }
+        ShaderPackDirectives directives = packDirectives.get();
+        Map<Integer, Boolean> preFlips = directives.explicitFlips("composite_pre");
+
         GpuDevice device = RenderSystem.tryGetDevice();
         if (device == null) {
             this.initialized = false;
@@ -162,7 +174,7 @@ final class ShaderPackCompositePasses {
         }
 
         List<Pass> builtPasses = new ArrayList<>();
-        Set<Integer> colorTargets = new LinkedHashSet<>();
+        Set<Integer> colorTargets = new LinkedHashSet<>(preFlips.keySet());
         Set<Integer> depthSamplers = new LinkedHashSet<>();
         int ordinal = 0;
         for (ProgramCandidate candidate : candidates) {
@@ -209,23 +221,27 @@ final class ShaderPackCompositePasses {
                 return;
             }
 
-            builtPasses.add(new Pass(program.name(), transformed, pipeline));
+            Map<Integer, Boolean> explicitFlips = directives.explicitFlips(program.name());
+            builtPasses.add(new Pass(program.name(), transformed, pipeline, explicitFlips));
             colorTargets.addAll(transformed.colorTargets());
             colorTargets.addAll(transformed.colorSamplers());
+            colorTargets.addAll(explicitFlips.keySet());
             depthSamplers.addAll(transformed.depthSamplers());
         }
 
         this.passes = List.copyOf(builtPasses);
+        this.preFlips = preFlips;
         this.requiredColorTargets = Set.copyOf(colorTargets);
         this.requiredDepthSamplers = Set.copyOf(depthSamplers);
         this.ready = true;
         LOGGER.info(
-            "Enabled {} shader-pack composite passes on {} for {} with color targets {} and depth samplers {}",
+            "Enabled {} shader-pack composite passes on {} for {} with color targets {}, depth samplers {}, and {} pre-flip directives",
             this.passes.size(),
             this.backend.displayName(),
             this.packName,
             this.requiredColorTargets,
-            this.requiredDepthSamplers
+            this.requiredDepthSamplers,
+            this.preFlips.size()
         );
     }
 
@@ -255,6 +271,14 @@ final class ShaderPackCompositePasses {
             builder.withBindGroupLayout(layout.build());
         }
         return builder.build();
+    }
+
+    private static void applyTrueFlips(final ShaderPackRenderTargets renderTargets, final Map<Integer, Boolean> explicitFlips) {
+        explicitFlips.forEach((target, shouldFlip) -> {
+            if (shouldFlip) {
+                renderTargets.flip(target);
+            }
+        });
     }
 
     private void fail(final String reason, final @Nullable Throwable throwable) {
@@ -303,7 +327,12 @@ final class ShaderPackCompositePasses {
         FAILED
     }
 
-    private record Pass(String name, ShaderPackCompositeTransformer.Result transformed, RenderPipeline pipeline) {
+    private record Pass(
+        String name,
+        ShaderPackCompositeTransformer.Result transformed,
+        RenderPipeline pipeline,
+        Map<Integer, Boolean> explicitFlips
+    ) {
     }
 
     private record ProgramCandidate(ShaderPackProgramSet.Program program, ProgramOrder order) {

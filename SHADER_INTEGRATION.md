@@ -16,7 +16,8 @@ Sigma-Modern keeps shader-pack loading and compatibility transformation separate
 - `depthtex2` is captured at the end of world rendering after translucent world content and before Minecraft clears depth for its vanilla first-person hand pass.
 - Deferred passes reuse the screen-pass transformer and the shared colortex ping-pong targets. Because Sigma's remaining translucent entity/particle paths are not fully shader-gbuffer-aware yet, deferred output is temporarily normalized back to each logical target's main side before vanilla translucent rendering continues.
 - Ordered `composite`, `composite1`, `composite2`, ... fragment passes execute at world end on OpenGL and Vulkan and can sample `depthtex0`, `depthtex1`, and `depthtex2`.
-- Composite passes use main/alternate render-target pairs. A pass samples the current side, writes the opposite side, then flips every logical target it wrote. This avoids reading from and writing to the same texture in one screen pass.
+- Literal `flip.<pass>.<buffer>=true|false` directives from `shaders.properties` are applied to `deferred_pre`, individual deferred passes, `composite_pre`, and individual composite passes with Iris-compatible ping-pong semantics.
+- Composite passes use main/alternate render-target pairs. A pass samples the current side, writes the opposite side, then applies its default and explicit flip rules without reading from and writing to the same texture in one screen pass.
 - Before the existing `final.fsh` stage runs, Sigma resolves the current logical `colortex0` side back to Minecraft's main world target. Extra `colortex` samplers keep their current ping-pong side, and final shaders can sample `depthtex0`, `depthtex1`, and `depthtex2` simultaneously.
 - Shader-pack `final.fsh` executes as a real full-screen pass after composite resolution. Sigma does not yet replace Minecraft's later vanilla first-person hand renderer with an Iris-style shader-aware hand path, so the vanilla hand is still drawn after the shader-pack final stage.
 
@@ -43,25 +44,29 @@ The current deferred subset supports:
 - `DRAWBUFFERS` and `RENDERTARGETS` using logical targets 0 through 7;
 - `colortex0` through `colortex7` and the legacy aliases `gcolor`, `gdepth`, `gnormal`, `composite`, and `gaux1` through `gaux4`;
 - `depthtex0` / `gdepthtex` and the captured pre-translucent `depthtex1`;
+- literal `flip.deferred_pre.<buffer>` and `flip.deferred[N].<buffer>` properties for `colortex0` through `colortex7` and their legacy aliases;
 - the same fragment compatibility forms currently supported by the composite transformer, including one `vec2` input, legacy texture functions, numeric `gl_FragData[n]`, and screen-size uniforms.
 
 `depthtex2` is intentionally rejected in deferred programs because the pre-hand snapshot does not exist until after translucent world rendering. After the deferred chain, flipped logical color targets are copied back to their main sides and the flip state is reset. This normalization is intentionally temporary: it preserves correct deferred results while existing vanilla translucent feature renderers still assume Minecraft's normal render targets.
 
 ## Composite-pass subset
 
-Sigma discovers root-level `composite`, `composite1`, `composite2`, ... in numeric order, preprocesses their fragment source, and synthesizes a full-screen triangle vertex stage. The pack-provided composite vertex stage is not executed yet, so packs that depend on meaningful custom composite vertex work are outside the guaranteed compatibility subset.
+Sigma discovers root-level `composite`, `composite1`, `composite2`, ... in numeric order, preprocesses their fragment source, and synthesizes a full-screen triangle vertex stage. The pack-provided composite vertex stage is not executed yet, so packs that depend on meaningful custom composite vertex work remain outside the guaranteed compatibility subset.
 
 The current subset supports:
 
 - `DRAWBUFFERS` and `RENDERTARGETS` using logical targets 0 through 7;
 - `colortex0` through `colortex7` and the legacy aliases `gcolor`, `gdepth`, `gnormal`, `composite`, and `gaux1` through `gaux4`;
 - `depthtex0` / `gdepthtex`, pre-translucent `depthtex1`, and pre-hand `depthtex2`;
+- literal `flip.composite_pre.<buffer>` and `flip.composite[N].<buffer>` properties;
 - one `vec2` fragment input, including legacy `gl_TexCoord[0]`;
 - legacy `texture2D`, `texture2DLod`, `texture2DProj`, and `texture2DGrad` forms;
 - `gl_FragColor` for a single draw buffer and numeric `gl_FragData[n]` mapped to explicit modern output locations;
 - `viewWidth`, `viewHeight`, and `aspectRatio` derived from the current `colortex0` size.
 
-Explicit flip directives, mipmap directives, viewport scaling, requested colortex formats, custom uniforms/textures, shadow samplers, image/SSBO resources, begin/prepare passes, and compute programs are not active yet. Unsupported resources are rejected rather than submitted as undefined Vulkan bindings.
+Flip behavior follows Iris's useful screen-pass rule: a draw buffer flips after a pass unless the corresponding explicit property is `false`, then every explicit `true` entry performs an additional flip. `*_pre` directives only perform entries explicitly set to `true`. Flip targets are included in Sigma's per-frame render-target preparation even when a pass does not otherwise sample or write them.
+
+Sigma currently reads literal `shaders.properties` values only. If property preprocessor conditionals such as `#if`, `#ifdef`, or `#else` are detected, explicit flip directives are ignored rather than evaluating inactive branches incorrectly. Mipmap directives, viewport scaling, requested colortex formats, custom uniforms/textures, shadow samplers, image/SSBO resources, begin/prepare passes, and compute programs are not active yet. Unsupported resources are rejected rather than submitted as undefined Vulkan bindings.
 
 ## Final-pass subset
 
@@ -73,14 +78,14 @@ The current `final.fsh` path supports `colortex0` through `colortex7` plus the s
 
 1. Make translucent terrain/entities/particles fully flip-aware so deferred output can remain on the Iris-style current side without the temporary normalize copies, while preserving Minecraft 26.2's Improved Transparency target routing.
 2. Add an Iris-style shader-aware hand path so first-person hands participate in shader-pack gbuffers and the final-stage ordering can match Iris end-to-end.
-3. Add explicit buffer flips, mipmap generation, viewport scaling, and requested `colortex` formats from shader-pack directives.
+3. Add mipmap generation, viewport scaling, requested `colortex` formats, and eventually the shader-properties preprocessor needed for conditional directives.
 4. Extend the shared uniform/texture contract for camera, time, environment, material/block IDs, normals, mid texture coordinates, tangents, and other commonly requested shader-pack data.
 5. Add shadow target ownership and shadow terrain/entity rendering phases.
 6. Extend backend stage support for geometry, tessellation, and compute programs where Minecraft's active backend can provide them safely.
 
 ## Compatibility policy
 
-- Vulkan vanilla rendering is a hard fallback path and must remain usable even when shader-pack transformation, pipeline compilation, a depth snapshot, or a screen pass fails.
+- Vulkan vanilla rendering is a hard fallback path and must remain usable even when shader-pack transformation, directive parsing, pipeline compilation, a depth snapshot, or a screen pass fails.
 - Vulkan shader support is capability-based. The same transformed source is submitted through Minecraft 26.2's backend-neutral pipeline API; Vulkan uses the native GLSL-to-SPIR-V route instead of emulating OpenGL state.
 - Backend-specific state stays out of shared shader-pack parsing, fallback resolution, render-target planning, and compatibility transformation code.
 - Screen-pass ping-pong and depth-snapshot readiness are reset every world frame and are not allowed to leak into vanilla rendering after a failed or missing final stage.
