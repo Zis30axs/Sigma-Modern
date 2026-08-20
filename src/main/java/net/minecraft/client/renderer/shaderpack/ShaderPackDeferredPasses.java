@@ -51,11 +51,6 @@ final class ShaderPackDeferredPasses {
         this.generation = generation;
     }
 
-    boolean requiresDepthSampler(final int target) {
-        this.initializeIfNeeded();
-        return this.ready && this.requiredDepthSamplers.contains(target);
-    }
-
     Outcome apply(final RenderTarget mainTarget, final ShaderPackRenderTargets renderTargets) {
         this.initializeIfNeeded();
         if (!this.ready || this.passes.isEmpty()) {
@@ -186,6 +181,10 @@ final class ShaderPackDeferredPasses {
                 transformed = ShaderPackCompositeTransformer.transform(fragmentSource.get());
             } catch (IllegalArgumentException exception) {
                 this.fail(program.name() + ": " + safeMessage(exception), exception);
+                return;
+            }
+            if (transformed.depthSamplers().contains(2)) {
+                this.fail(program.name() + " requests depthtex2 before the pre-hand snapshot exists", null);
                 return;
             }
             if (transformed.colorTargets().size() > device.getDeviceInfo().limits().maxColorAttachments()) {

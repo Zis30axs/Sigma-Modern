@@ -35,6 +35,10 @@ public final class ShaderPackDeferredRuntime {
         INSTANCE.renderBeforeTranslucents();
     }
 
+    public static void capturePreHandDepth() {
+        INSTANCE.capturePreHandDepthInternal();
+    }
+
     public static void invalidate() {
         synchronized (INSTANCE) {
             INSTANCE.manager = null;
@@ -57,14 +61,9 @@ public final class ShaderPackDeferredRuntime {
         this.preTranslucentProcessed = true;
 
         try {
-            ShaderPackRenderTargets targets = ShaderPackRenderTargets.active();
+            ShaderPackRenderTargets targets = this.activeTargets();
             if (targets == null) {
                 return;
-            }
-            if (targets.epoch() != this.targetEpoch) {
-                this.targetEpoch = targets.epoch();
-                this.manager = null;
-                this.reset(ShaderPackBackend.UNKNOWN, null);
             }
 
             ShaderPackManager manager = this.manager();
@@ -74,14 +73,13 @@ public final class ShaderPackDeferredRuntime {
             if (pack == null || !backend.supportsCustomShaderPipelines()) {
                 return;
             }
-            if (this.passes == null) {
-                this.passes = new ShaderPackDeferredPasses(manager, pack, backend, this.generation);
-            }
 
             RenderTarget mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-            if (this.passes.requiresDepthSampler(1)) {
-                CommandEncoder depthEncoder = RenderSystem.getDevice().createCommandEncoder();
-                targets.captureDepthSnapshot(1, depthEncoder, mainTarget);
+            CommandEncoder depthEncoder = RenderSystem.getDevice().createCommandEncoder();
+            targets.captureDepthSnapshot(1, depthEncoder, mainTarget);
+
+            if (this.passes == null) {
+                this.passes = new ShaderPackDeferredPasses(manager, pack, backend, this.generation);
             }
 
             this.passes.apply(mainTarget, targets);
@@ -95,6 +93,50 @@ public final class ShaderPackDeferredRuntime {
                 exception
             );
         }
+    }
+
+    private synchronized void capturePreHandDepthInternal() {
+        if (!this.worldFrameArmed) {
+            return;
+        }
+
+        try {
+            ShaderPackRenderTargets targets = this.activeTargets();
+            if (targets == null) {
+                return;
+            }
+
+            ShaderPackManager manager = this.manager();
+            ShaderPackBackend backend = ShaderPackBackend.current();
+            String pack = manager.selectedPackPath().isPresent() ? manager.selectedPack().orElse(null) : null;
+            this.updateSelection(backend, pack);
+            if (pack == null || !backend.supportsCustomShaderPipelines()) {
+                return;
+            }
+
+            RenderTarget mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+            targets.captureDepthSnapshot(2, RenderSystem.getDevice().createCommandEncoder(), mainTarget);
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                "Could not capture shader-pack pre-hand depth on {}: {}",
+                this.activeBackend.displayName(),
+                safeMessage(exception),
+                exception
+            );
+        }
+    }
+
+    private @Nullable ShaderPackRenderTargets activeTargets() {
+        ShaderPackRenderTargets targets = ShaderPackRenderTargets.active();
+        if (targets == null) {
+            return null;
+        }
+        if (targets.epoch() != this.targetEpoch) {
+            this.targetEpoch = targets.epoch();
+            this.manager = null;
+            this.reset(ShaderPackBackend.UNKNOWN, null);
+        }
+        return targets;
     }
 
     private ShaderPackManager manager() {

@@ -62,7 +62,7 @@ public final class ShaderPackFinalTransformer {
         List<Edit> declarationEdits = new ArrayList<>();
         List<Replacement> samplerReplacements = new ArrayList<>();
         Set<Integer> colorSamplers = new TreeSet<>();
-        boolean depthSampler = false;
+        Set<Integer> depthSamplers = new TreeSet<>();
         boolean replaceViewWidth = false;
         boolean replaceViewHeight = false;
         boolean replaceAspectRatio = false;
@@ -72,6 +72,7 @@ public final class ShaderPackFinalTransformer {
             String type = uniformMatcher.group(1);
             String name = uniformMatcher.group(2);
             Integer colorTarget = "sampler2D".equals(type) ? colorSamplerTarget(name) : null;
+            Integer depthTarget = "sampler2D".equals(type) ? depthSamplerTarget(name) : null;
             if (colorTarget != null) {
                 colorSamplers.add(colorTarget);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
@@ -79,11 +80,12 @@ public final class ShaderPackFinalTransformer {
                 if (!canonical.equals(name)) {
                     samplerReplacements.add(new Replacement(name, canonical));
                 }
-            } else if ("sampler2D".equals(type) && ("depthtex0".equals(name) || "gdepthtex".equals(name))) {
-                depthSampler = true;
+            } else if (depthTarget != null) {
+                depthSamplers.add(depthTarget);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
-                if (!"depthtex0".equals(name)) {
-                    samplerReplacements.add(new Replacement(name, "depthtex0"));
+                String canonical = "depthtex" + depthTarget;
+                if (!canonical.equals(name)) {
+                    samplerReplacements.add(new Replacement(name, canonical));
                 }
             } else if ("float".equals(type) && "viewWidth".equals(name)) {
                 replaceViewWidth = true;
@@ -203,8 +205,8 @@ public final class ShaderPackFinalTransformer {
         for (int colorSampler : colorSamplers) {
             declarations.append("uniform sampler2D colortex").append(colorSampler).append(";\n");
         }
-        if (depthSampler) {
-            declarations.append("uniform sampler2D depthtex0;\n");
+        for (int depthSampler : depthSamplers) {
+            declarations.append("uniform sampler2D depthtex").append(depthSampler).append(";\n");
         }
         if (inputDeclarationInjected) {
             declarations.append("in vec2 ").append(inputName).append(";\n");
@@ -228,7 +230,7 @@ public final class ShaderPackFinalTransformer {
         }
         vertex.append("}\n");
 
-        return new Result(vertex.toString(), fragment, List.copyOf(colorSamplers), depthSampler);
+        return new Result(vertex.toString(), fragment, List.copyOf(colorSamplers), List.copyOf(depthSamplers));
     }
 
     private static Integer colorSamplerTarget(final String name) {
@@ -249,6 +251,15 @@ public final class ShaderPackFinalTransformer {
             case "gaux2" -> 5;
             case "gaux3" -> 6;
             case "gaux4" -> 7;
+            default -> null;
+        };
+    }
+
+    private static Integer depthSamplerTarget(final String name) {
+        return switch (name) {
+            case "depthtex0", "gdepthtex" -> 0;
+            case "depthtex1" -> 1;
+            case "depthtex2" -> 2;
             default -> null;
         };
     }
@@ -310,7 +321,7 @@ public final class ShaderPackFinalTransformer {
         return masked.toString();
     }
 
-    public record Result(String vertexSource, String fragmentSource, List<Integer> colorSamplers, boolean depthSampler) {
+    public record Result(String vertexSource, String fragmentSource, List<Integer> colorSamplers, List<Integer> depthSamplers) {
     }
 
     private record Edit(int start, int end, String replacement) {
