@@ -41,7 +41,7 @@ final class ShaderPackFinalPass implements AutoCloseable {
     private @Nullable RenderPipeline pipeline;
     private @Nullable TextureTarget copyTarget;
     private List<Integer> colorSamplers = List.of();
-    private boolean depthSampler;
+    private List<Integer> depthSamplers = List.of();
 
     ShaderPackFinalPass(final ShaderPackManager manager, final String packName, final ShaderPackBackend backend, final long generation) {
         this.manager = manager;
@@ -79,13 +79,14 @@ final class ShaderPackFinalPass implements AutoCloseable {
                 samplerViews.put(colorSampler, view);
             }
 
-            GpuTextureView depthView = null;
-            if (this.depthSampler) {
-                depthView = mainTarget.getDepthTextureView();
-                if (depthView == null) {
-                    this.fail("final.fsh requested depthtex0 but the main depth texture is unavailable", null);
+            Map<Integer, GpuTextureView> depthViews = new LinkedHashMap<>();
+            for (int depthSampler : this.depthSamplers) {
+                GpuTextureView view = renderTargets.depthSamplerView(depthSampler, mainTarget);
+                if (view == null) {
+                    this.fail("final.fsh requested depthtex" + depthSampler + " but that current-frame depth texture is unavailable", null);
                     return;
                 }
+                depthViews.put(depthSampler, view);
             }
 
             try (RenderPass pass = encoder.createRenderPass(() -> "Sigma shader pack final", mainColorView, Optional.empty())) {
@@ -97,8 +98,12 @@ final class ShaderPackFinalPass implements AutoCloseable {
                         RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)
                     );
                 }
-                if (depthView != null) {
-                    pass.bindTexture("depthtex0", depthView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                for (Map.Entry<Integer, GpuTextureView> sampler : depthViews.entrySet()) {
+                    pass.bindTexture(
+                        "depthtex" + sampler.getKey(),
+                        sampler.getValue(),
+                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)
+                    );
                 }
                 pass.draw(3, 1, 0, 0);
             }
@@ -112,8 +117,9 @@ final class ShaderPackFinalPass implements AutoCloseable {
             String samplers = this.colorSamplers.isEmpty()
                 ? "no color samplers"
                 : this.colorSamplers.stream().map(index -> "colortex" + index).collect(Collectors.joining(","));
-            if (this.depthSampler) {
-                samplers = samplers.equals("no color samplers") ? "depthtex0" : samplers + ",depthtex0";
+            String depthSamplerStatus = this.depthSamplers.stream().map(index -> "depthtex" + index).collect(Collectors.joining(","));
+            if (!depthSamplerStatus.isEmpty()) {
+                samplers = samplers.equals("no color samplers") ? depthSamplerStatus : samplers + "," + depthSamplerStatus;
             }
             return "final.fsh active on " + this.backend.displayName() + " (" + samplers + ")";
         }
@@ -177,13 +183,13 @@ final class ShaderPackFinalPass implements AutoCloseable {
             .withFragmentShader(shaderId)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .withCull(false);
-        if (!transformed.colorSamplers().isEmpty() || transformed.depthSampler()) {
+        if (!transformed.colorSamplers().isEmpty() || !transformed.depthSamplers().isEmpty()) {
             BindGroupLayout.Builder layoutBuilder = BindGroupLayout.builder();
             for (int colorSampler : transformed.colorSamplers()) {
                 layoutBuilder.withSampler("colortex" + colorSampler);
             }
-            if (transformed.depthSampler()) {
-                layoutBuilder.withSampler("depthtex0");
+            for (int depthSampler : transformed.depthSamplers()) {
+                layoutBuilder.withSampler("depthtex" + depthSampler);
             }
             pipelineBuilder.withBindGroupLayout(layoutBuilder.build());
         }
@@ -196,9 +202,15 @@ final class ShaderPackFinalPass implements AutoCloseable {
 
         this.pipeline = finalPipeline;
         this.colorSamplers = transformed.colorSamplers();
-        this.depthSampler = transformed.depthSampler();
+        this.depthSamplers = transformed.depthSamplers();
         this.ready = true;
-        LOGGER.info("Enabled shader-pack final.fsh subset on {} for {} with samplers {}", this.backend.displayName(), this.packName, this.colorSamplers);
+        LOGGER.info(
+            "Enabled shader-pack final.fsh subset on {} for {} with color samplers {} and depth samplers {}",
+            this.backend.displayName(),
+            this.packName,
+            this.colorSamplers,
+            this.depthSamplers
+        );
     }
 
     private void ensureCopyTarget(final int width, final int height) {
