@@ -23,6 +23,7 @@ public class TagEntry {
     private final Identifier id;
     private final boolean tag;
     private final boolean required;
+    private ExtraCodecs.TagOrElementLocation cachedElementOrTag;
 
     private TagEntry(final Identifier id, final boolean tag, final boolean required) {
         this.id = id;
@@ -37,7 +38,13 @@ public class TagEntry {
     }
 
     private ExtraCodecs.TagOrElementLocation elementOrTag() {
-        return new ExtraCodecs.TagOrElementLocation(this.id, this.tag);
+        ExtraCodecs.TagOrElementLocation location = this.cachedElementOrTag;
+        if (location == null) {
+            location = new ExtraCodecs.TagOrElementLocation(this.id, this.tag);
+            this.cachedElementOrTag = location;
+        }
+
+        return location;
     }
 
     public static TagEntry element(final Identifier id) {

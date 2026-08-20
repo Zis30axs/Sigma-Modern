@@ -60,6 +60,7 @@ public class RedStoneWireBlock extends Block {
             list[i] = ARGB.colorFromFloat(1.0F, red, green, blue);
         }
     });
+    private static final Direction[] ALL_DIRECTIONS = Direction.values();
     private static final float PARTICLE_DENSITY = 0.2F;
     private final Function<BlockState, VoxelShape> shapes;
     private final BlockState crossState;
@@ -293,7 +294,7 @@ public class RedStoneWireBlock extends Block {
         if (level.getBlockState(pos).is(this)) {
             level.updateNeighborsAt(pos, this);
 
-            for (Direction direction : Direction.values()) {
+            for (Direction direction : ALL_DIRECTIONS) {
                 level.updateNeighborsAt(pos.relative(direction), this);
             }
         }
@@ -315,7 +316,7 @@ public class RedStoneWireBlock extends Block {
     @Override
     protected void affectNeighborsAfterRemoval(final BlockState state, final ServerLevel level, final BlockPos pos, final boolean movedByPiston) {
         if (!movedByPiston) {
-            for (Direction direction : Direction.values()) {
+            for (Direction direction : ALL_DIRECTIONS) {
                 level.updateNeighborsAt(pos.relative(direction), this);
             }
 

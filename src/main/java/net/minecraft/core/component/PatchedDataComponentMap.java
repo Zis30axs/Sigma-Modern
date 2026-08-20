@@ -76,7 +76,9 @@ public final class PatchedDataComponentMap implements DataComponentMap {
             lastValue = (Optional<T>)this.patch.put(type, Optional.ofNullable(value));
         }
 
-        return lastValue != null ? lastValue.orElse(defaultValue) : defaultValue;
+        T result = lastValue != null ? lastValue.orElse(defaultValue) : defaultValue;
+        this.compactPatchIfEmpty();
+        return result;
     }
 
     public <T> @Nullable T set(final TypedDataComponent<T> value) {
@@ -93,7 +95,9 @@ public final class PatchedDataComponentMap implements DataComponentMap {
             lastValue = (Optional<? extends T>)this.patch.remove(type);
         }
 
-        return (T)(lastValue != null ? lastValue.orElse(null) : defaultValue);
+        T result = (T)(lastValue != null ? lastValue.orElse(null) : defaultValue);
+        this.compactPatchIfEmpty();
+        return result;
     }
 
     public void applyPatch(final DataComponentPatch patch) {
@@ -102,6 +106,8 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         for (Entry<DataComponentType<?>, Optional<?>> entry : Reference2ObjectMaps.fastIterable(patch.map)) {
             this.applyPatch(entry.getKey(), entry.getValue());
         }
+
+        this.compactPatchIfEmpty();
     }
 
     private void applyPatch(final DataComponentType<?> type, final Optional<?> value) {
@@ -123,11 +129,13 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         this.ensureMapOwnership();
         this.patch.clear();
         this.patch.putAll(patch.map);
+        this.compactPatchIfEmpty();
     }
 
     public void clearPatch() {
         this.ensureMapOwnership();
         this.patch.clear();
+        this.compactPatchIfEmpty();
     }
 
     public void setAll(final DataComponentMap components) {
@@ -140,6 +148,13 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         if (this.copyOnWrite) {
             this.patch = new Reference2ObjectArrayMap<>(this.patch);
             this.copyOnWrite = false;
+        }
+    }
+
+    private void compactPatchIfEmpty() {
+        if (this.patch.isEmpty()) {
+            this.patch = Reference2ObjectMaps.emptyMap();
+            this.copyOnWrite = true;
         }
     }
 
