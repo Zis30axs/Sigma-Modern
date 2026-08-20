@@ -41,7 +41,7 @@ public class ShaderPackScreen extends Screen {
         header.defaultCellSetting().alignHorizontallyCenter();
         header.addChild(new StringWidget(TITLE, this.font));
         header.addChild(new StringWidget(this.backendStatus(), this.font));
-        header.addChild(new StringWidget(Component.literal("Pack loading is ready; the Iris-style world rendering pipeline is being integrated next."), this.font));
+        header.addChild(new StringWidget(Component.literal("Shader pack loading and parsing are ready; world shader rendering is not active yet."), this.font));
 
         this.packList = this.layout.addToContents(new ShaderPackScreen.PackList());
 
@@ -59,10 +59,10 @@ public class ShaderPackScreen extends Screen {
 
     private Component backendStatus() {
         if (this.manager.canUseShaders()) {
-            return Component.literal("Graphics backend: " + this.manager.backendName() + " - shader packs supported");
+            return Component.literal("Graphics backend: " + this.manager.backendName() + " - shader pack loading available");
         }
 
-        return Component.literal("Graphics backend: " + this.manager.backendName() + " - switch to OpenGL to use shader packs");
+        return Component.literal("Graphics backend: " + this.manager.backendName() + " - switch to OpenGL to load shader packs");
     }
 
     @Override
