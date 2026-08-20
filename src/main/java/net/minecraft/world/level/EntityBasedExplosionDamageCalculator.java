@@ -17,8 +17,16 @@ public class EntityBasedExplosionDamageCalculator extends ExplosionDamageCalcula
     public Optional<Float> getBlockExplosionResistance(
         final Explosion explosion, final BlockGetter level, final BlockPos pos, final BlockState block, final FluidState fluid
     ) {
-        return super.getBlockExplosionResistance(explosion, level, pos, block, fluid)
-            .map(resistance -> this.source.getBlockExplosionResistance(explosion, level, pos, block, fluid, resistance));
+        Optional<Float> resistance = super.getBlockExplosionResistance(explosion, level, pos, block, fluid);
+        if (resistance.isPresent()) {
+            float baseResistance = resistance.get();
+            float effectiveResistance = this.source.getBlockExplosionResistance(explosion, level, pos, block, fluid, baseResistance);
+            if (effectiveResistance != baseResistance) {
+                return Optional.of(effectiveResistance);
+            }
+        }
+
+        return resistance;
     }
 
     @Override

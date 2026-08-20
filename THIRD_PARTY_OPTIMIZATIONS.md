@@ -9,7 +9,7 @@ This file records provenance and upstream licensing for maintainers. Redistribut
 - Upstream: https://github.com/CaffeineMC/lithium
 - Reference branch: `26.1.x`
 - License: GNU LGPL v3
-- Adaptations: cache `Direction.values()` results used by `RedStoneWireBlock` neighbor-update hot paths and `PistonStructureResolver` branching checks, avoiding repeated enum-array allocations while preserving vanilla iteration order and behavior.
+- Adaptations: cache `Direction.values()` results used by `RedStoneWireBlock` neighbor-update hot paths and `PistonStructureResolver` branching checks, avoiding repeated enum-array allocations while preserving vanilla iteration order and behavior; replace `Optional.map` in `EntityBasedExplosionDamageCalculator` with an explicit fast path that reuses the original `Optional` when explosion resistance is unchanged.
 
 ## FerriteCore
 
