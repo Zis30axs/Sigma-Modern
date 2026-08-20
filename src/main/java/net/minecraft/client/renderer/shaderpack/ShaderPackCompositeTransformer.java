@@ -265,6 +265,7 @@ public final class ShaderPackCompositeTransformer {
         return switch (name) {
             case "depthtex0", "gdepthtex" -> 0;
             case "depthtex1" -> 1;
+            case "depthtex2" -> 2;
             default -> null;
         };
     }
