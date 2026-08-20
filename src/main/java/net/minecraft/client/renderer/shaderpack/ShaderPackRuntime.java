@@ -6,6 +6,7 @@ import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.shaders.ShaderType;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -24,11 +25,12 @@ import org.slf4j.Logger;
 
 public final class ShaderPackRuntime {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final Identifier TERRAIN_SHADER = Identifier.withDefaultNamespace("core/terrain");
+    private static final Identifier VANILLA_TERRAIN_SHADER = Identifier.withDefaultNamespace("core/terrain");
     private static final ShaderPackRuntime INSTANCE = new ShaderPackRuntime();
     private @Nullable ShaderPackManager manager;
     private ShaderPackBackend activeBackend = ShaderPackBackend.UNKNOWN;
     private @Nullable String activePack;
+    private long generation;
     private boolean bridgeReady;
     private boolean bridgeFailed;
     private Map<ChunkSectionLayer, RenderPipeline> terrainPipelines = Map.of();
@@ -101,6 +103,7 @@ public final class ShaderPackRuntime {
     private void reset(final ShaderPackBackend backend, final @Nullable String pack) {
         this.activeBackend = backend;
         this.activePack = pack;
+        this.generation++;
         this.bridgeReady = false;
         this.bridgeFailed = false;
         this.terrainPipelines = Map.of();
@@ -113,17 +116,20 @@ public final class ShaderPackRuntime {
         }
 
         ShaderManager shaderManager = Minecraft.getInstance().getShaderManager();
-        if (shaderManager.getShader(TERRAIN_SHADER, ShaderType.VERTEX) == null || shaderManager.getShader(TERRAIN_SHADER, ShaderType.FRAGMENT) == null) {
+        if (shaderManager.getShader(VANILLA_TERRAIN_SHADER, ShaderType.VERTEX) == null
+            || shaderManager.getShader(VANILLA_TERRAIN_SHADER, ShaderType.FRAGMENT) == null) {
             return;
         }
 
+        Identifier bridgeShader = Identifier.fromNamespaceAndPath("sigma", "shaderpack/terrain_" + Long.toUnsignedString(this.generation, 16));
+        ShaderSource bridgeSource = (id, type) -> id.equals(bridgeShader) ? shaderManager.getShader(VANILLA_TERRAIN_SHADER, type) : null;
         EnumMap<ChunkSectionLayer, RenderPipeline> pipelines = new EnumMap<>(ChunkSectionLayer.class);
-        pipelines.put(ChunkSectionLayer.SOLID, this.createTerrainPipeline(ChunkSectionLayer.SOLID));
-        pipelines.put(ChunkSectionLayer.CUTOUT, this.createTerrainPipeline(ChunkSectionLayer.CUTOUT));
-        pipelines.put(ChunkSectionLayer.TRANSLUCENT, this.createTerrainPipeline(ChunkSectionLayer.TRANSLUCENT));
+        pipelines.put(ChunkSectionLayer.SOLID, this.createTerrainPipeline(ChunkSectionLayer.SOLID, bridgeShader));
+        pipelines.put(ChunkSectionLayer.CUTOUT, this.createTerrainPipeline(ChunkSectionLayer.CUTOUT, bridgeShader));
+        pipelines.put(ChunkSectionLayer.TRANSLUCENT, this.createTerrainPipeline(ChunkSectionLayer.TRANSLUCENT, bridgeShader));
 
         for (RenderPipeline pipeline : pipelines.values()) {
-            CompiledRenderPipeline compiled = device.precompilePipeline(pipeline, shaderManager::getShader);
+            CompiledRenderPipeline compiled = device.precompilePipeline(pipeline, bridgeSource);
             if (!compiled.isValid()) {
                 this.bridgeFailed = true;
                 this.terrainPipelines = Map.of();
@@ -144,16 +150,16 @@ public final class ShaderPackRuntime {
         );
     }
 
-    private RenderPipeline createTerrainPipeline(final ChunkSectionLayer layer) {
+    private RenderPipeline createTerrainPipeline(final ChunkSectionLayer layer, final Identifier shader) {
         RenderPipeline.Builder builder = RenderPipeline.builder()
-            .withLocation("pipeline/sigma_shader_bridge_" + layer.label())
+            .withLocation(Identifier.fromNamespaceAndPath("sigma", "pipeline/shader_bridge_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)))
             .withBindGroupLayout(BindGroupLayouts.GLOBALS)
             .withBindGroupLayout(BindGroupLayouts.FOG)
             .withBindGroupLayout(BindGroupLayouts.SAMPLER0_SAMPLER2)
             .withBindGroupLayout(BindGroupLayouts.PROJECTION)
             .withBindGroupLayout(BindGroupLayouts.CHUNK_SECTION)
-            .withVertexShader(TERRAIN_SHADER)
-            .withFragmentShader(TERRAIN_SHADER)
+            .withVertexShader(shader)
+            .withFragmentShader(shader)
             .withVertexBinding(0, DefaultVertexFormat.BLOCK)
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState.DEFAULT);
