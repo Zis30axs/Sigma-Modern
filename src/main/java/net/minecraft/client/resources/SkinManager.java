@@ -142,6 +142,10 @@ public class SkinManager {
         private final Path root;
         private final Type type;
         private final Map<String, CompletableFuture<ClientAsset.Texture>> textures = new Object2ObjectOpenHashMap<>();
+        private final LoadingCache<MinecraftProfileTexture, String> textureHashes = CacheBuilder.newBuilder()
+            .concurrencyLevel(1)
+            .expireAfterAccess(Duration.ofSeconds(60L))
+            .build(CacheLoader.from(MinecraftProfileTexture::getHash));
 
         private TextureCache(final Path root, final Type type) {
             this.root = root;
@@ -149,7 +153,7 @@ public class SkinManager {
         }
 
         public CompletableFuture<ClientAsset.Texture> getOrLoad(final MinecraftProfileTexture texture) {
-            String hash = texture.getHash();
+            String hash = this.textureHashes.getUnchecked(texture);
             CompletableFuture<ClientAsset.Texture> future = this.textures.get(hash);
             if (future == null) {
                 future = this.registerTexture(texture);
@@ -160,7 +164,7 @@ public class SkinManager {
         }
 
         private CompletableFuture<ClientAsset.Texture> registerTexture(final MinecraftProfileTexture textureInfo) {
-            String hash = Hashing.sha1().hashUnencodedChars(textureInfo.getHash()).toString();
+            String hash = Hashing.sha1().hashUnencodedChars(this.textureHashes.getUnchecked(textureInfo)).toString();
             Identifier textureId = this.getTextureLocation(hash);
             Path file = this.root.resolve(hash.length() > 2 ? hash.substring(0, 2) : "xx").resolve(hash);
             return SkinManager.this.skinTextureDownloader.downloadAndRegisterSkin(textureId, file, textureInfo.getUrl(), this.type == Type.SKIN);
