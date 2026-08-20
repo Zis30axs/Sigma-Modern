@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.feature.phase.FeatureRenderPhase;
 import net.minecraft.client.renderer.feature.submit.SubmitNode;
+import net.minecraft.client.renderer.shaderpack.ShaderPackDeferredRuntime;
 import net.minecraft.client.renderer.state.GameRenderState;
 import net.minecraft.client.resources.model.ModelManager;
 import net.minecraft.client.resources.model.sprite.AtlasManager;
@@ -214,6 +215,7 @@ public class FeatureRenderDispatcher implements AutoCloseable {
         public void executeTranslucent() {
             FeatureFrameContext context = Objects.requireNonNull(this.context);
             SubmitNodeStorage submitNodeStorage = Objects.requireNonNull(this.submitNodeStorage);
+            ShaderPackDeferredRuntime.beginTranslucents();
 
             for (SubmitNodeCollection collection : submitNodeStorage.getSubmitsPerOrder().values()) {
                 this.executePhase(collection.shadows, context);
