@@ -16,9 +16,9 @@ import com.mojang.logging.LogUtils;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BindGroupLayouts;
-import net.minecraft.client.renderer.ShaderManager;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
@@ -26,15 +26,16 @@ import org.slf4j.Logger;
 
 public final class ShaderPackRuntime {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final Identifier VANILLA_TERRAIN_SHADER = Identifier.withDefaultNamespace("core/terrain");
     private static final ShaderPackRuntime INSTANCE = new ShaderPackRuntime();
     private @Nullable ShaderPackManager manager;
     private ShaderPackBackend activeBackend = ShaderPackBackend.UNKNOWN;
     private @Nullable String activePack;
     private long generation;
-    private boolean bridgeReady;
-    private boolean bridgeFailed;
+    private boolean terrainInitialized;
+    private int terrainActivePipelines;
+    private @Nullable String terrainFailureReason;
     private Map<ChunkSectionLayer, RenderPipeline> terrainPipelines = Map.of();
+    private Map<ChunkSectionLayer, String> terrainProgramNames = Map.of();
     private @Nullable ShaderPackFinalPass finalPass;
 
     private ShaderPackRuntime() {
@@ -69,12 +70,16 @@ public final class ShaderPackRuntime {
             }
 
             String terrainStatus;
-            if (INSTANCE.bridgeReady) {
-                terrainStatus = "terrain bridge active";
-            } else if (INSTANCE.bridgeFailed) {
-                terrainStatus = "terrain bridge failed; vanilla terrain active";
+            if (!INSTANCE.terrainInitialized) {
+                terrainStatus = "terrain pack GLSL waiting for the first terrain draw";
+            } else if (INSTANCE.terrainActivePipelines == 0) {
+                terrainStatus = "terrain pack GLSL fallback: "
+                    + (INSTANCE.terrainFailureReason == null ? "vanilla terrain active" : INSTANCE.terrainFailureReason);
             } else {
-                terrainStatus = "terrain bridge ready to initialize";
+                terrainStatus = "terrain pack GLSL " + INSTANCE.terrainActivePipelines + "/3 active";
+                if (INSTANCE.terrainActivePipelines < 3 && INSTANCE.terrainFailureReason != null) {
+                    terrainStatus += "; fallback: " + INSTANCE.terrainFailureReason;
+                }
             }
 
             String finalStatus = INSTANCE.finalPass == null ? "final.fsh waiting for the next world frame" : INSTANCE.finalPass.status();
@@ -91,11 +96,11 @@ public final class ShaderPackRuntime {
             return layer.pipeline();
         }
 
-        if (!this.bridgeReady && !this.bridgeFailed) {
-            this.tryInitializeTerrainBridge();
+        if (!this.terrainInitialized) {
+            this.tryInitializeTerrainPipelines();
         }
 
-        return this.bridgeReady ? this.terrainPipelines.getOrDefault(layer, layer.pipeline()) : layer.pipeline();
+        return this.terrainPipelines.getOrDefault(layer, layer.pipeline());
     }
 
     private synchronized void renderFinalPass() {
@@ -136,55 +141,165 @@ public final class ShaderPackRuntime {
         this.activeBackend = backend;
         this.activePack = pack;
         this.generation++;
-        this.bridgeReady = false;
-        this.bridgeFailed = false;
+        this.terrainInitialized = false;
+        this.terrainActivePipelines = 0;
+        this.terrainFailureReason = null;
         this.terrainPipelines = Map.of();
+        this.terrainProgramNames = Map.of();
     }
 
-    private void tryInitializeTerrainBridge() {
+    private void tryInitializeTerrainPipelines() {
         GpuDevice device = RenderSystem.tryGetDevice();
-        if (device == null) {
+        if (device == null || this.activePack == null) {
             return;
         }
 
-        ShaderManager shaderManager = Minecraft.getInstance().getShaderManager();
-        if (shaderManager.getShader(VANILLA_TERRAIN_SHADER, ShaderType.VERTEX) == null
-            || shaderManager.getShader(VANILLA_TERRAIN_SHADER, ShaderType.FRAGMENT) == null) {
+        String packName = Objects.requireNonNull(this.activePack);
+        Optional<ShaderPackProgramSet> programSet = this.manager().inspectPrograms(packName);
+        if (programSet.isEmpty()) {
+            this.terrainInitialized = true;
+            this.terrainFailureReason = "program discovery failed";
             return;
         }
 
-        Identifier bridgeShader = Identifier.fromNamespaceAndPath("sigma", "shaderpack/terrain_" + Long.toUnsignedString(this.generation, 16));
-        ShaderSource bridgeSource = (id, type) -> id.equals(bridgeShader) ? shaderManager.getShader(VANILLA_TERRAIN_SHADER, type) : null;
+        ShaderPackProgramResolver resolver = new ShaderPackProgramResolver(programSet.get());
         EnumMap<ChunkSectionLayer, RenderPipeline> pipelines = new EnumMap<>(ChunkSectionLayer.class);
-        pipelines.put(ChunkSectionLayer.SOLID, this.createTerrainPipeline(ChunkSectionLayer.SOLID, bridgeShader));
-        pipelines.put(ChunkSectionLayer.CUTOUT, this.createTerrainPipeline(ChunkSectionLayer.CUTOUT, bridgeShader));
-        pipelines.put(ChunkSectionLayer.TRANSLUCENT, this.createTerrainPipeline(ChunkSectionLayer.TRANSLUCENT, bridgeShader));
-
-        for (RenderPipeline pipeline : pipelines.values()) {
-            CompiledRenderPipeline compiled = device.precompilePipeline(pipeline, bridgeSource);
-            if (!compiled.isValid()) {
-                this.bridgeFailed = true;
-                this.terrainPipelines = Map.of();
-                LOGGER.warn(
-                    "Shader terrain bridge failed to compile on {}. Keeping the vanilla terrain renderer active.",
-                    this.activeBackend.displayName()
-                );
-                return;
-            }
-        }
+        EnumMap<ChunkSectionLayer, String> programNames = new EnumMap<>(ChunkSectionLayer.class);
+        this.tryCreateTerrainPipeline(
+            device,
+            resolver,
+            ChunkSectionLayer.SOLID,
+            ShaderPackProgramResolver.TerrainProgram.SOLID,
+            ShaderPackTerrainTransformer.AlphaMode.SOLID,
+            pipelines,
+            programNames
+        );
+        this.tryCreateTerrainPipeline(
+            device,
+            resolver,
+            ChunkSectionLayer.CUTOUT,
+            ShaderPackProgramResolver.TerrainProgram.CUTOUT,
+            ShaderPackTerrainTransformer.AlphaMode.CUTOUT,
+            pipelines,
+            programNames
+        );
+        this.tryCreateTerrainPipeline(
+            device,
+            resolver,
+            ChunkSectionLayer.TRANSLUCENT,
+            ShaderPackProgramResolver.TerrainProgram.TRANSLUCENT,
+            ShaderPackTerrainTransformer.AlphaMode.TRANSLUCENT,
+            pipelines,
+            programNames
+        );
 
         this.terrainPipelines = Map.copyOf(pipelines);
-        this.bridgeReady = true;
-        LOGGER.info(
-            "Shader terrain bridge initialized on {} for selected pack {}. Pack GLSL transformation will replace the bridge sources in the next stage.",
-            this.activeBackend.displayName(),
-            this.activePack
+        this.terrainProgramNames = Map.copyOf(programNames);
+        this.terrainActivePipelines = pipelines.size();
+        this.terrainInitialized = true;
+        if (pipelines.isEmpty()) {
+            LOGGER.warn(
+                "No shader-pack terrain program could be activated on {} for {}{}. Vanilla terrain remains active.",
+                this.activeBackend.displayName(),
+                packName,
+                this.terrainFailureReason == null ? "" : ": " + this.terrainFailureReason
+            );
+        } else {
+            LOGGER.info(
+                "Activated {}/3 shader-pack terrain pipelines on {} for {}: {}",
+                pipelines.size(),
+                this.activeBackend.displayName(),
+                packName,
+                this.terrainProgramNames
+            );
+        }
+    }
+
+    private void tryCreateTerrainPipeline(
+        final GpuDevice device,
+        final ShaderPackProgramResolver resolver,
+        final ChunkSectionLayer layer,
+        final ShaderPackProgramResolver.TerrainProgram requested,
+        final ShaderPackTerrainTransformer.AlphaMode alphaMode,
+        final EnumMap<ChunkSectionLayer, RenderPipeline> pipelines,
+        final EnumMap<ChunkSectionLayer, String> programNames
+    ) {
+        Optional<ShaderPackProgramResolver.ResolvedProgram> resolved = resolver.resolve(requested);
+        if (resolved.isEmpty()) {
+            this.recordTerrainFailure(requested.fileBase() + " and its fallbacks are missing");
+            return;
+        }
+
+        ShaderPackProgramResolver.ResolvedProgram program = resolved.get();
+        if (hasUnsupportedStages(program.program())) {
+            this.recordTerrainFailure(program.resolvedName() + " uses geometry, tessellation, or compute stages");
+            return;
+        }
+
+        String packName = Objects.requireNonNull(this.activePack);
+        Optional<String> vertexSource = this.manager().preprocessShader(packName, program.resolvedName() + ".vsh");
+        Optional<String> fragmentSource = this.manager().preprocessShader(packName, program.resolvedName() + ".fsh");
+        if (vertexSource.isEmpty() || fragmentSource.isEmpty()) {
+            this.recordTerrainFailure("failed to preprocess " + program.resolvedName());
+            return;
+        }
+
+        ShaderPackTerrainTransformer.Result transformed;
+        try {
+            transformed = ShaderPackTerrainTransformer.transform(vertexSource.get(), fragmentSource.get(), alphaMode);
+        } catch (IllegalArgumentException exception) {
+            this.recordTerrainFailure(program.resolvedName() + ": " + safeMessage(exception));
+            LOGGER.debug("Shader-pack terrain program {} is outside the current compatibility subset", program.resolvedName(), exception);
+            return;
+        }
+
+        Identifier shaderId = Identifier.fromNamespaceAndPath(
+            "sigma",
+            "shaderpack/terrain_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)
         );
+        ShaderSource source = (id, type) -> {
+            if (!id.equals(shaderId)) {
+                return null;
+            }
+            return type == ShaderType.VERTEX ? transformed.vertexSource() : transformed.fragmentSource();
+        };
+        RenderPipeline pipeline = this.createTerrainPipeline(layer, shaderId);
+        CompiledRenderPipeline compiled = device.precompilePipeline(pipeline, source);
+        if (!compiled.isValid()) {
+            this.recordTerrainFailure(this.activeBackend.displayName() + " rejected transformed " + program.resolvedName());
+            return;
+        }
+
+        pipelines.put(layer, pipeline);
+        programNames.put(layer, program.direct() ? program.resolvedName() : requested.fileBase() + " -> " + program.resolvedName());
+    }
+
+    private static boolean hasUnsupportedStages(final ShaderPackProgramSet.Program program) {
+        return program.stages().contains(ShaderPackProgramSet.Stage.GEOMETRY)
+            || program.stages().contains(ShaderPackProgramSet.Stage.COMPUTE)
+            || program.stages().contains(ShaderPackProgramSet.Stage.TESS_CONTROL)
+            || program.stages().contains(ShaderPackProgramSet.Stage.TESS_EVALUATION);
+    }
+
+    private void recordTerrainFailure(final String reason) {
+        if (this.terrainFailureReason == null) {
+            this.terrainFailureReason = truncate(reason);
+        }
+    }
+
+    private static String safeMessage(final Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
+    }
+
+    private static String truncate(final String value) {
+        String singleLine = value.replace('\n', ' ').replace('\r', ' ').strip();
+        return singleLine.length() <= 180 ? singleLine : singleLine.substring(0, 177) + "...";
     }
 
     private RenderPipeline createTerrainPipeline(final ChunkSectionLayer layer, final Identifier shader) {
         RenderPipeline.Builder builder = RenderPipeline.builder()
-            .withLocation(Identifier.fromNamespaceAndPath("sigma", "pipeline/shader_bridge_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)))
+            .withLocation(Identifier.fromNamespaceAndPath("sigma", "pipeline/shader_terrain_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)))
             .withBindGroupLayout(BindGroupLayouts.GLOBALS)
             .withBindGroupLayout(BindGroupLayouts.FOG)
             .withBindGroupLayout(BindGroupLayouts.SAMPLER0_SAMPLER2)
@@ -196,10 +311,7 @@ public final class ShaderPackRuntime {
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState.DEFAULT);
 
-        if (layer == ChunkSectionLayer.CUTOUT) {
-            builder.withShaderDefine("ALPHA_CUTOUT", 0.5F);
-        } else if (layer == ChunkSectionLayer.TRANSLUCENT) {
-            builder.withShaderDefine("ALPHA_CUTOUT", 0.1F);
+        if (layer == ChunkSectionLayer.TRANSLUCENT) {
             builder.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT));
         }
 
