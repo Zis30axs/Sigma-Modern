@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - perf/four-source-optimizations
+      - shader-deferred-stage
   pull_request:
     branches:
       - main
