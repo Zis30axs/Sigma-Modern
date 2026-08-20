@@ -103,12 +103,16 @@ public class ShaderPackScreen extends Screen {
     private class PackEntry extends ContainerObjectSelectionList.Entry<ShaderPackScreen.PackEntry> {
         private final @Nullable String packName;
         private final boolean valid;
+        private final long renderablePrograms;
         private final Button selectButton;
         private final List<GuiEventListener> children = new ArrayList<>();
 
         private PackEntry(final @Nullable String packName) {
             this.packName = packName;
             this.valid = packName == null || ShaderPackScreen.this.manager.isValidShaderPack(packName);
+            this.renderablePrograms = packName != null && this.valid
+                ? ShaderPackScreen.this.manager.inspectPrograms(packName).map(programs -> programs.renderableProgramCount()).orElse(0L)
+                : 0L;
             this.selectButton = Button.builder(this.label(), button -> {
                 if (ShaderPackScreen.this.manager.select(this.packName)) {
                     ShaderPackScreen.this.packList.refreshEntries();
@@ -127,11 +131,12 @@ public class ShaderPackScreen extends Screen {
                 return Component.literal("Invalid shader pack: " + this.packName);
             }
 
+            String programInfo = " [" + this.renderablePrograms + " programs]";
             if (this.isSelected()) {
-                return Component.literal("Selected: " + this.packName);
+                return Component.literal("Selected: " + this.packName + programInfo);
             }
 
-            return Component.literal(this.packName);
+            return Component.literal(this.packName + programInfo);
         }
 
         private boolean canSelect() {
