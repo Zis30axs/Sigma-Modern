@@ -6,6 +6,7 @@ import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.DepthStencilState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.shaders.ShaderType;
 import com.mojang.blaze3d.systems.GpuDevice;
@@ -34,12 +35,17 @@ public final class ShaderPackRuntime {
     private boolean bridgeReady;
     private boolean bridgeFailed;
     private Map<ChunkSectionLayer, RenderPipeline> terrainPipelines = Map.of();
+    private @Nullable ShaderPackFinalPass finalPass;
 
     private ShaderPackRuntime() {
     }
 
     public static RenderPipeline terrainPipeline(final ChunkSectionLayer layer) {
         return INSTANCE.resolveTerrainPipeline(layer);
+    }
+
+    public static void applyFinalPass() {
+        INSTANCE.renderFinalPass();
     }
 
     public static void invalidate() {
@@ -61,13 +67,18 @@ public final class ShaderPackRuntime {
             if (!backend.supportsCustomShaderPipelines()) {
                 return "Shader rendering unavailable on " + backend.displayName() + "; vanilla renderer active";
             }
+
+            String terrainStatus;
             if (INSTANCE.bridgeReady) {
-                return "Terrain shader bridge active on " + backend.displayName();
+                terrainStatus = "terrain bridge active";
+            } else if (INSTANCE.bridgeFailed) {
+                terrainStatus = "terrain bridge failed; vanilla terrain active";
+            } else {
+                terrainStatus = "terrain bridge ready to initialize";
             }
-            if (INSTANCE.bridgeFailed) {
-                return "Terrain shader bridge failed on " + backend.displayName() + "; vanilla renderer active";
-            }
-            return "Terrain shader bridge ready to initialize on " + backend.displayName();
+
+            String finalStatus = INSTANCE.finalPass == null ? "final.fsh waiting for the next world frame" : INSTANCE.finalPass.status();
+            return backend.displayName() + ": " + terrainStatus + "; " + finalStatus;
         }
     }
 
@@ -87,6 +98,23 @@ public final class ShaderPackRuntime {
         return this.bridgeReady ? this.terrainPipelines.getOrDefault(layer, layer.pipeline()) : layer.pipeline();
     }
 
+    private synchronized void renderFinalPass() {
+        ShaderPackManager manager = this.manager();
+        ShaderPackBackend backend = ShaderPackBackend.current();
+        String pack = manager.selectedPackPath().isPresent() ? manager.selectedPack().orElse(null) : null;
+        this.updateSelection(backend, pack);
+        if (pack == null || !backend.supportsCustomShaderPipelines()) {
+            return;
+        }
+
+        if (this.finalPass == null) {
+            this.finalPass = new ShaderPackFinalPass(manager, pack, backend, this.generation);
+        }
+
+        RenderTarget mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+        this.finalPass.apply(mainTarget);
+    }
+
     private ShaderPackManager manager() {
         if (this.manager == null) {
             this.manager = new ShaderPackManager(Minecraft.getInstance().gameDirectory.toPath());
@@ -101,6 +129,10 @@ public final class ShaderPackRuntime {
     }
 
     private void reset(final ShaderPackBackend backend, final @Nullable String pack) {
+        if (this.finalPass != null) {
+            this.finalPass.close();
+            this.finalPass = null;
+        }
         this.activeBackend = backend;
         this.activePack = pack;
         this.generation++;
