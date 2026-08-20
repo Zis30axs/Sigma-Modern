@@ -98,6 +98,20 @@ public final class ShaderPackManager {
         }
     }
 
+    public Optional<String> preprocessShader(final String packName, final String shaderPath) {
+        Optional<Path> packPath = this.resolvePackPath(packName);
+        if (packPath.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try (ShaderPackSource source = ShaderPackSource.open(packPath.get())) {
+            return Optional.of(new ShaderPackIncludeProcessor(source).expand(shaderPath));
+        } catch (IOException exception) {
+            LOGGER.warn("Failed to preprocess shader {} from {}", shaderPath, packPath.get(), exception);
+            return Optional.empty();
+        }
+    }
+
     public boolean isSelected(final String packName) {
         return packName.equals(this.selectedPack);
     }
