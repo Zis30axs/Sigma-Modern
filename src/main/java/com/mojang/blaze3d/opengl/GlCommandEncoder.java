@@ -691,7 +691,7 @@ class GlCommandEncoder implements CommandEncoderBackend, AutoCloseable {
                         }
 
                         if ((value.buffer().usage() & 256) == 0) {
-                            throw new IllegalStateException("Uniform texel buffer " + uniform.name() + " must have GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER!");
+                            throw new IllegalStateException("Uniform texel buffer " + uniform.name() + " must have GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER");
                         }
 
                         if (uniform.gpuFormat() == null) {
