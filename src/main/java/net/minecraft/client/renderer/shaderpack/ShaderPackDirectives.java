@@ -9,11 +9,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 
 final class ShaderPackDirectives {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String FLIP_PREFIX = "flip.";
+    private static final Pattern CONDITIONAL_PROPERTIES = Pattern.compile(
+        "(?im)^[\\t ]*#[\\t ]*(?:if|ifdef|ifndef|elif|else|endif)\\b"
+    );
     private static final List<String> LEGACY_COLOR_TARGETS = List.of(
         "gcolor", "gdepth", "gnormal", "composite", "gaux1", "gaux2", "gaux3", "gaux4"
     );
@@ -30,8 +34,14 @@ final class ShaderPackDirectives {
             return EMPTY;
         }
 
+        String rawProperties = propertiesText.get();
+        if (CONDITIONAL_PROPERTIES.matcher(rawProperties).find()) {
+            LOGGER.warn("Shader pack uses conditional shaders.properties preprocessing; explicit flip directives are ignored until Sigma supports property preprocessing");
+            return EMPTY;
+        }
+
         Properties properties = new Properties();
-        properties.load(new StringReader(propertiesText.get()));
+        properties.load(new StringReader(rawProperties));
         Map<String, Map<Integer, Boolean>> flips = new LinkedHashMap<>();
         for (String key : properties.stringPropertyNames()) {
             if (!key.startsWith(FLIP_PREFIX)) {
