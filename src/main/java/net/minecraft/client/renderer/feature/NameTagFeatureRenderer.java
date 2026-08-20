@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.font.TextRenderable;
 import net.minecraft.client.renderer.feature.submit.TranslucentSubmit;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -35,6 +36,8 @@ public class NameTagFeatureRenderer extends RenderTypeFeatureRenderer<NameTagFea
         private final Matrix4f pose = new Matrix4f();
         private int lightCoords = 15728880;
         private Font.DisplayMode displayMode = Font.DisplayMode.NORMAL;
+        private RenderType lastRenderType;
+        private VertexConsumer lastVertexConsumer;
 
         public void prepare(final NameTagFeatureRenderer.Submit submit, final Font.DisplayMode displayMode) {
             this.pose.set(submit.pose());
@@ -44,8 +47,13 @@ public class NameTagFeatureRenderer extends RenderTypeFeatureRenderer<NameTagFea
 
         @Override
         public void acceptRenderable(final TextRenderable renderable) {
-            VertexConsumer builder = NameTagFeatureRenderer.this.getVertexBuilder(renderable.renderType(this.displayMode));
-            renderable.render(this.pose, builder, this.lightCoords, false);
+            RenderType renderType = renderable.renderType(this.displayMode);
+            if (this.lastRenderType != renderType) {
+                this.lastRenderType = renderType;
+                this.lastVertexConsumer = NameTagFeatureRenderer.this.getVertexBuilder(renderType);
+            }
+
+            renderable.render(this.pose, this.lastVertexConsumer, this.lightCoords, false);
         }
     }
 

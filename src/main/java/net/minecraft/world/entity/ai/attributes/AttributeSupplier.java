@@ -1,6 +1,7 @@
 package net.minecraft.world.entity.ai.attributes;
 
 import com.google.common.collect.ImmutableMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import net.minecraft.core.Holder;
@@ -11,7 +12,7 @@ public class AttributeSupplier {
     private final Map<Holder<Attribute>, AttributeInstance> instances;
 
     private AttributeSupplier(final Map<Holder<Attribute>, AttributeInstance> instances) {
-        this.instances = instances;
+        this.instances = new Object2ObjectOpenHashMap<>(instances);
     }
 
     private AttributeInstance getAttributeInstance(final Holder<Attribute> attribute) {

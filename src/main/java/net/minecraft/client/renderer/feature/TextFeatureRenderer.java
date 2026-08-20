@@ -5,6 +5,7 @@ import java.util.List;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.font.TextRenderable;
 import net.minecraft.client.renderer.feature.submit.SubmitNode;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -45,11 +46,18 @@ public class TextFeatureRenderer extends RenderTypeFeatureRenderer<TextFeatureRe
         private final Matrix4f pose = new Matrix4f();
         private int lightCoords = 15728880;
         private Font.DisplayMode displayMode = Font.DisplayMode.NORMAL;
+        private RenderType lastRenderType;
+        private VertexConsumer lastVertexConsumer;
 
         @Override
         public void acceptRenderable(final TextRenderable renderable) {
-            VertexConsumer builder = TextFeatureRenderer.this.getVertexBuilder(renderable.renderType(this.displayMode));
-            renderable.render(this.pose, builder, this.lightCoords, false);
+            RenderType renderType = renderable.renderType(this.displayMode);
+            if (this.lastRenderType != renderType) {
+                this.lastRenderType = renderType;
+                this.lastVertexConsumer = TextFeatureRenderer.this.getVertexBuilder(renderType);
+            }
+
+            renderable.render(this.pose, this.lastVertexConsumer, this.lightCoords, false);
         }
     }
 

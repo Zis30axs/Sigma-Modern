@@ -11,6 +11,7 @@ import net.minecraft.world.level.material.PushReaction;
 
 public class PistonStructureResolver {
     public static final int MAX_PUSH_DEPTH = 12;
+    private static final Direction[] ALL_DIRECTIONS = Direction.values();
     private final Level level;
     private final BlockPos pistonPos;
     private final boolean extending;
@@ -177,7 +178,7 @@ public class PistonStructureResolver {
     private boolean addBranchingBlocks(final BlockPos fromPos) {
         BlockState fromState = this.level.getBlockState(fromPos);
 
-        for (Direction direction : Direction.values()) {
+        for (Direction direction : ALL_DIRECTIONS) {
             if (direction.getAxis() != this.pushDirection.getAxis()) {
                 BlockPos neighbourPos = fromPos.relative(direction);
                 BlockState neighbourState = this.level.getBlockState(neighbourPos);

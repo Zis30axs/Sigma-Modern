@@ -9,7 +9,7 @@ This file records provenance and upstream licensing for maintainers. Redistribut
 - Upstream: https://github.com/CaffeineMC/lithium
 - Reference branch: `26.1.x`
 - License: GNU LGPL v3
-- Adaptation: cache the `Direction.values()` result used by `RedStoneWireBlock` neighbor-update hot paths, avoiding repeated enum-array allocations while preserving vanilla iteration order and behavior.
+- Adaptations: cache `Direction.values()` results used by `RedStoneWireBlock` neighbor-update hot paths and `PistonStructureResolver` branching checks, avoiding repeated enum-array allocations while preserving vanilla iteration order and behavior.
 
 ## FerriteCore
 
@@ -23,15 +23,15 @@ This file records provenance and upstream licensing for maintainers. Redistribut
 - Upstream: https://github.com/RaphiMC/ImmediatelyFast
 - Reference branch: `26.2`
 - License: GNU LGPL v3
-- Adaptation: avoid unbinding the framebuffer after every render pass; restore the default framebuffer immediately before presenting the swapchain texture instead.
+- Adaptations: avoid unbinding the framebuffer after every render pass and restore the default framebuffer immediately before presentation; cache consecutive text and name-tag `RenderType` to `VertexConsumer` lookups to avoid redundant vertex-builder resolution.
 
 ## ModernFix
 
 - Upstream: https://github.com/embeddedt/ModernFix
 - Reference branch: `26.1`
 - License: GNU LGPL v3 or later
-- Adaptation: lazily cache `ExtraCodecs.TagOrElementLocation` in `TagEntry` so repeated codec serialization does not allocate an equivalent wrapper object each time.
+- Adaptations: lazily cache `ExtraCodecs.TagOrElementLocation` in `TagEntry`; use a compact FastUtil map as the persistent `AttributeSupplier` backing map instead of retaining the ImmutableMap representation produced by its builder.
 
 ## Scope
 
-Only the optimization techniques listed above are included by this integration pass. No Fabric/NeoForge loader code, Mixin configuration, compatibility plugin, settings UI, or unrelated optimization from the upstream projects is bundled here.
+Only the optimization techniques listed above are included by these integration passes. No Fabric/NeoForge loader code, Mixin configuration, compatibility plugin, settings UI, or unrelated optimization from the upstream projects is bundled here.
