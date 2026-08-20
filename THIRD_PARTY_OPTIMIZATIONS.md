@@ -30,7 +30,7 @@ This file records provenance and upstream licensing for maintainers. Redistribut
 - Upstream: https://github.com/embeddedt/ModernFix
 - Reference branch: `26.1`
 - License: GNU LGPL v3 or later
-- Adaptations: lazily cache `ExtraCodecs.TagOrElementLocation` in `TagEntry`; use a compact FastUtil map as the persistent `AttributeSupplier` backing map instead of retaining the ImmutableMap representation produced by its builder.
+- Adaptations: lazily cache `ExtraCodecs.TagOrElementLocation` in `TagEntry`; use a compact FastUtil map as the persistent `AttributeSupplier` backing map instead of retaining the ImmutableMap representation produced by its builder; cache `MinecraftProfileTexture#getHash()` results briefly inside each `SkinManager.TextureCache` to avoid recomputing profile texture hashes during lookup and registration.
 
 ## Scope
 
