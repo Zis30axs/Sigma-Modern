@@ -412,6 +412,7 @@ class GlCommandEncoder implements CommandEncoderBackend, AutoCloseable {
     }
 
     public void presentTexture(final GpuTextureView textureView, final int swapchainWidth, final int swapchainHeight) {
+        GlStateManager._glBindFramebuffer(36160, 0);
         int destY = Math.max(0, swapchainHeight - textureView.getHeight(0));
         int copyWidth = Math.min(swapchainWidth, textureView.getWidth(0));
         int copyHeight = Math.min(swapchainHeight, textureView.getHeight(0));
@@ -690,7 +691,7 @@ class GlCommandEncoder implements CommandEncoderBackend, AutoCloseable {
                         }
 
                         if ((value.buffer().usage() & 256) == 0) {
-                            throw new IllegalStateException("Uniform texel buffer " + uniform.name() + " must have GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER");
+                            throw new IllegalStateException("Uniform texel buffer " + uniform.name() + " must have GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER!");
                         }
 
                         if (uniform.gpuFormat() == null) {
@@ -870,7 +871,6 @@ class GlCommandEncoder implements CommandEncoderBackend, AutoCloseable {
 
     @Override
     public void submitRenderPass() {
-        GlStateManager._glBindFramebuffer(36160, 0);
         this.device.debugLabels().popDebugGroup();
     }
 
