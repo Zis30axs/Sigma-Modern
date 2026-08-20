@@ -1,7 +1,5 @@
 package net.minecraft.client.renderer.shaderpack;
 
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,7 +18,6 @@ public final class ShaderPackManager {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String CONFIG_FILE = "optionsshaders.txt";
     private static final String SELECTED_PACK_KEY = "shaderPack";
-    private static final String OPENGL_BACKEND = "OpenGL";
     private final Path shaderPackDirectory;
     private final Path configFile;
     private @Nullable String selectedPack;
@@ -116,14 +113,16 @@ public final class ShaderPackManager {
         return packName.equals(this.selectedPack);
     }
 
+    public ShaderPackBackend backend() {
+        return ShaderPackBackend.current();
+    }
+
     public boolean canUseShaders() {
-        GpuDevice device = RenderSystem.tryGetDevice();
-        return device != null && OPENGL_BACKEND.equals(device.getDeviceInfo().backendName());
+        return this.backend().supportsCustomShaderPipelines();
     }
 
     public String backendName() {
-        GpuDevice device = RenderSystem.tryGetDevice();
-        return device == null ? "Unavailable" : device.getDeviceInfo().backendName();
+        return this.backend().displayName();
     }
 
     public boolean isValidShaderPack(final String packName) {
@@ -134,6 +133,7 @@ public final class ShaderPackManager {
         if (packName == null || packName.isBlank()) {
             this.selectedPack = null;
             this.save();
+            ShaderPackRuntime.invalidate();
             return true;
         }
 
@@ -148,6 +148,7 @@ public final class ShaderPackManager {
 
         this.selectedPack = packName;
         this.save();
+        ShaderPackRuntime.invalidate();
         return true;
     }
 

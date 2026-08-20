@@ -18,6 +18,7 @@ import java.util.OptionalDouble;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.shaderpack.ShaderPackRuntime;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -51,7 +52,7 @@ public record ChunkSectionsToRender(
             renderPass.bindTexture("Sampler2", minecraft.gameRenderer.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 
             for (ChunkSectionLayer layer : layers) {
-                renderPass.setPipeline(wireframe ? RenderPipelines.WIREFRAME : layer.pipeline());
+                renderPass.setPipeline(wireframe ? RenderPipelines.WIREFRAME : ShaderPackRuntime.terrainPipeline(layer));
                 Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>> drawGroup = this.drawGroupsPerLayer.get(layer);
 
                 for (List<RenderPass.Draw<GpuBufferSlice[]>> draws : drawGroup.values()) {

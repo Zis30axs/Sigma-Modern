@@ -13,6 +13,7 @@ import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.shaderpack.ShaderPackManager;
+import net.minecraft.client.renderer.shaderpack.ShaderPackRuntime;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
@@ -41,7 +42,7 @@ public class ShaderPackScreen extends Screen {
         header.defaultCellSetting().alignHorizontallyCenter();
         header.addChild(new StringWidget(TITLE, this.font));
         header.addChild(new StringWidget(this.backendStatus(), this.font));
-        header.addChild(new StringWidget(Component.literal("Shader pack loading and parsing are ready; world shader rendering is not active yet."), this.font));
+        header.addChild(new StringWidget(Component.literal(ShaderPackRuntime.status()), this.font));
 
         this.packList = this.layout.addToContents(new ShaderPackScreen.PackList());
 
@@ -59,10 +60,10 @@ public class ShaderPackScreen extends Screen {
 
     private Component backendStatus() {
         if (this.manager.canUseShaders()) {
-            return Component.literal("Graphics backend: " + this.manager.backendName() + " - shader pack loading available");
+            return Component.literal("Graphics backend: " + this.manager.backendName() + " - custom shader pipeline path available");
         }
 
-        return Component.literal("Graphics backend: " + this.manager.backendName() + " - switch to OpenGL to load shader packs");
+        return Component.literal("Graphics backend: " + this.manager.backendName() + " - shader renderer unavailable; vanilla rendering remains active");
     }
 
     @Override
