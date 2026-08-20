@@ -32,6 +32,16 @@ This file records provenance and upstream licensing for maintainers. Redistribut
 - License: GNU LGPL v3 or later
 - Adaptations: lazily cache `ExtraCodecs.TagOrElementLocation` in `TagEntry`; use a compact FastUtil map as the persistent `AttributeSupplier` backing map instead of retaining the ImmutableMap representation produced by its builder; cache `MinecraftProfileTexture#getHash()` results briefly inside each `SkinManager.TextureCache` to avoid recomputing profile texture hashes during lookup and registration.
 
+## Video settings and shader UI
+
+- Reese's Sodium Options: https://github.com/FlashyReese/reeses-sodium-options
+- Reference branch: `26.2/dev`
+- License: MIT
+- Iris: https://github.com/IrisShaders/Iris
+- Reference branch: `26.2`
+- License: GNU LGPL v3
+- Adaptation: provide a native Minecraft 26.2 tabbed/searchable video settings layout inspired by modern Sodium option screens, plus an Iris-style shader-pack entry. The shader-pack manager scans the standard `shaderpacks` directory and persists pack selection without bundling Fabric/NeoForge, Mixin, Sodium, Reese's Sodium Options, or Iris runtime code. Actual shader rendering integration is intentionally separate and is not claimed by this UI pass.
+
 ## Scope
 
-Only the optimization techniques listed above are included by these integration passes. No Fabric/NeoForge loader code, Mixin configuration, compatibility plugin, settings UI, or unrelated optimization from the upstream projects is bundled here.
+Only the optimization and UI techniques listed above are included by these integration passes. No Fabric/NeoForge loader code, Mixin configuration, compatibility plugin, or unrelated optimization from the upstream projects is bundled here.

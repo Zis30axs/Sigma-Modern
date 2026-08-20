@@ -5,7 +5,9 @@ import com.google.common.collect.Lists;
 import com.mojang.blaze3d.platform.Monitor;
 import com.mojang.blaze3d.platform.VideoMode;
 import com.mojang.blaze3d.platform.Window;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -14,12 +16,15 @@ import net.minecraft.client.Options;
 import net.minecraft.client.TextureFilteringMethod;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.GpuWarnlistManager;
+import net.minecraft.client.renderer.shaderpack.ShaderPackManager;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
@@ -28,32 +33,35 @@ import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
 public class VideoSettingsScreen extends OptionsSubScreen {
-    private static final Component TITLE = Component.translatable("options.videoTitle");
+    private static final Component TITLE = Component.literal("Sigma Video Settings");
     private static final Component IMPROVED_TRANSPARENCY = Component.translatable("options.improvedTransparency").withStyle(ChatFormatting.ITALIC);
     private static final Component WARNING_MESSAGE = Component.translatable("options.graphics.warning.message", IMPROVED_TRANSPARENCY, IMPROVED_TRANSPARENCY);
     private static final Component WARNING_TITLE = Component.translatable("options.graphics.warning.title").withStyle(ChatFormatting.RED);
     private static final Component BUTTON_ACCEPT = Component.translatable("options.graphics.warning.accept");
     private static final Component BUTTON_CANCEL = Component.translatable("options.graphics.warning.cancel");
-    private static final Component DISPLAY_HEADER = Component.translatable("options.video.display.header");
-    private static final Component QUALITY_HEADER = Component.translatable("options.video.quality.header");
-    private static final Component PREFERENCES_HEADER = Component.translatable("options.video.preferences.header");
+    private static final Component DISPLAY_HEADER = Component.literal("Display");
+    private static final Component QUALITY_HEADER = Component.literal("Quality");
+    private static final Component PERFORMANCE_HEADER = Component.literal("Performance");
+    private static final Component PREFERENCES_HEADER = Component.literal("Preferences");
     private static final Component RESTART_REQUIRED = Component.translatable("options.restartRequired").withColor(-2142128);
+    private static final Component SEARCH = Component.literal("Search settings...").withStyle(EditBox.SEARCH_HINT_STYLE);
     private final GpuWarnlistManager gpuWarnlistManager;
     private final int oldMipmaps;
     private final int oldAnisotropyBit;
     private final TextureFilteringMethod oldTextureFiltering;
-    private final LinearLayout header = LinearLayout.vertical().spacing(2);
+    private final ShaderPackManager shaderPackManager;
+    private LinearLayout header;
+    private @Nullable EditBox searchBox;
     private @Nullable StringWidget restartWarning;
+    private Page selectedPage = Page.GENERAL;
+    private String searchQuery = "";
 
     private static OptionInstance<?>[] qualityOptions(final Options options) {
         return new OptionInstance[]{
             options.biomeBlendRadius(),
             options.renderDistance(),
-            options.prioritizeChunkUpdates(),
-            options.simulationDistance(),
             options.ambientOcclusion(),
             options.cloudStatus(),
-            options.particles(),
             options.mipmapLevels(),
             options.entityShadows(),
             options.entityDistanceScaling(),
@@ -80,6 +88,19 @@ public class VideoSettingsScreen extends OptionsSubScreen {
         };
     }
 
+    private static OptionInstance<?>[] performanceOptions(final Options options) {
+        return new OptionInstance[]{
+            options.renderDistance(),
+            options.simulationDistance(),
+            options.prioritizeChunkUpdates(),
+            options.entityDistanceScaling(),
+            options.particles(),
+            options.chunkSectionFadeInTime(),
+            options.cloudRange(),
+            options.weatherRadius()
+        };
+    }
+
     private static OptionInstance<?>[] preferenceOptions(final Options options) {
         return new OptionInstance[]{options.showAutosaveIndicator(), options.vignette(), options.attackIndicator(), options.chunkSectionFadeInTime()};
     }
@@ -95,11 +116,17 @@ public class VideoSettingsScreen extends OptionsSubScreen {
         this.oldMipmaps = options.mipmapLevels().get();
         this.oldAnisotropyBit = options.maxAnisotropyBit().get();
         this.oldTextureFiltering = options.textureFiltering().get();
+        this.shaderPackManager = new ShaderPackManager(minecraft.gameDirectory.toPath());
+        this.layout.setHeaderHeight(76);
     }
 
     @Override
     protected void addOptions() {
-        int CURRENT_MODE = -1;
+        if (this.selectedPage == Page.SHADERS) {
+            this.addShaderOptions();
+            return;
+        }
+
         Window window = this.minecraft.getWindow();
         Monitor monitor = window.findBestMonitor();
         int initialValue;
@@ -142,26 +169,121 @@ public class VideoSettingsScreen extends OptionsSubScreen {
                 }
             }
         );
-        this.list.addHeader(DISPLAY_HEADER);
-        this.list.addBig(fullscreenOption);
-        this.list.addSmall(displayOptions(this.options));
-        this.list.addHeader(QUALITY_HEADER);
-        this.list.addBig(this.options.graphicsPreset());
-        this.list.addSmall(qualityOptions(this.options));
-        this.list.addHeader(PREFERENCES_HEADER);
-        this.list.addSmall(preferenceOptions(this.options));
+
+        switch (this.selectedPage) {
+            case GENERAL -> {
+                this.list.addHeader(DISPLAY_HEADER);
+                if (this.matches(fullscreenOption)) {
+                    this.list.addBig(fullscreenOption);
+                }
+                this.addFilteredOptions(displayOptions(this.options));
+                this.list.addHeader(PREFERENCES_HEADER);
+                this.addFilteredOptions(preferenceOptions(this.options));
+            }
+            case QUALITY -> {
+                this.list.addHeader(QUALITY_HEADER);
+                if (this.matches(this.options.graphicsPreset())) {
+                    this.list.addBig(this.options.graphicsPreset());
+                }
+                this.addFilteredOptions(qualityOptions(this.options));
+            }
+            case PERFORMANCE -> {
+                this.list.addHeader(PERFORMANCE_HEADER);
+                this.addFilteredOptions(performanceOptions(this.options));
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void addShaderOptions() {
+        this.list.addHeader(Component.literal("Shaders"));
+        String selected = this.shaderPackManager.selectedPack().orElse("Off");
+        this.list.addBig(
+            Button.builder(Component.literal("Shader Packs: " + selected), button -> this.minecraft.gui.setScreen(new ShaderPackScreen(this, this.shaderPackManager)))
+                .build()
+        );
+        this.list.addBig(
+            Button.builder(Component.literal("Open shaderpacks folder"), button -> {
+                this.shaderPackManager.ensureDirectory();
+                net.minecraft.util.Util.getPlatform().openPath(this.shaderPackManager.shaderPackDirectory());
+            }).build()
+        );
+        this.list.addHeader(Component.literal("Compatibility"));
+        Button rendererStatus = Button.builder(Component.literal("Shader renderer: integration pending"), button -> {}).build();
+        rendererStatus.active = false;
+        this.list.addBig(rendererStatus);
+    }
+
+    private void addFilteredOptions(final OptionInstance<?>[] options) {
+        List<OptionInstance<?>> filtered = new ArrayList<>();
+        for (OptionInstance<?> option : options) {
+            if (this.matches(option)) {
+                filtered.add(option);
+            }
+        }
+
+        this.list.addSmall(filtered.toArray(new OptionInstance<?>[0]));
+    }
+
+    private boolean matches(final OptionInstance<?> option) {
+        if (this.searchQuery.isBlank()) {
+            return true;
+        }
+        return option.toString().toLowerCase(Locale.ROOT).contains(this.searchQuery.toLowerCase(Locale.ROOT));
+    }
+
+    private void rebuildPage() {
+        this.layout.removeChildren();
+        this.rebuildWidgets();
     }
 
     @Override
     protected void addTitle() {
+        this.header = LinearLayout.vertical().spacing(4);
         this.header.defaultCellSetting().alignHorizontallyCenter().alignVerticallyMiddle();
         this.header.addChild(new StringWidget(this.title, this.font));
+
+        this.searchBox = new EditBox(this.font, 0, 0, 240, 18, SEARCH);
+        this.searchBox.setValue(this.searchQuery);
+        this.searchBox.setHint(SEARCH);
+        this.searchBox.setResponder(value -> {
+            if (!value.equals(this.searchQuery)) {
+                this.searchQuery = value;
+                this.rebuildPage();
+            }
+        });
+        this.header.addChild(this.searchBox);
+
+        LinearLayout tabs = this.header.addChild(LinearLayout.horizontal().spacing(4));
+        for (Page page : Page.values()) {
+            Button tab = Button.builder(page.label, button -> {
+                if (this.selectedPage != page) {
+                    this.selectedPage = page;
+                    this.searchQuery = "";
+                    this.rebuildPage();
+                }
+            }).width(76).build();
+            tab.active = this.selectedPage != page;
+            tabs.addChild(tab);
+        }
+
+        this.restartWarning = null;
         if (this.options.isRestartRequiredToApplyVideoSettings()) {
             this.restartWarning = new StringWidget(RESTART_REQUIRED, this.font);
             this.header.addChild(this.restartWarning);
         }
 
         this.layout.addToHeader(this.header);
+    }
+
+    @Override
+    protected void setInitialFocus() {
+        if (this.searchBox != null) {
+            this.setInitialFocus(this.searchBox);
+        } else {
+            super.setInitialFocus();
+        }
     }
 
     @Override
@@ -172,17 +294,9 @@ public class VideoSettingsScreen extends OptionsSubScreen {
 
         boolean restartRequired = this.options.isRestartRequiredToApplyVideoSettings();
         if (restartRequired && (this.restartWarning == null || !this.restartWarning.visible)) {
-            if (this.restartWarning == null) {
-                this.restartWarning = new StringWidget(RESTART_REQUIRED, this.font);
-                this.header.addChild(this.restartWarning);
-                this.addRenderableWidget(this.restartWarning);
-            }
-
-            this.restartWarning.visible = true;
-            this.repositionElements();
-        } else if (!restartRequired && this.restartWarning != null && this.restartWarning.visible) {
-            this.restartWarning.visible = false;
-            this.repositionElements();
+            this.rebuildPage();
+        } else if (!restartRequired && this.restartWarning != null) {
+            this.rebuildPage();
         }
 
         super.tick();
@@ -229,23 +343,26 @@ public class VideoSettingsScreen extends OptionsSubScreen {
                     warningMessage.add(Component.translatable("options.graphics.warning.version", versionWarnings).withStyle(ChatFormatting.GRAY));
                 }
 
-                this.minecraft
-                    .gui
-                    .setScreen(
-                        new UnsupportedGraphicsWarningScreen(
-                            WARNING_TITLE, warningMessage, ImmutableList.of(new UnsupportedGraphicsWarningScreen.ButtonOption(BUTTON_ACCEPT, btn -> {
+                this.minecraft.gui.setScreen(
+                    new UnsupportedGraphicsWarningScreen(
+                        WARNING_TITLE,
+                        warningMessage,
+                        ImmutableList.of(
+                            new UnsupportedGraphicsWarningScreen.ButtonOption(BUTTON_ACCEPT, btn -> {
                                 this.options.improvedTransparency().set(true);
                                 Minecraft.getInstance().levelExtractor.allChanged();
                                 this.gpuWarnlistManager.dismissWarning();
                                 this.minecraft.gui.setScreen(this);
-                            }), new UnsupportedGraphicsWarningScreen.ButtonOption(BUTTON_CANCEL, btn -> {
+                            }),
+                            new UnsupportedGraphicsWarningScreen.ButtonOption(BUTTON_CANCEL, btn -> {
                                 this.gpuWarnlistManager.dismissWarning();
                                 this.options.improvedTransparency().set(false);
                                 this.updateTransparencyButton();
                                 this.minecraft.gui.setScreen(this);
-                            }))
+                            })
                         )
-                    );
+                    )
+                );
             }
 
             return true;
@@ -297,6 +414,19 @@ public class VideoSettingsScreen extends OptionsSubScreen {
                 CycleButton<Boolean> button = (CycleButton<Boolean>)widget;
                 button.setValue(option.get());
             }
+        }
+    }
+
+    private enum Page {
+        GENERAL(Component.literal("General")),
+        QUALITY(Component.literal("Quality")),
+        PERFORMANCE(Component.literal("Performance")),
+        SHADERS(Component.literal("Shaders"));
+
+        private final Component label;
+
+        Page(final Component label) {
+            this.label = label;
         }
     }
 }
