@@ -121,12 +121,7 @@ public class VideoSettingsScreen extends Screen {
         this.searchBox = new EditBox(this.font, this.panelX, this.topY, searchWidth, TOP_ROW_HEIGHT, SEARCH_HINT);
         this.searchBox.setValue(this.searchQuery);
         this.searchBox.setHint(SEARCH_HINT);
-        this.searchBox.setResponder(value -> {
-            if (!Objects.equals(value, this.searchQuery)) {
-                this.searchQuery = value;
-                this.refreshOptionList();
-            }
-        });
+        this.searchBox.setResponder(value -> this.searchQuery = value);
         this.addRenderableWidget(this.searchBox);
 
         this.addRenderableWidget(
@@ -252,16 +247,12 @@ public class VideoSettingsScreen extends Screen {
     }
 
     private void selectCategory(final VideoSettingsScreen.Category category) {
-        if (this.optionList != null && this.searchQuery.isBlank()) {
+        if (this.optionList != null) {
             this.scrollOffsets.put(this.selectedCategory, this.optionList.scrollAmount());
         }
-        if (this.selectedCategory != category || !this.searchQuery.isBlank()) {
+        if (this.selectedCategory != category) {
             this.selectedCategory = category;
-            if (this.searchBox != null && !this.searchQuery.isBlank()) {
-                this.searchBox.setValue("");
-            } else {
-                this.refreshOptionList();
-            }
+            this.refreshOptionList();
         }
     }
 
@@ -275,30 +266,12 @@ public class VideoSettingsScreen extends Screen {
             this.optionList.addOption(option);
         }
         this.optionList.refreshScrollAmount();
-        if (this.searchQuery.isBlank()) {
-            this.optionList.setScrollAmount(this.scrollOffsets.getOrDefault(this.selectedCategory, 0.0));
-        } else {
-            this.optionList.setScrollAmount(0.0);
-        }
+        this.optionList.setScrollAmount(this.scrollOffsets.getOrDefault(this.selectedCategory, 0.0));
         this.optionList.updateControlStates();
     }
 
     private List<OptionInstance<?>> visibleOptions() {
-        String query = this.normalizedSearchQuery();
-        if (query.isEmpty()) {
-            return this.optionsFor(this.selectedCategory);
-        }
-
-        List<OptionInstance<?>> result = new ArrayList<>();
-        IdentityHashMap<OptionInstance<?>, Boolean> seen = new IdentityHashMap<>();
-        for (VideoSettingsScreen.Category category : VideoSettingsScreen.Category.values()) {
-            for (OptionInstance<?> option : this.optionsFor(category)) {
-                if (seen.put(option, Boolean.TRUE) == null && this.matches(option, query)) {
-                    result.add(option);
-                }
-            }
-        }
-        return result;
+        return this.optionsFor(this.selectedCategory);
     }
 
     private List<OptionInstance<?>> optionsFor(final VideoSettingsScreen.Category category) {
@@ -396,14 +369,6 @@ public class VideoSettingsScreen extends Screen {
         return this.searchQuery.strip().toLowerCase(Locale.ROOT);
     }
 
-    private boolean matches(final OptionInstance<?> option, final String query) {
-        if (option.toString().toLowerCase(Locale.ROOT).contains(query)) {
-            return true;
-        }
-        String value = VideoSettingsScreen.probeValueText(option, this.options);
-        return value.toLowerCase(Locale.ROOT).contains(query);
-    }
-
     private boolean captionMatchesSearch(final OptionInstance<?> option) {
         String query = this.normalizedSearchQuery();
         return !query.isEmpty() && option.toString().toLowerCase(Locale.ROOT).contains(query);
@@ -498,10 +463,6 @@ public class VideoSettingsScreen extends Screen {
         graphics.fill(this.panelX, this.bodyY, this.panelX + this.railWidth, this.bodyY + this.bodyHeight, RAIL_BACKGROUND);
         graphics.fill(this.listX, this.bodyY, this.listX + this.listWidth, this.bodyY + this.bodyHeight, PAGE_BACKGROUND);
         super.extractRenderState(graphics, mouseX, mouseY, a);
-
-        if (this.optionList != null && this.optionList.isEmpty() && !this.searchQuery.isBlank()) {
-            graphics.centeredText(this.font, Component.literal("No matching settings"), this.listX + this.listWidth / 2, this.bodyY + 12, MUTED_TEXT);
-        }
         if (this.options.isRestartRequiredToApplyVideoSettings()) {
             graphics.text(this.font, RESTART_REQUIRED, this.panelX + 4, this.footerY + 6, 0xFFFFAA00, false);
         }
@@ -655,10 +616,6 @@ public class VideoSettingsScreen extends Screen {
 
         private void addOption(final OptionInstance<?> option) {
             this.addEntry(new VideoSettingsScreen.OptionRow(option));
-        }
-
-        private boolean isEmpty() {
-            return this.children().isEmpty();
         }
 
         private void updateControlStates() {
