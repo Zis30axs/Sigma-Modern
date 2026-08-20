@@ -23,7 +23,7 @@ public class TagEntry {
     private final Identifier id;
     private final boolean tag;
     private final boolean required;
-    private @Nullable ExtraCodecs.TagOrElementLocation cachedElementOrTag;
+    private ExtraCodecs.TagOrElementLocation cachedElementOrTag;
 
     private TagEntry(final Identifier id, final boolean tag, final boolean required) {
         this.id = id;
