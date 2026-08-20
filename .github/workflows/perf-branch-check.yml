@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - perf/four-source-optimizations
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
