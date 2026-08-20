@@ -3,8 +3,6 @@ package net.minecraft.world.level.block.state;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import it.unimi.dsi.fastutil.booleans.BooleanArrays;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenCustomHashMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -630,7 +628,7 @@ public abstract class BlockBehaviour implements FeatureElement {
         }
 
         public boolean isSignalSource() {
-            return this.getBlock().isSignalSource();
+            return this.getBlock().isSignalSource(this.asState());
         }
 
         public int getOwnSignal(final BlockGetter level, final BlockPos pos) {
@@ -642,7 +640,7 @@ public abstract class BlockBehaviour implements FeatureElement {
         }
 
         public boolean hasAnalogOutputSignal() {
-            return this.getBlock().hasAnalogOutputSignal();
+            return this.getBlock().hasAnalogOutputSignal(this.asState());
         }
 
         public int getAnalogOutputSignal(final Level level, final BlockPos pos, final Direction direction) {
@@ -924,9 +922,6 @@ public abstract class BlockBehaviour implements FeatureElement {
         private static final class Cache {
             private static final Direction[] DIRECTIONS = Direction.values();
             private static final int SUPPORT_TYPE_COUNT = SupportType.values().length;
-            private static final Object2ObjectOpenCustomHashMap<boolean[], boolean[]> FACE_STURDY_CACHE = new Object2ObjectOpenCustomHashMap<>(
-                BooleanArrays.HASH_STRATEGY
-            );
             public final VoxelShape collisionShape;
             public final boolean largeCollisionShape;
             private final boolean[] faceSturdy;
@@ -947,30 +942,19 @@ public abstract class BlockBehaviour implements FeatureElement {
 
                 this.largeCollisionShape = Arrays.stream(Direction.Axis.values())
                     .anyMatch(axis -> this.collisionShape.min(axis) < 0.0 || this.collisionShape.max(axis) > 1.0);
-                boolean[] faceSturdy = new boolean[DIRECTIONS.length * SUPPORT_TYPE_COUNT];
+                this.faceSturdy = new boolean[DIRECTIONS.length * SUPPORT_TYPE_COUNT];
 
                 for (Direction direction : DIRECTIONS) {
                     for (SupportType type : SupportType.values()) {
-                        faceSturdy[getFaceSupportIndex(direction, type)] = type.isSupporting(state, EmptyBlockGetter.INSTANCE, BlockPos.ZERO, direction);
+                        this.faceSturdy[getFaceSupportIndex(direction, type)] = type.isSupporting(state, EmptyBlockGetter.INSTANCE, BlockPos.ZERO, direction);
                     }
                 }
 
-                this.faceSturdy = internFaceSturdy(faceSturdy);
                 this.isCollisionShapeFullBlock = Block.isShapeFullBlock(state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
             }
 
             public boolean isFaceSturdy(final Direction direction, final SupportType supportType) {
                 return this.faceSturdy[getFaceSupportIndex(direction, supportType)];
-            }
-
-            private static synchronized boolean[] internFaceSturdy(final boolean[] faceSturdy) {
-                boolean[] existing = FACE_STURDY_CACHE.get(faceSturdy);
-                if (existing != null) {
-                    return existing;
-                }
-
-                FACE_STURDY_CACHE.put(faceSturdy, faceSturdy);
-                return faceSturdy;
             }
 
             private static int getFaceSupportIndex(final Direction direction, final SupportType supportType) {
