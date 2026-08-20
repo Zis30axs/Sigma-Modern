@@ -20,6 +20,7 @@ import java.util.OptionalDouble;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.shaderpack.ShaderPackDeferredRuntime;
 import net.minecraft.client.renderer.shaderpack.ShaderPackRuntime;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -32,6 +33,10 @@ public record ChunkSectionsToRender(
     GpuBufferSlice[] chunkSectionInfos
 ) {
     public void renderGroup(final ChunkSectionLayerGroup group, final GpuSampler sampler) {
+        if (group == ChunkSectionLayerGroup.OPAQUE) {
+            ShaderPackDeferredRuntime.markWorldFrame();
+        }
+
         RenderSystem.AutoStorageIndexBuffer autoIndices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
         GpuBuffer defaultIndexBuffer = this.maxIndicesRequired == 0 ? null : autoIndices.getBuffer(this.maxIndicesRequired);
         IndexType defaultIndexType = this.maxIndicesRequired == 0 ? null : autoIndices.type();

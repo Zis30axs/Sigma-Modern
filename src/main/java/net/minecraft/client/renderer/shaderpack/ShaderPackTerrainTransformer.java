@@ -219,7 +219,7 @@ public final class ShaderPackTerrainTransformer {
     }
 
     private static String replaceFragData(final String source, final String singleOutput, final int attachmentCount) {
-        Matcher matcher = FRAGG_DATA.matcher(source);
+        Matcher matcher = FRAG_DATA.matcher(source);
         StringBuffer result = new StringBuffer(source.length());
         while (matcher.find()) {
             int location = parseOutputLocation(matcher.group(1));
