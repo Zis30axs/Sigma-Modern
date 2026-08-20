@@ -1,0 +1,28 @@
+name: Performance Branch Check
+
+on:
+  push:
+    branches:
+      - perf/four-source-optimizations
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Compile package
+        run: mvn -B -DskipTests package
