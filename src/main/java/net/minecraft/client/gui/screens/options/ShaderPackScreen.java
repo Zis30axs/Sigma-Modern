@@ -24,10 +24,9 @@ import org.jspecify.annotations.Nullable;
 public class ShaderPackScreen extends Screen {
     private static final Component TITLE = Component.literal("Shader Packs");
     private static final Component DISABLED = Component.literal("Shaders: Off");
-    private static final Component RENDERER_PENDING = Component.literal("Pack selection is ready; shader rendering integration is still being connected.");
     private final Screen lastScreen;
     private final ShaderPackManager manager;
-    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 48, 33);
+    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 57, 33);
     private ShaderPackScreen.PackList packList;
 
     public ShaderPackScreen(final Screen lastScreen, final ShaderPackManager manager) {
@@ -41,7 +40,8 @@ public class ShaderPackScreen extends Screen {
         LinearLayout header = this.layout.addToHeader(LinearLayout.vertical().spacing(5));
         header.defaultCellSetting().alignHorizontallyCenter();
         header.addChild(new StringWidget(TITLE, this.font));
-        header.addChild(new StringWidget(RENDERER_PENDING, this.font));
+        header.addChild(new StringWidget(this.backendStatus(), this.font));
+        header.addChild(new StringWidget(Component.literal("Pack loading is ready; the Iris-style world rendering pipeline is being integrated next."), this.font));
 
         this.packList = this.layout.addToContents(new ShaderPackScreen.PackList());
 
@@ -55,6 +55,14 @@ public class ShaderPackScreen extends Screen {
 
         this.layout.visitWidgets(widget -> this.addRenderableWidget(widget));
         this.repositionElements();
+    }
+
+    private Component backendStatus() {
+        if (this.manager.canUseShaders()) {
+            return Component.literal("Graphics backend: " + this.manager.backendName() + " - shader packs supported");
+        }
+
+        return Component.literal("Graphics backend: " + this.manager.backendName() + " - switch to OpenGL to use shader packs");
     }
 
     @Override
@@ -94,21 +102,44 @@ public class ShaderPackScreen extends Screen {
 
     private class PackEntry extends ContainerObjectSelectionList.Entry<ShaderPackScreen.PackEntry> {
         private final @Nullable String packName;
+        private final boolean valid;
         private final Button selectButton;
         private final List<GuiEventListener> children = new ArrayList<>();
 
         private PackEntry(final @Nullable String packName) {
             this.packName = packName;
+            this.valid = packName == null || ShaderPackScreen.this.manager.isValidShaderPack(packName);
             this.selectButton = Button.builder(this.label(), button -> {
-                ShaderPackScreen.this.manager.select(this.packName);
-                ShaderPackScreen.this.packList.refreshEntries();
+                if (ShaderPackScreen.this.manager.select(this.packName)) {
+                    ShaderPackScreen.this.packList.refreshEntries();
+                }
             }).width(310).build();
-            this.selectButton.active = !this.isSelected();
+            this.selectButton.active = this.canSelect();
             this.children.add(this.selectButton);
         }
 
         private Component label() {
-            return this.packName == null ? DISABLED : Component.literal(this.packName);
+            if (this.packName == null) {
+                return DISABLED;
+            }
+
+            if (!this.valid) {
+                return Component.literal("Invalid shader pack: " + this.packName);
+            }
+
+            if (this.isSelected()) {
+                return Component.literal("Selected: " + this.packName);
+            }
+
+            return Component.literal(this.packName);
+        }
+
+        private boolean canSelect() {
+            if (this.packName == null) {
+                return ShaderPackScreen.this.manager.selectedPack().isPresent();
+            }
+
+            return this.valid && ShaderPackScreen.this.manager.canUseShaders() && !this.isSelected();
         }
 
         private boolean isSelected() {
