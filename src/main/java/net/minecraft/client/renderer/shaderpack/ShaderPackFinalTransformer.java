@@ -3,6 +3,8 @@ package net.minecraft.client.renderer.shaderpack;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,6 +60,9 @@ public final class ShaderPackFinalTransformer {
         }
 
         List<Edit> declarationEdits = new ArrayList<>();
+        List<Replacement> samplerReplacements = new ArrayList<>();
+        Set<Integer> colorSamplers = new TreeSet<>();
+        boolean depthSampler = false;
         boolean replaceViewWidth = false;
         boolean replaceViewHeight = false;
         boolean replaceAspectRatio = false;
@@ -66,16 +71,31 @@ public final class ShaderPackFinalTransformer {
         while (uniformMatcher.find()) {
             String type = uniformMatcher.group(1);
             String name = uniformMatcher.group(2);
-            if ("sampler2D".equals(type) && ("colortex0".equals(name) || "gcolor".equals(name))) {
+            Integer colorTarget = "sampler2D".equals(type) ? colorSamplerTarget(name) : null;
+            if (colorTarget != null) {
+                colorSamplers.add(colorTarget);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
+                String canonical = "colortex" + colorTarget;
+                if (!canonical.equals(name)) {
+                    samplerReplacements.add(new Replacement(name, canonical));
+                }
+            } else if ("sampler2D".equals(type) && ("depthtex0".equals(name) || "gdepthtex".equals(name))) {
+                depthSampler = true;
+                declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
+                if (!"depthtex0".equals(name)) {
+                    samplerReplacements.add(new Replacement(name, "depthtex0"));
+                }
             } else if ("float".equals(type) && "viewWidth".equals(name)) {
                 replaceViewWidth = true;
+                colorSamplers.add(0);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
             } else if ("float".equals(type) && "viewHeight".equals(name)) {
                 replaceViewHeight = true;
+                colorSamplers.add(0);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
             } else if ("float".equals(type) && "aspectRatio".equals(name)) {
                 replaceAspectRatio = true;
+                colorSamplers.add(0);
                 declarationEdits.add(new Edit(uniformMatcher.start(), uniformMatcher.end(), ""));
             } else {
                 throw new IllegalArgumentException("Unsupported final.fsh uniform: " + type + " " + name);
@@ -90,7 +110,7 @@ public final class ShaderPackFinalTransformer {
                 throw new IllegalArgumentException("Unsupported final.fsh varying type: " + varyingMatcher.group(1));
             }
             if (inputName != null && !inputName.equals(varyingMatcher.group(2))) {
-                throw new IllegalArgumentException("final.fsh uses more than one fragment varying; the initial final-pass subset supports one vec2 input");
+                throw new IllegalArgumentException("final.fsh uses more than one fragment varying; the final-pass subset supports one vec2 input");
             }
             inputName = varyingMatcher.group(2);
             declarationEdits.add(new Edit(varyingMatcher.start(), varyingMatcher.end(), "in vec2 " + inputName + ";"));
@@ -102,7 +122,7 @@ public final class ShaderPackFinalTransformer {
                 throw new IllegalArgumentException("Unsupported final.fsh input type: " + inputMatcher.group(1));
             }
             if (inputName != null && !inputName.equals(inputMatcher.group(2))) {
-                throw new IllegalArgumentException("final.fsh uses more than one fragment input; the initial final-pass subset supports one vec2 input");
+                throw new IllegalArgumentException("final.fsh uses more than one fragment input; the final-pass subset supports one vec2 input");
             }
             inputName = inputMatcher.group(2);
         }
@@ -136,7 +156,9 @@ public final class ShaderPackFinalTransformer {
             extensions.add(extensionMatcher.group().trim());
         }
         body = EXTENSION.matcher(body).replaceAll("");
-        body = replaceWord(body, "gcolor", "colortex0");
+        for (Replacement replacement : samplerReplacements) {
+            body = replaceWord(body, replacement.from(), replacement.to());
+        }
         body = body.replaceAll("\\btexture2DLod\\b", "textureLod");
         body = body.replaceAll("\\btexture2D\\b", "texture");
         body = body.replaceAll("\\bgl_FragColor\\b", Matcher.quoteReplacement(outputName));
@@ -178,7 +200,12 @@ public final class ShaderPackFinalTransformer {
         }
 
         StringBuilder declarations = new StringBuilder();
-        declarations.append("uniform sampler2D colortex0;\n");
+        for (int colorSampler : colorSamplers) {
+            declarations.append("uniform sampler2D colortex").append(colorSampler).append(";\n");
+        }
+        if (depthSampler) {
+            declarations.append("uniform sampler2D depthtex0;\n");
+        }
         if (inputDeclarationInjected) {
             declarations.append("in vec2 ").append(inputName).append(";\n");
         }
@@ -201,7 +228,29 @@ public final class ShaderPackFinalTransformer {
         }
         vertex.append("}\n");
 
-        return new Result(vertex.toString(), fragment);
+        return new Result(vertex.toString(), fragment, List.copyOf(colorSamplers), depthSampler);
+    }
+
+    private static Integer colorSamplerTarget(final String name) {
+        if (name.startsWith("colortex")) {
+            try {
+                int target = Integer.parseInt(name.substring("colortex".length()));
+                return target >= 0 && target < 8 ? target : null;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return switch (name) {
+            case "gcolor" -> 0;
+            case "gdepth" -> 1;
+            case "gnormal" -> 2;
+            case "composite" -> 3;
+            case "gaux1" -> 4;
+            case "gaux2" -> 5;
+            case "gaux3" -> 6;
+            case "gaux4" -> 7;
+            default -> null;
+        };
     }
 
     private static String replaceWord(final String source, final String word, final String replacement) {
@@ -261,9 +310,12 @@ public final class ShaderPackFinalTransformer {
         return masked.toString();
     }
 
-    public record Result(String vertexSource, String fragmentSource) {
+    public record Result(String vertexSource, String fragmentSource, List<Integer> colorSamplers, boolean depthSampler) {
     }
 
     private record Edit(int start, int end, String replacement) {
+    }
+
+    private record Replacement(String from, String to) {
     }
 }

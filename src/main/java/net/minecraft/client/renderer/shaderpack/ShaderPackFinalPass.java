@@ -18,8 +18,12 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -36,6 +40,8 @@ final class ShaderPackFinalPass implements AutoCloseable {
     private @Nullable String failureReason;
     private @Nullable RenderPipeline pipeline;
     private @Nullable TextureTarget copyTarget;
+    private List<Integer> colorSamplers = List.of();
+    private boolean depthSampler;
 
     ShaderPackFinalPass(final ShaderPackManager manager, final String packName, final ShaderPackBackend backend, final long generation) {
         this.manager = manager;
@@ -44,7 +50,7 @@ final class ShaderPackFinalPass implements AutoCloseable {
         this.generation = generation;
     }
 
-    void apply(final RenderTarget mainTarget) {
+    void apply(final RenderTarget mainTarget, final ShaderPackRenderTargets renderTargets) {
         if (!this.initialized) {
             this.initialize();
         }
@@ -63,9 +69,37 @@ final class ShaderPackFinalPass implements AutoCloseable {
             CommandEncoder encoder = device.createCommandEncoder();
             encoder.copyTextureToTexture(mainColor, sourceColor, 0, 0, 0, 0, 0, mainTarget.width, mainTarget.height);
 
+            Map<Integer, GpuTextureView> samplerViews = new LinkedHashMap<>();
+            for (int colorSampler : this.colorSamplers) {
+                GpuTextureView view = colorSampler == 0 ? sourceColorView : renderTargets.samplerView(colorSampler);
+                if (view == null) {
+                    this.fail("final.fsh requested colortex" + colorSampler + " but no current-frame gbuffer target is available", null);
+                    return;
+                }
+                samplerViews.put(colorSampler, view);
+            }
+
+            GpuTextureView depthView = null;
+            if (this.depthSampler) {
+                depthView = mainTarget.getDepthTextureView();
+                if (depthView == null) {
+                    this.fail("final.fsh requested depthtex0 but the main depth texture is unavailable", null);
+                    return;
+                }
+            }
+
             try (RenderPass pass = encoder.createRenderPass(() -> "Sigma shader pack final", mainColorView, Optional.empty())) {
                 pass.setPipeline(this.pipeline);
-                pass.bindTexture("colortex0", sourceColorView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+                for (Map.Entry<Integer, GpuTextureView> sampler : samplerViews.entrySet()) {
+                    pass.bindTexture(
+                        "colortex" + sampler.getKey(),
+                        sampler.getValue(),
+                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)
+                    );
+                }
+                if (depthView != null) {
+                    pass.bindTexture("depthtex0", depthView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                }
                 pass.draw(3, 1, 0, 0);
             }
         } catch (RuntimeException exception) {
@@ -75,7 +109,13 @@ final class ShaderPackFinalPass implements AutoCloseable {
 
     String status() {
         if (this.ready) {
-            return "final.fsh active on " + this.backend.displayName() + " (colortex0 subset)";
+            String samplers = this.colorSamplers.isEmpty()
+                ? "no color samplers"
+                : this.colorSamplers.stream().map(index -> "colortex" + index).collect(Collectors.joining(","));
+            if (this.depthSampler) {
+                samplers = samplers.equals("no color samplers") ? "depthtex0" : samplers + ",depthtex0";
+            }
+            return "final.fsh active on " + this.backend.displayName() + " (" + samplers + ")";
         }
         if (this.missing) {
             return "pack has no final.fsh";
@@ -131,15 +171,23 @@ final class ShaderPackFinalPass implements AutoCloseable {
             }
             return type == ShaderType.VERTEX ? transformed.vertexSource() : transformed.fragmentSource();
         };
-        BindGroupLayout finalLayout = BindGroupLayout.builder().withSampler("colortex0").build();
-        RenderPipeline finalPipeline = RenderPipeline.builder()
+        RenderPipeline.Builder pipelineBuilder = RenderPipeline.builder()
             .withLocation(Identifier.fromNamespaceAndPath("sigma", "pipeline/shader_final_" + Long.toUnsignedString(this.generation, 16)))
-            .withBindGroupLayout(finalLayout)
             .withVertexShader(shaderId)
             .withFragmentShader(shaderId)
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-            .withCull(false)
-            .build();
+            .withCull(false);
+        if (!transformed.colorSamplers().isEmpty() || transformed.depthSampler()) {
+            BindGroupLayout.Builder layoutBuilder = BindGroupLayout.builder();
+            for (int colorSampler : transformed.colorSamplers()) {
+                layoutBuilder.withSampler("colortex" + colorSampler);
+            }
+            if (transformed.depthSampler()) {
+                layoutBuilder.withSampler("depthtex0");
+            }
+            pipelineBuilder.withBindGroupLayout(layoutBuilder.build());
+        }
+        RenderPipeline finalPipeline = pipelineBuilder.build();
         CompiledRenderPipeline compiled = device.precompilePipeline(finalPipeline, source);
         if (!compiled.isValid()) {
             this.fail("backend rejected the transformed final.fsh", null);
@@ -147,8 +195,10 @@ final class ShaderPackFinalPass implements AutoCloseable {
         }
 
         this.pipeline = finalPipeline;
+        this.colorSamplers = transformed.colorSamplers();
+        this.depthSampler = transformed.depthSampler();
         this.ready = true;
-        LOGGER.info("Enabled shader-pack final.fsh subset on {} for {}", this.backend.displayName(), this.packName);
+        LOGGER.info("Enabled shader-pack final.fsh subset on {} for {} with samplers {}", this.backend.displayName(), this.packName, this.colorSamplers);
     }
 
     private void ensureCopyTarget(final int width, final int height) {

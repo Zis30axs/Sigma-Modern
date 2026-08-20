@@ -9,14 +9,21 @@ import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.shaders.ShaderType;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.logging.LogUtils;
 import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
@@ -27,15 +34,19 @@ import org.slf4j.Logger;
 public final class ShaderPackRuntime {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final ShaderPackRuntime INSTANCE = new ShaderPackRuntime();
+    private final ShaderPackRenderTargets gbufferTargets = new ShaderPackRenderTargets();
     private @Nullable ShaderPackManager manager;
     private ShaderPackBackend activeBackend = ShaderPackBackend.UNKNOWN;
     private @Nullable String activePack;
     private long generation;
     private boolean terrainInitialized;
     private int terrainActivePipelines;
+    private int terrainMaxColorAttachments = 1;
     private @Nullable String terrainFailureReason;
     private Map<ChunkSectionLayer, RenderPipeline> terrainPipelines = Map.of();
     private Map<ChunkSectionLayer, String> terrainProgramNames = Map.of();
+    private Map<ChunkSectionLayer, List<Integer>> terrainColorTargets = Map.of();
+    private Set<Integer> terrainExtraTargets = Set.of();
     private @Nullable ShaderPackFinalPass finalPass;
 
     private ShaderPackRuntime() {
@@ -43,6 +54,19 @@ public final class ShaderPackRuntime {
 
     public static RenderPipeline terrainPipeline(final ChunkSectionLayer layer) {
         return INSTANCE.resolveTerrainPipeline(layer);
+    }
+
+    public static int terrainColorAttachmentCount(final ChunkSectionLayer layer) {
+        return INSTANCE.resolveTerrainColorAttachmentCount(layer);
+    }
+
+    public static RenderPassDescriptor terrainPassDescriptor(
+        final CommandEncoder encoder,
+        final ChunkSectionLayer layer,
+        final RenderTarget renderTarget,
+        final Supplier<String> label
+    ) {
+        return INSTANCE.createTerrainPassDescriptor(encoder, layer, renderTarget, label);
     }
 
     public static void applyFinalPass() {
@@ -77,6 +101,9 @@ public final class ShaderPackRuntime {
                     + (INSTANCE.terrainFailureReason == null ? "vanilla terrain active" : INSTANCE.terrainFailureReason);
             } else {
                 terrainStatus = "terrain pack GLSL " + INSTANCE.terrainActivePipelines + "/3 active";
+                if (INSTANCE.terrainMaxColorAttachments > 1) {
+                    terrainStatus += "; MRT up to " + INSTANCE.terrainMaxColorAttachments + " attachments";
+                }
                 if (INSTANCE.terrainActivePipelines < 3 && INSTANCE.terrainFailureReason != null) {
                     terrainStatus += "; fallback: " + INSTANCE.terrainFailureReason;
                 }
@@ -103,21 +130,51 @@ public final class ShaderPackRuntime {
         return this.terrainPipelines.getOrDefault(layer, layer.pipeline());
     }
 
+    private synchronized int resolveTerrainColorAttachmentCount(final ChunkSectionLayer layer) {
+        this.resolveTerrainPipeline(layer);
+        return this.terrainColorTargets.getOrDefault(layer, List.of(0)).size();
+    }
+
+    private synchronized RenderPassDescriptor createTerrainPassDescriptor(
+        final CommandEncoder encoder,
+        final ChunkSectionLayer layer,
+        final RenderTarget renderTarget,
+        final Supplier<String> label
+    ) {
+        List<Integer> colorTargets = this.terrainColorTargets.getOrDefault(layer, List.of(0));
+        if (colorTargets.size() > 1 || !this.terrainExtraTargets.isEmpty()) {
+            this.gbufferTargets.prepare(encoder, renderTarget.width, renderTarget.height, this.terrainExtraTargets);
+        }
+
+        RenderPassDescriptor descriptor = RenderPassDescriptor.create(label);
+        for (int colorTarget : colorTargets) {
+            descriptor.withColorAttachment(this.gbufferTargets.attachmentView(colorTarget, renderTarget));
+        }
+        if (renderTarget.getDepthTextureView() != null) {
+            descriptor.withDepthAttachment(renderTarget.getDepthTextureView());
+        }
+        return descriptor.withRenderArea(new RenderPass.RenderArea(0, 0, renderTarget.width, renderTarget.height));
+    }
+
     private synchronized void renderFinalPass() {
-        ShaderPackManager manager = this.manager();
-        ShaderPackBackend backend = ShaderPackBackend.current();
-        String pack = manager.selectedPackPath().isPresent() ? manager.selectedPack().orElse(null) : null;
-        this.updateSelection(backend, pack);
-        if (pack == null || !backend.supportsCustomShaderPipelines()) {
-            return;
-        }
+        try {
+            ShaderPackManager manager = this.manager();
+            ShaderPackBackend backend = ShaderPackBackend.current();
+            String pack = manager.selectedPackPath().isPresent() ? manager.selectedPack().orElse(null) : null;
+            this.updateSelection(backend, pack);
+            if (pack == null || !backend.supportsCustomShaderPipelines()) {
+                return;
+            }
 
-        if (this.finalPass == null) {
-            this.finalPass = new ShaderPackFinalPass(manager, pack, backend, this.generation);
-        }
+            if (this.finalPass == null) {
+                this.finalPass = new ShaderPackFinalPass(manager, pack, backend, this.generation);
+            }
 
-        RenderTarget mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-        this.finalPass.apply(mainTarget);
+            RenderTarget mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+            this.finalPass.apply(mainTarget, this.gbufferTargets);
+        } finally {
+            this.gbufferTargets.endFrame();
+        }
     }
 
     private ShaderPackManager manager() {
@@ -138,14 +195,18 @@ public final class ShaderPackRuntime {
             this.finalPass.close();
             this.finalPass = null;
         }
+        this.gbufferTargets.release();
         this.activeBackend = backend;
         this.activePack = pack;
         this.generation++;
         this.terrainInitialized = false;
         this.terrainActivePipelines = 0;
+        this.terrainMaxColorAttachments = 1;
         this.terrainFailureReason = null;
         this.terrainPipelines = Map.of();
         this.terrainProgramNames = Map.of();
+        this.terrainColorTargets = Map.of();
+        this.terrainExtraTargets = Set.of();
     }
 
     private void tryInitializeTerrainPipelines() {
@@ -165,6 +226,7 @@ public final class ShaderPackRuntime {
         ShaderPackProgramResolver resolver = new ShaderPackProgramResolver(programSet.get());
         EnumMap<ChunkSectionLayer, RenderPipeline> pipelines = new EnumMap<>(ChunkSectionLayer.class);
         EnumMap<ChunkSectionLayer, String> programNames = new EnumMap<>(ChunkSectionLayer.class);
+        EnumMap<ChunkSectionLayer, List<Integer>> colorTargets = new EnumMap<>(ChunkSectionLayer.class);
         this.tryCreateTerrainPipeline(
             device,
             resolver,
@@ -172,7 +234,8 @@ public final class ShaderPackRuntime {
             ShaderPackProgramResolver.TerrainProgram.SOLID,
             ShaderPackTerrainTransformer.AlphaMode.SOLID,
             pipelines,
-            programNames
+            programNames,
+            colorTargets
         );
         this.tryCreateTerrainPipeline(
             device,
@@ -181,7 +244,8 @@ public final class ShaderPackRuntime {
             ShaderPackProgramResolver.TerrainProgram.CUTOUT,
             ShaderPackTerrainTransformer.AlphaMode.CUTOUT,
             pipelines,
-            programNames
+            programNames,
+            colorTargets
         );
         this.tryCreateTerrainPipeline(
             device,
@@ -190,11 +254,26 @@ public final class ShaderPackRuntime {
             ShaderPackProgramResolver.TerrainProgram.TRANSLUCENT,
             ShaderPackTerrainTransformer.AlphaMode.TRANSLUCENT,
             pipelines,
-            programNames
+            programNames,
+            colorTargets
         );
+
+        Set<Integer> extraTargets = new HashSet<>();
+        int maxAttachments = 1;
+        for (List<Integer> targets : colorTargets.values()) {
+            maxAttachments = Math.max(maxAttachments, targets.size());
+            for (int target : targets) {
+                if (target != 0) {
+                    extraTargets.add(target);
+                }
+            }
+        }
 
         this.terrainPipelines = Map.copyOf(pipelines);
         this.terrainProgramNames = Map.copyOf(programNames);
+        this.terrainColorTargets = Map.copyOf(colorTargets);
+        this.terrainExtraTargets = Set.copyOf(extraTargets);
+        this.terrainMaxColorAttachments = maxAttachments;
         this.terrainActivePipelines = pipelines.size();
         this.terrainInitialized = true;
         if (pipelines.isEmpty()) {
@@ -206,11 +285,12 @@ public final class ShaderPackRuntime {
             );
         } else {
             LOGGER.info(
-                "Activated {}/3 shader-pack terrain pipelines on {} for {}: {}",
+                "Activated {}/3 shader-pack terrain pipelines on {} for {}: {} draw targets {}",
                 pipelines.size(),
                 this.activeBackend.displayName(),
                 packName,
-                this.terrainProgramNames
+                this.terrainProgramNames,
+                this.terrainColorTargets
             );
         }
     }
@@ -222,7 +302,8 @@ public final class ShaderPackRuntime {
         final ShaderPackProgramResolver.TerrainProgram requested,
         final ShaderPackTerrainTransformer.AlphaMode alphaMode,
         final EnumMap<ChunkSectionLayer, RenderPipeline> pipelines,
-        final EnumMap<ChunkSectionLayer, String> programNames
+        final EnumMap<ChunkSectionLayer, String> programNames,
+        final EnumMap<ChunkSectionLayer, List<Integer>> colorTargets
     ) {
         Optional<ShaderPackProgramResolver.ResolvedProgram> resolved = resolver.resolve(requested);
         if (resolved.isEmpty()) {
@@ -253,6 +334,14 @@ public final class ShaderPackRuntime {
             return;
         }
 
+        if (transformed.colorTargets().size() > device.getDeviceInfo().limits().maxColorAttachments()) {
+            this.recordTerrainFailure(
+                program.resolvedName() + " requests " + transformed.colorTargets().size() + " color attachments; backend limit is "
+                    + device.getDeviceInfo().limits().maxColorAttachments()
+            );
+            return;
+        }
+
         Identifier shaderId = Identifier.fromNamespaceAndPath(
             "sigma",
             "shaderpack/terrain_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)
@@ -263,7 +352,7 @@ public final class ShaderPackRuntime {
             }
             return type == ShaderType.VERTEX ? transformed.vertexSource() : transformed.fragmentSource();
         };
-        RenderPipeline pipeline = this.createTerrainPipeline(layer, shaderId);
+        RenderPipeline pipeline = this.createTerrainPipeline(layer, shaderId, transformed.colorTargets());
         CompiledRenderPipeline compiled = device.precompilePipeline(pipeline, source);
         if (!compiled.isValid()) {
             this.recordTerrainFailure(this.activeBackend.displayName() + " rejected transformed " + program.resolvedName());
@@ -271,6 +360,7 @@ public final class ShaderPackRuntime {
         }
 
         pipelines.put(layer, pipeline);
+        colorTargets.put(layer, transformed.colorTargets());
         programNames.put(layer, program.direct() ? program.resolvedName() : requested.fileBase() + " -> " + program.resolvedName());
     }
 
@@ -297,7 +387,7 @@ public final class ShaderPackRuntime {
         return singleLine.length() <= 180 ? singleLine : singleLine.substring(0, 177) + "...";
     }
 
-    private RenderPipeline createTerrainPipeline(final ChunkSectionLayer layer, final Identifier shader) {
+    private RenderPipeline createTerrainPipeline(final ChunkSectionLayer layer, final Identifier shader, final List<Integer> colorTargets) {
         RenderPipeline.Builder builder = RenderPipeline.builder()
             .withLocation(Identifier.fromNamespaceAndPath("sigma", "pipeline/shader_terrain_" + layer.label() + "_" + Long.toUnsignedString(this.generation, 16)))
             .withBindGroupLayout(BindGroupLayouts.GLOBALS)
@@ -311,10 +401,12 @@ public final class ShaderPackRuntime {
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .withDepthStencilState(DepthStencilState.DEFAULT);
 
-        if (layer == ChunkSectionLayer.TRANSLUCENT) {
-            builder.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT));
+        ColorTargetState targetState = layer == ChunkSectionLayer.TRANSLUCENT
+            ? new ColorTargetState(BlendFunction.TRANSLUCENT)
+            : ColorTargetState.DEFAULT;
+        for (int location = 0; location < colorTargets.size(); location++) {
+            builder.withColorTargetState(location, targetState);
         }
-
         return builder.build();
     }
 }

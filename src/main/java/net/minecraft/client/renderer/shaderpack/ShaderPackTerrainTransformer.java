@@ -11,12 +11,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ShaderPackTerrainTransformer {
+    private static final int MAX_COLOR_TARGETS = 8;
     private static final Pattern VERSION = Pattern.compile("(?m)^[\\t ]*#\\s*version\\s+[^\\n]*$");
     private static final Pattern EXTENSION = Pattern.compile("(?m)^[\\t ]*#\\s*extension\\s+[^\\n]*$");
     private static final Pattern UNIFORM = Pattern.compile("\\buniform[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]*;");
     private static final Pattern VARYING = Pattern.compile("\\bvarying[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]*;");
     private static final Pattern VERTEX_INPUT = Pattern.compile("\\b(?:attribute|in)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]*;");
-    private static final Pattern FRAGMENT_OUTPUT = Pattern.compile("\\bout[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]*;");
+    private static final Pattern FRAGMENT_OUTPUT = Pattern.compile(
+        "(?m)^[\\t ]*(?:layout[\\t ]*\\([\\t ]*location[\\t ]*=[\\t ]*([0-9]+)[\\t ]*\\)[\\t ]*)?out[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]+([A-Za-z_][A-Za-z0-9_]*)[\\t ]*;"
+    );
     private static final Pattern MAIN = Pattern.compile("\\bvoid\\s+main\\s*\\(");
     private static final Pattern FRAG_DATA = Pattern.compile("\\bgl_FragData\\s*\\[\\s*([^]\\s]+)\\s*]");
     private static final Pattern DRAWBUFFERS = Pattern.compile("(?i)DRAWBUFFERS\\s*:\\s*([0-9]+)");
@@ -55,20 +58,20 @@ public final class ShaderPackTerrainTransformer {
 
         String rawVertex = normalize(vertexSource);
         String rawFragment = normalize(fragmentSource);
-        validateTargets(rawFragment);
+        List<Integer> colorTargets = parseColorTargets(rawFragment);
         BuiltIns builtIns = BuiltIns.detect(rawVertex, rawFragment);
         String vertex = transformStage(rawVertex, true, builtIns);
         String fragment = transformStage(rawFragment, false, builtIns);
-        FragmentOutput output = resolveOutput(fragment);
+        FragmentOutput output = resolveOutput(fragment, colorTargets);
         fragment = renameMain(output.source(), "sigma_pack_fragment_main")
-            + "\nvoid main(){ sigma_pack_fragment_main(); " + alphaMode.discard(output.name()) + " }\n";
+            + "\nvoid main(){ sigma_pack_fragment_main(); " + alphaMode.discard(output.primaryName()) + " }\n";
         vertex = renameMain(vertex, "sigma_pack_vertex_main") + builtIns.vertexWrapper();
 
         String vertexResult = assemble(vertex, VERTEX_HEADER + builtIns.vertexDeclarations());
         String fragmentResult = assemble(fragment, FRAGMENT_HEADER + builtIns.fragmentDeclarations());
         validateResult(vertexResult, true);
         validateResult(fragmentResult, false);
-        return new Result(vertexResult, fragmentResult);
+        return new Result(vertexResult, fragmentResult, colorTargets);
     }
 
     private static String transformStage(final String raw, final boolean vertexStage, final BuiltIns builtIns) {
@@ -116,8 +119,8 @@ public final class ShaderPackTerrainTransformer {
             source = replaceIdentifier(source, "gl_ModelViewProjectionMatrix", "(ProjMat * ModelViewMat)");
             source = replaceIdentifier(source, "gl_ModelViewMatrix", "ModelViewMat");
             source = replaceIdentifier(source, "gl_ProjectionMatrix", "ProjMat");
-            source = source.replaceAll("\\bgl_TextureMatrix\\s*\\[\\s*0\\s*]", "mat4(1.0)");
-            source = source.replaceAll("\\bgl_TextureMatrix\\s*\\[\\s*[12]\\s*]", Matcher.quoteReplacement(LIGHTMAP_MATRIX));
+            source = source.replaceAll("\\bgl_TextureMatrix\\s*\\[\\s*\\0\\s*\\]", "mat4(1.0)");
+            source = source.replaceAll("\\bgl_TextureMatrix\\s*\\[\\s*[12]\\s*\\]", Matcher.quoteReplacement(LIGHTMAP_MATRIX));
             source = replaceIdentifier(source, "gl_Vertex", TERRAIN_VERTEX);
             source = replaceIdentifier(source, "gl_Color", "Color");
             source = replaceIdentifier(source, "gl_MultiTexCoord0", "vec4(UV0,0,1)");
@@ -128,10 +131,10 @@ public final class ShaderPackTerrainTransformer {
             source = builtIns.replaceFragment(source);
         }
 
-        source = source.replaceAll("\\btexture2DLod\\b", "textureLod");
+        source = source.replaceAll("\\texture2DLod\\b", "textureLod");
         source = source.replaceAll("\\btexture2DProj\\b", "textureProj");
         source = source.replaceAll("\\btexture2DGrad\\b", "textureGrad");
-        source = source.replaceAll("\\btexture2D\\b", "texture");
+        source = source.replaceAll("\\texture2D\\b", "texture");
         return source;
     }
 
@@ -166,46 +169,138 @@ public final class ShaderPackTerrainTransformer {
         };
     }
 
-    private static FragmentOutput resolveOutput(String source) {
+    private static FragmentOutput resolveOutput(String source, final List<Integer> colorTargets) {
         String masked = maskComments(source);
+        Matcher outputMatcher = FRAGMENT_OUTPUT.matcher(masked);
+        String explicitOutput = null;
+        while (outputMatcher.find()) {
+            String location = outputMatcher.group(1);
+            String type = outputMatcher.group(2);
+            String name = outputMatcher.group(3);
+            if (!"vec4".equals(type)) {
+                throw new IllegalArgumentException("Terrain shader output must be vec4: " + type + " " + name);
+            }
+            if (colorTargets.size() != 1) {
+                throw new IllegalArgumentException("Explicit fragment outputs are not yet supported with multiple DRAWBUFFERS targets");
+            }
+            if (location != null && Integer.parseInt(location) != 0) {
+                throw new IllegalArgumentException("Single-target terrain output must use location 0");
+            }
+            if (explicitOutput != null && !explicitOutput.equals(name)) {
+                throw new IllegalArgumentException("Terrain shader declares more than one color output");
+            }
+            explicitOutput = name;
+        }
+
         Matcher fragData = FRAG_DATA.matcher(masked);
         while (fragData.find()) {
-            if (!"0".equals(fragData.group(1))) {
-                throw new IllegalArgumentException("Terrain shader writes gl_FragData[" + fragData.group(1) + "]; only target 0 is available");
+            int location = parseOutputLocation(fragData.group(1));
+            if (location >= colorTargets.size()) {
+                throw new IllegalArgumentException(
+                    "gl_FragData[" + location + "] has no matching DRAWBUFFERS/RENDERTARGETS entry"
+                );
             }
         }
-        Matcher outputs = FRAGMENT_OUTPUT.matcher(masked);
-        String outputName = null;
-        while (outputs.find()) {
-            if (!"vec4".equals(outputs.group(1)) || outputName != null) {
-                throw new IllegalArgumentException("Terrain shader must have at most one vec4 color output");
-            }
-            outputName = outputs.group(2);
+
+        if (colorTargets.size() == 1 && explicitOutput != null) {
+            source = replaceIdentifier(source, "gl_FragColor", explicitOutput);
+            source = replaceFragData(source, explicitOutput, 1);
+            return new FragmentOutput(source, explicitOutput);
         }
-        if (outputName == null) {
-            outputName = "sigmaFragColor";
-            source = "out vec4 sigmaFragColor;\n" + source;
+
+        StringBuilder declarations = new StringBuilder();
+        for (int location = 0; location < colorTargets.size(); location++) {
+            declarations.append("layout(location = ").append(location).append(") out vec4 sigmaFragColor").append(location).append(";\n");
         }
-        source = replaceIdentifier(source, "gl_FragColor", outputName);
-        source = source.replaceAll("\\bgl_FragData\\s*\\[\\s*0\\s*]", Matcher.quoteReplacement(outputName));
-        return new FragmentOutput(source, outputName);
+        source = declarations + source;
+        source = replaceIdentifier(source, "gl_FragColor", "sigmaFragColor0");
+        source = replaceFragData(source, null, colorTargets.size());
+        return new FragmentOutput(source, "sigmaFragColor0");
     }
 
-    private static void validateTargets(final String fragment) {
-        Matcher drawBuffers = DRAWBUFFERS.matcher(fragment);
-        while (drawBuffers.find()) {
-            if (!drawBuffers.group(1).chars().allMatch(c -> c == '0')) {
-                throw new IllegalArgumentException("Unsupported DRAWBUFFERS:" + drawBuffers.group(1));
+    private static String replaceFragData(final String source, final String singleOutput, final int attachmentCount) {
+        Matcher matcher = FRAGG_DATA.matcher(source);
+        StringBuffer result = new StringBuffer(source.length());
+        while (matcher.find()) {
+            int location = parseOutputLocation(matcher.group(1));
+            if (location >= attachmentCount) {
+                throw new IllegalArgumentException("gl_FragData[" + location + "] exceeds active color attachment count " + attachmentCount);
             }
+            String replacement = singleOutput == null ? "sigmaFragColor" + location : singleOutput;
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
-        Matcher renderTargets = RENDERTARGETS.matcher(fragment);
-        while (renderTargets.find()) {
-            for (String target : renderTargets.group(1).split(",")) {
-                if (!target.isBlank() && !"0".equals(target.strip())) {
-                    throw new IllegalArgumentException("Unsupported RENDERTARGETS:" + renderTargets.group(1).strip());
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private static int parseOutputLocation(final String value) {
+        try {
+            int location = Integer.parseInt(value);
+            if (location < 0 || location >= MAX_COLOR_TARGETS) {
+                throw new IllegalArgumentException("Fragment output location out of range: " + value);
+            }
+            return location;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Dynamic gl_FragData indices are not supported: " + value, exception);
+        }
+    }
+
+    private static List<Integer> parseColorTargets(final String fragment) {
+        Matcher drawMatcher = DRAWBUFFERS.matcher(fragment);
+        String drawValue = null;
+        int drawPosition = -1;
+        while (drawMatcher.find()) {
+            drawValue = drawMatcher.group(1);
+            drawPosition = drawMatcher.start();
+        }
+
+        Matcher renderMatcher = RENDERTARGETS.matcher(fragment);
+        String renderValue = null;
+        int renderPosition = -1;
+        while (renderMatcher.find()) {
+            renderValue = renderMatcher.group(1);
+            renderPosition = renderMatcher.start();
+        }
+
+        List<Integer> targets = new ArrayList<>();
+        if (drawPosition < 0 && renderPosition < 0) {
+            targets.add(0);
+        } else if (drawPosition > renderPosition) {
+            for (int index = 0; index < drawValue.length(); index++) {
+                targets.add(Character.digit(drawValue.charAt(index), 10));
+            }
+        } else {
+            for (String target : renderValue.split(",")) {
+                if (!target.isBlank()) {
+                    try {
+                        targets.add(Integer.parseInt(target.strip()));
+                    } catch (NumberFormatException exception) {
+                        throw new IllegalArgumentException("Invalid RENDERTARGETS entry: " + target, exception);
+                    }
                 }
             }
         }
+
+        if (targets.isEmpty()) {
+            throw new IllegalArgumentException("Terrain program declares no color targets");
+        }
+        if (targets.size() > MAX_COLOR_TARGETS) {
+            throw new IllegalArgumentException("Terrain program requests more than " + MAX_COLOR_TARGETS + " color attachments");
+        }
+        if (targets.getFirst() != 0) {
+            throw new IllegalArgumentException("Current terrain MRT subset requires colortex0 as the first draw buffer");
+        }
+
+        Set<Integer> unique = new HashSet<>();
+        for (int target : targets) {
+            if (target < 0 || target >= MAX_COLOR_TARGETS) {
+                throw new IllegalArgumentException("Unsupported colortex target " + target + "; supported range is 0-7");
+            }
+            if (!unique.add(target)) {
+                throw new IllegalArgumentException("Duplicate colortex target " + target + " in draw-buffer list");
+            }
+        }
+        return List.copyOf(targets);
     }
 
     private static String assemble(final String source, final String header) {
@@ -223,7 +318,7 @@ public final class ShaderPackTerrainTransformer {
         if (Pattern.compile("\\battribute\\b").matcher(masked).find()) {
             throw new IllegalArgumentException("Legacy attribute remains after terrain transformation");
         }
-        if (Pattern.compile("\\b(?:texture1D|texture2D|texture3D|textureCube)\\b").matcher(masked).find()) {
+        if (Pattern.compile("\\b(?:texture1D|texture2D_texture3D|textureCube)\\b").matcher(masked).find()) {
             throw new IllegalArgumentException("Legacy texture function remains after terrain transformation");
         }
         Matcher gl = Pattern.compile("\\bgl_[A-Za-z_][A-Za-z0-9_]*\\b").matcher(masked);
@@ -249,9 +344,7 @@ public final class ShaderPackTerrainTransformer {
 
     private static String replaceMappedIdentifier(final String source, final String identifier, final String replacement) {
         if ("texture".equals(identifier)) {
-            return Pattern.compile("\\btexture\\b(?!\\s*\\()")
-                .matcher(source)
-                .replaceAll(Matcher.quoteReplacement(replacement));
+            return Pattern.compile("\\btexture\\b(?!\\s*\\()").matcher(source).replaceAll(Matcher.quoteReplacement(replacement));
         }
         return replaceIdentifier(source, identifier, replacement);
     }
@@ -306,13 +399,13 @@ public final class ShaderPackTerrainTransformer {
         }
     }
 
-    public record Result(String vertexSource, String fragmentSource) {
+    public record Result(String vertexSource, String fragmentSource, List<Integer> colorTargets) {
     }
 
     private record Edit(int start, int end, String replacement) {
     }
 
-    private record FragmentOutput(String source, String name) {
+    private record FragmentOutput(String source, String primaryName) {
     }
 
     private static final class BuiltIns {

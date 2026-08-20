@@ -4,7 +4,9 @@ import com.mojang.blaze3d.IndexType;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
@@ -37,7 +39,60 @@ public record ChunkSectionsToRender(
         Minecraft minecraft = Minecraft.getInstance();
         boolean wireframe = SharedConstants.DEBUG_HOTKEYS && minecraft.wireframe;
         RenderTarget renderTarget = group.outputTarget();
+        EnumMap<ChunkSectionLayer, RenderPipeline> pipelines = new EnumMap<>(ChunkSectionLayer.class);
+        boolean requiresSeparatePasses = false;
 
+        for (ChunkSectionLayer layer : layers) {
+            RenderPipeline pipeline = wireframe ? RenderPipelines.WIREFRAME : ShaderPackRuntime.terrainPipeline(layer);
+            pipelines.put(layer, pipeline);
+            if (!wireframe && ShaderPackRuntime.terrainColorAttachmentCount(layer) > 1) {
+                requiresSeparatePasses = true;
+            }
+        }
+
+        if (!requiresSeparatePasses) {
+            this.renderCombinedGroup(
+                group,
+                layers,
+                renderTarget,
+                sampler,
+                minecraft,
+                pipelines,
+                defaultIndexBuffer,
+                defaultIndexType
+            );
+            return;
+        }
+
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        for (ChunkSectionLayer layer : layers) {
+            Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>> drawGroup = this.drawGroupsPerLayer.get(layer);
+            if (drawGroup == null || drawGroup.isEmpty()) {
+                continue;
+            }
+
+            try (RenderPass renderPass = encoder.createRenderPass(
+                    ShaderPackRuntime.terrainPassDescriptor(encoder, layer, renderTarget, () -> "Section layer " + layer.label())
+                )) {
+                RenderSystem.bindDefaultUniforms(renderPass);
+                renderPass.bindTexture("Sampler0", this.textureView, sampler);
+                renderPass.bindTexture("Sampler2", minecraft.gameRenderer.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+                renderPass.setPipeline(pipelines.get(layer));
+                this.drawLayer(renderPass, layer, drawGroup, defaultIndexBuffer, defaultIndexType);
+            }
+        }
+    }
+
+    private void renderCombinedGroup(
+        final ChunkSectionLayerGroup group,
+        final ChunkSectionLayer[] layers,
+        final RenderTarget renderTarget,
+        final GpuSampler sampler,
+        final Minecraft minecraft,
+        final EnumMap<ChunkSectionLayer, RenderPipeline> pipelines,
+        final GpuBuffer defaultIndexBuffer,
+        final IndexType defaultIndexType
+    ) {
         try (RenderPass renderPass = RenderSystem.getDevice()
                 .createCommandEncoder()
                 .createRenderPass(
@@ -52,18 +107,30 @@ public record ChunkSectionsToRender(
             renderPass.bindTexture("Sampler2", minecraft.gameRenderer.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
 
             for (ChunkSectionLayer layer : layers) {
-                renderPass.setPipeline(wireframe ? RenderPipelines.WIREFRAME : ShaderPackRuntime.terrainPipeline(layer));
                 Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>> drawGroup = this.drawGroupsPerLayer.get(layer);
-
-                for (List<RenderPass.Draw<GpuBufferSlice[]>> draws : drawGroup.values()) {
-                    if (!draws.isEmpty()) {
-                        if (layer == ChunkSectionLayer.TRANSLUCENT) {
-                            draws = draws.reversed();
-                        }
-
-                        renderPass.drawMultipleIndexed(draws, defaultIndexBuffer, defaultIndexType, List.of("ChunkSection"), this.chunkSectionInfos);
-                    }
+                if (drawGroup == null || drawGroup.isEmpty()) {
+                    continue;
                 }
+                renderPass.setPipeline(pipelines.get(layer));
+                this.drawLayer(renderPass, layer, drawGroup, defaultIndexBuffer, defaultIndexType);
+            }
+        }
+    }
+
+    private void drawLayer(
+        final RenderPass renderPass,
+        final ChunkSectionLayer layer,
+        final Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>> drawGroup,
+        final GpuBuffer defaultIndexBuffer,
+        final IndexType defaultIndexType
+    ) {
+        for (List<RenderPass.Draw<GpuBufferSlice[]>> draws : drawGroup.values()) {
+            if (!draws.isEmpty()) {
+                if (layer == ChunkSectionLayer.TRANSLUCENT) {
+                    draws = draws.reversed();
+                }
+
+                renderPass.drawMultipleIndexed(draws, defaultIndexBuffer, defaultIndexType, List.of("ChunkSection"), this.chunkSectionInfos);
             }
         }
     }
