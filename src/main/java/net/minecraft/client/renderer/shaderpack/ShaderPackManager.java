@@ -95,6 +95,20 @@ public final class ShaderPackManager {
         }
     }
 
+    Optional<ShaderPackDirectives> inspectDirectives(final String packName) {
+        Optional<Path> packPath = this.resolvePackPath(packName);
+        if (packPath.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try (ShaderPackSource source = ShaderPackSource.open(packPath.get())) {
+            return Optional.of(ShaderPackDirectives.parse(source));
+        } catch (IOException exception) {
+            LOGGER.warn("Failed to inspect shader directives in {}", packPath.get(), exception);
+            return Optional.empty();
+        }
+    }
+
     public Optional<String> preprocessShader(final String packName, final String shaderPath) {
         Optional<Path> packPath = this.resolvePackPath(packName);
         if (packPath.isEmpty()) {
