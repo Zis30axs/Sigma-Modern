@@ -185,10 +185,6 @@ final class ShaderPackCompositePasses {
                 this.fail(program.name() + ": " + safeMessage(exception), exception);
                 return;
             }
-            if (transformed.depthSamplers().contains(1)) {
-                this.fail(program.name() + " requests depthtex1; pre-translucent depth snapshots are not enabled in this milestone", null);
-                return;
-            }
             if (transformed.colorTargets().size() > device.getDeviceInfo().limits().maxColorAttachments()) {
                 this.fail(
                     program.name() + " requests " + transformed.colorTargets().size() + " color attachments; backend limit is "
@@ -224,11 +220,12 @@ final class ShaderPackCompositePasses {
         this.requiredDepthSamplers = Set.copyOf(depthSamplers);
         this.ready = true;
         LOGGER.info(
-            "Enabled {} shader-pack composite passes on {} for {} with color targets {}",
+            "Enabled {} shader-pack composite passes on {} for {} with color targets {} and depth samplers {}",
             this.passes.size(),
             this.backend.displayName(),
             this.packName,
-            this.requiredColorTargets
+            this.requiredColorTargets,
+            this.requiredDepthSamplers
         );
     }
 
