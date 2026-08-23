@@ -30,6 +30,15 @@ import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import javax.crypto.Cipher;
+import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viafabricplus.injection.access.core.ILocalSampleLogger;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.connection.UserConnection;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viaversion.platform.ViaChannelInitializer;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
+import net.raphimc.vialegacy.netty.PreNettyLengthPrepender;
+import net.raphimc.vialegacy.netty.PreNettyLengthRemover;
 import net.minecraft.SharedConstants;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.BundlerInfo;
@@ -55,7 +64,11 @@ import org.slf4j.Logger;
 import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
 
-public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+public class Connection extends SimpleChannelInboundHandler<Packet<?>> implements IConnection {
+    // MODIFIED for porting: was VFP MixinConnection @Unique fields
+    private UserConnection viaFabricPlus$userConnection;
+    private ProtocolVersion viaFabricPlus$serverVersion;
+    private Cipher viaFabricPlus$decryptionCipher;
     private static final float AVERAGE_PACKETS_SMOOTHING = 0.75F;
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final Marker ROOT_MARKER = MarkerFactory.getMarker("NETWORK");
@@ -416,7 +429,11 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
         final InetSocketAddress address, final EventLoopGroupHolder eventLoopGroupHolder, final @Nullable LocalSampleLogger bandwidthLogger
     ) {
         Connection connection = new Connection(PacketFlow.CLIENTBOUND);
-        if (bandwidthLogger != null) {
+        // MODIFIED for porting: was VFP MixinConnection setTargetVersion(@Inject INVOKE) + dontSetPerformanceLog(@WrapWithCondition)
+        // - the bandwidth logger doubles as carrier for a forced target version
+        if (bandwidthLogger instanceof ILocalSampleLogger localSampleLogger && localSampleLogger.viaFabricPlus$getForcedVersion() != null) {
+            ((IConnection) connection).viaFabricPlus$setTargetVersion(localSampleLogger.viaFabricPlus$getForcedVersion());
+        } else if (bandwidthLogger != null) {
             connection.setBandwidthLogger(bandwidthLogger);
         }
 
@@ -426,6 +443,15 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
     }
 
     public static ChannelFuture connect(final InetSocketAddress address, final EventLoopGroupHolder eventLoopGroupHolder, final Connection connection) {
+        // MODIFIED for porting: resolve target protocol version (was VFP MixinConnection#setTargetVersion @Inject HEAD)
+        ProtocolVersion targetVersion = ((IConnection) connection).viaFabricPlus$getTargetVersion();
+        if (targetVersion == null) {
+            targetVersion = ProtocolTranslator.getTargetVersion();
+        }
+        if (targetVersion == ProtocolTranslator.AUTO_DETECT_PROTOCOL) {
+            targetVersion = ProtocolTranslator.NATIVE_VERSION;
+        }
+        ((IConnection) connection).viaFabricPlus$setTargetVersion(targetVersion);
         return new Bootstrap().group(eventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
             @Override
             protected void initChannel(final Channel channel) {
@@ -516,8 +542,47 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
     }
 
     public void setEncryptionKey(final Cipher decryptCipher, final Cipher encryptCipher) {
+        // MODIFIED for porting: legacy <=1.6.4 handling (was VFP MixinConnection#storeDecryptionCipher @Inject cancellable)
+        final ProtocolVersion viaTargetVersion = this.viaFabricPlus$getTargetVersion();
+        if (viaTargetVersion != null && viaTargetVersion.olderThanOrEqualTo(LegacyProtocolVersion.r1_6_4)) {
+            this.viaFabricPlus$decryptionCipher = decryptCipher;
+            if (encryptCipher == null) {
+                throw new IllegalStateException("Encryption cipher is null");
+            }
+            this.channel.pipeline().addBefore(PreNettyLengthRemover.NAME, HandlerNames.ENCRYPT, new CipherEncoder(encryptCipher));
+            return;
+        }
+
         this.channel.pipeline().addBefore("splitter", "decrypt", new CipherDecoder(decryptCipher));
         this.channel.pipeline().addBefore("prepender", "encrypt", new CipherEncoder(encryptCipher));
+    }
+
+    @Override
+    public void viaFabricPlus$setupPreNettyDecryption() {
+        if (this.viaFabricPlus$decryptionCipher == null) {
+            throw new IllegalStateException("Decryption cipher is null");
+        }
+        this.channel.pipeline().addBefore(PreNettyLengthPrepender.NAME, HandlerNames.DECRYPT, new CipherDecoder(this.viaFabricPlus$decryptionCipher));
+    }
+
+    @Override
+    public UserConnection viaFabricPlus$getUserConnection() {
+        return this.viaFabricPlus$userConnection;
+    }
+
+    @Override
+    public void viaFabricPlus$setUserConnection(final UserConnection connection) {
+        this.viaFabricPlus$userConnection = connection;
+    }
+
+    @Override
+    public ProtocolVersion viaFabricPlus$getTargetVersion() {
+        return this.viaFabricPlus$serverVersion;
+    }
+
+    @Override
+    public void viaFabricPlus$setTargetVersion(final ProtocolVersion serverVersion) {
+        this.viaFabricPlus$serverVersion = serverVersion;
     }
 
     public boolean isConnected() {
@@ -564,6 +629,9 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
                 this.channel.pipeline().remove("compress");
             }
         }
+
+        // MODIFIED for porting: compression enabled and handlers placed, keep Via handlers ordered (was VFP MixinConnection#reorderCompression)
+        ViaChannelInitializer.reorderPipeline(this.channel.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
     }
 
     public void handleDisconnection() {

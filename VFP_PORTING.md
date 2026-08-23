@@ -42,5 +42,6 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
 - [ ] D 收尾：删除临时桩、更新 README、提交推送
 
 ## 运行记录
+- Round3：B 阶段开批。core/connection 首批完成：Connection.java 全量移植(IConnection 实现/字段/setupCompression 重排序/setEncryptionKey <=1.6.4 分支/connectToServer 强制版本/connect 版本解析/viaFabricPlus 访问器组)；LocalSampleLogger 实现 ILocalSampleLogger(forcedVersion)。下一批：ClientHandshakePacketListenerImpl、Connection_1、MixinMinecraft(core)、ServerStatusPinger 组。
 - Round2：A 阶段全部完成。访问拓宽器脚本化应用 viafabricplus.accesswidener(33 文件)；net.fabricmc shim 15 文件落地；ViaFabricPlusImpl 元数据/入口点两处移植点编辑；ViaFabricPlusMixinPlugin 去 IMixinConfigPlugin 化；ModMenuScreenFactory 删除(modmenu 缺席且无引用)。
 - Round1(本回合)：完成盘点与本文件；下一步 A1。

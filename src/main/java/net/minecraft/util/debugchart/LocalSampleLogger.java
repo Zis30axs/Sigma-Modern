@@ -1,10 +1,25 @@
 package net.minecraft.util.debugchart;
 
-public class LocalSampleLogger extends AbstractSampleLogger implements SampleStorage {
+import com.viaversion.viafabricplus.injection.access.core.ILocalSampleLogger;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+
+public class LocalSampleLogger extends AbstractSampleLogger implements SampleStorage, com.viaversion.viafabricplus.injection.access.core.ILocalSampleLogger {
     public static final int CAPACITY = 240;
     private final long[][] samples;
     private int start;
     private int size;
+    // MODIFIED for porting: was VFP MixinLocalSampleLogger @Unique field
+    private ProtocolVersion viaFabricPlus$forcedVersion;
+
+    @Override
+    public ProtocolVersion viaFabricPlus$getForcedVersion() {
+        return this.viaFabricPlus$forcedVersion;
+    }
+
+    @Override
+    public void viaFabricPlus$setForcedVersion(final ProtocolVersion version) {
+        this.viaFabricPlus$forcedVersion = version;
+    }
 
     public LocalSampleLogger(final int dimensions) {
         this(dimensions, new long[dimensions]);
