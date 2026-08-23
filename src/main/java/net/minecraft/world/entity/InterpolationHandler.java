@@ -11,7 +11,7 @@ public class InterpolationHandler {
     public static final int DEFAULT_INTERPOLATION_STEPS = 3;
     private final Entity entity;
     private int interpolationSteps;
-    private final InterpolationHandler.InterpolationData interpolationData = new InterpolationHandler.InterpolationData(0, Vec3.ZERO, 0.0F, 0.0F);
+    public final InterpolationHandler.InterpolationData interpolationData = new InterpolationHandler.InterpolationData(0, Vec3.ZERO, 0.0F, 0.0F);
     private @Nullable Vec3 previousTickPosition;
     private @Nullable Vec2 previousTickRot;
     private final @Nullable Consumer<InterpolationHandler> onInterpolationStart;
@@ -114,11 +114,11 @@ public class InterpolationHandler {
         this.previousTickRot = null;
     }
 
-    private static class InterpolationData {
-        protected int steps;
-        private Vec3 position;
-        private float yRot;
-        private float xRot;
+    public static class InterpolationData {
+        public int steps;
+        public Vec3 position;
+        public float yRot;
+        public float xRot;
 
         private InterpolationData(final int steps, final Vec3 position, final float yRot, final float xRot) {
             this.steps = steps;

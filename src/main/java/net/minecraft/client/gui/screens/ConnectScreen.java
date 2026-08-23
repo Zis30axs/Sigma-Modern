@@ -204,7 +204,7 @@ public class ConnectScreen extends Screen {
         thread.start();
     }
 
-    private void updateStatus(final Component status) {
+    public void updateStatus(final Component status) {
         this.status = status;
     }
 

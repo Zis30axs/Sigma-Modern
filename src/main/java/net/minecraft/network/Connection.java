@@ -65,8 +65,8 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
     private static final ProtocolInfo<ServerHandshakePacketListener> INITIAL_PROTOCOL = HandshakeProtocols.SERVERBOUND;
     private final PacketFlow receiving;
     private volatile boolean sendLoginDisconnect = true;
-    private final Queue<Consumer<Connection>> pendingActions = Queues.newConcurrentLinkedQueue();
-    private Channel channel;
+    public final Queue<Consumer<Connection>> pendingActions = Queues.newConcurrentLinkedQueue();
+    public Channel channel;
     private SocketAddress address;
     private volatile @Nullable PacketListener disconnectListener;
     private volatile @Nullable PacketListener packetListener;
@@ -79,7 +79,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
     private int tickCount;
     private boolean handlingFault;
     private volatile @Nullable DisconnectionDetails delayedDisconnect;
-    private @Nullable BandwidthDebugMonitor bandwidthDebugMonitor;
+    public @Nullable BandwidthDebugMonitor bandwidthDebugMonitor;
     private @Nullable UUID intendedProfileId;
 
     public Connection(final PacketFlow receiving) {

@@ -496,7 +496,7 @@ public abstract class Entity
         return Mth.lengthSquared(dx, dz) < Mth.square(distanceXZ) && Mth.square(dy) < Mth.square(distanceY);
     }
 
-    protected void setRot(final float yRot, final float xRot) {
+    public void setRot(final float yRot, final float xRot) {
         this.setYRot(yRot % 360.0F);
         this.setXRot(xRot % 360.0F);
     }
@@ -2723,7 +2723,7 @@ public abstract class Entity
         return this.getInterpolation() != null && this.getInterpolation().hasActiveInterpolation();
     }
 
-    public final void moveOrInterpolateTo(final Vec3 position, final float yRot, final float xRot) {
+    public void moveOrInterpolateTo(final Vec3 position, final float yRot, final float xRot) {
         this.moveOrInterpolateTo(Optional.of(position), Optional.of(yRot), Optional.of(xRot));
     }
 

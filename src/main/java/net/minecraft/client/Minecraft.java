@@ -314,7 +314,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     private final @Nullable TracyFrameCapture tracyFrameCapture;
     private final SoundManager soundManager;
     private final MusicManager musicManager;
-    private final FontManager fontManager;
+    public final FontManager fontManager;
     private final GpuWarnlistManager gpuWarnlistManager;
     private final PeriodicNotificationManager regionalCompliancies = new PeriodicNotificationManager(REGIONAL_COMPLIANCIES, Minecraft::countryEqualsISO3);
     private final UserApiService userApiService;

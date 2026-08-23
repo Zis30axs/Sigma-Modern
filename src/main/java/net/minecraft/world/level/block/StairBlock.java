@@ -128,7 +128,7 @@ public class StairBlock extends Block implements SimpleWaterloggedBlock {
             : super.updateShape(state, level, ticks, pos, directionToNeighbour, neighbourPos, neighbourState, random);
     }
 
-    private static StairsShape getStairsShape(final BlockState state, final BlockGetter level, final BlockPos pos) {
+    public static StairsShape getStairsShape(final BlockState state, final BlockGetter level, final BlockPos pos) {
         Direction facing = state.getValue(FACING);
         BlockState behindState = level.getBlockState(pos.relative(facing));
         if (isStairs(behindState) && state.getValue(HALF) == behindState.getValue(HALF)) {

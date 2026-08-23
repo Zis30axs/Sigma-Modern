@@ -11,7 +11,7 @@ public class ServerNameResolver {
         ServerAddressResolver.SYSTEM, ServerRedirectHandler.createDnsSrvRedirectHandler(), AddressCheck.createFromService()
     );
     private final ServerAddressResolver resolver;
-    private final ServerRedirectHandler redirectHandler;
+    public final ServerRedirectHandler redirectHandler;
     private final AddressCheck addressCheck;
 
     @VisibleForTesting

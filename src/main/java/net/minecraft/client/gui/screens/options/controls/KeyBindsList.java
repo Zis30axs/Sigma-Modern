@@ -103,7 +103,7 @@ public class KeyBindsList extends ContainerObjectSelectionList<KeyBindsList.Entr
 
     @OnlyIn(Dist.CLIENT)
     public class KeyEntry extends KeyBindsList.Entry {
-        private static final Component RESET_BUTTON_TITLE = Component.translatable("controls.reset");
+        public static final Component RESET_BUTTON_TITLE = Component.translatable("controls.reset");
         private static final int PADDING = 10;
         private final KeyMapping key;
         private final Component name;

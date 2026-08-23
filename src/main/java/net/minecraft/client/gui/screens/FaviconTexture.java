@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
 public class FaviconTexture implements AutoCloseable {
-    private static final Identifier MISSING_LOCATION = Identifier.withDefaultNamespace("textures/misc/unknown_server.png");
+    public static final Identifier MISSING_LOCATION = Identifier.withDefaultNamespace("textures/misc/unknown_server.png");
     private static final int WIDTH = 64;
     private static final int HEIGHT = 64;
     private final TextureManager textureManager;

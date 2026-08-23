@@ -282,7 +282,7 @@ public class FireBlock extends BaseFireBlock {
     }
 
     @Override
-    protected boolean canBurn(final BlockState state) {
+    public boolean canBurn(final BlockState state) {
         return this.getIgniteOdds(state) > 0;
     }
 

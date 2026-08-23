@@ -62,7 +62,7 @@ public class FontManager implements AutoCloseable, PreparableReloadListener {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private final FontSet missingFontSet;
     private final List<GlyphProvider> providersToClose = new ArrayList<>();
-    private final Map<Identifier, FontSet> fontSets = new HashMap<>();
+    public final Map<Identifier, FontSet> fontSets = new HashMap<>();
     private final TextureManager textureManager;
     private final FontManager.CachedFontProvider anyGlyphs = new FontManager.CachedFontProvider(false);
     private final FontManager.CachedFontProvider nonFishyGlyphs = new FontManager.CachedFontProvider(true);

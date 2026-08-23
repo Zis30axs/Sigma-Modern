@@ -503,7 +503,7 @@ public class EditBox extends AbstractWidget {
         }
     }
 
-    private int getMaxLength() {
+    public int getMaxLength() {
         return this.maxLength;
     }
 

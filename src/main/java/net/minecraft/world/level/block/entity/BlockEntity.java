@@ -182,7 +182,7 @@ public abstract class BlockEntity implements DebugValueSource, TypedInstance<Blo
         output.store("id", TYPE_CODEC, type);
     }
 
-    private void saveMetadata(final ValueOutput output) {
+    public void saveMetadata(final ValueOutput output) {
         this.saveId(output);
         output.putInt("x", this.worldPosition.getX());
         output.putInt("y", this.worldPosition.getY());

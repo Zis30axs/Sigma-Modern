@@ -58,7 +58,7 @@ public class NetherWartBlock extends VegetationBlock {
     }
 
     @Override
-    protected ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
+    public ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
         return new ItemStack(Items.NETHER_WART);
     }
 

@@ -329,7 +329,7 @@ public class BeehiveBlock extends BaseEntityBlock {
     }
 
     @Override
-    protected ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
+    public ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
         ItemStack itemStack = super.getCloneItemStack(level, pos, state, includeData);
         if (includeData) {
             itemStack.set(DataComponents.BLOCK_STATE, BlockItemStateProperties.EMPTY.with(HONEY_LEVEL, state.getValue(HONEY_LEVEL)));

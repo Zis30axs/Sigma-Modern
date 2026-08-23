@@ -12,7 +12,7 @@ public class GameMasterBlockItem extends BlockItem {
     }
 
     @Override
-    protected @Nullable BlockState getPlacementState(final BlockPlaceContext context) {
+    public @Nullable BlockState getPlacementState(final BlockPlaceContext context) {
         Player player = context.getPlayer();
         return player != null && !player.canUseGameMasterBlocks() ? null : super.getPlacementState(context);
     }

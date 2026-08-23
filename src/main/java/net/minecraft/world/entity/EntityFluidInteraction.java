@@ -150,7 +150,7 @@ public class EntityFluidInteraction {
         return tracker != null && tracker.eyesInside;
     }
 
-    private static class Tracker {
+    static class Tracker {
         private double height;
         private boolean eyesInside;
         private Vec3 accumulatedCurrent = Vec3.ZERO;

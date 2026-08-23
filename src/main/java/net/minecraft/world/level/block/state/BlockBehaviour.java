@@ -95,7 +95,7 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
     protected final boolean isRandomlyTicking;
     protected final SoundType soundType;
     protected final float friction;
-    protected final float speedFactor;
+    public final float speedFactor;
     protected final float jumpFactor;
     protected final float bounceRestitution;
     protected final boolean dynamicShape;
@@ -419,7 +419,7 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
         return this.soundType;
     }
 
-    protected ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
+    public ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
         return new ItemStack(this.asItem());
     }
 
@@ -1093,7 +1093,7 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
         private boolean requiresCorrectToolForDrops;
         private boolean isRandomlyTicking;
         private float friction = 0.6F;
-        private float speedFactor = 1.0F;
+        public float speedFactor = 1.0F;
         private float jumpFactor = 1.0F;
         private float bounceRestitution;
         private @Nullable ResourceKey<Block> id;

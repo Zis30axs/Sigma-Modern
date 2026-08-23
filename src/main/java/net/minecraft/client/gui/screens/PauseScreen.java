@@ -70,7 +70,7 @@ public class PauseScreen extends Screen {
     private final Runnable friendListUpdateListener = this::onFriendListUpdate;
     private @Nullable FriendsButton friends;
     private final boolean showPauseMenu;
-    private @Nullable Button disconnectButton;
+    public @Nullable Button disconnectButton;
 
     public PauseScreen(final boolean showPauseMenu) {
         super(showPauseMenu ? GAME : PAUSED);

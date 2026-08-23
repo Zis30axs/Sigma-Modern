@@ -59,7 +59,7 @@ public class FontSet implements AutoCloseable {
     private List<GlyphProvider.Conditional> allProviders = List.of();
     private List<GlyphProvider> activeProviders = List.of();
     private final Int2ObjectMap<IntList> glyphsByWidth = new Int2ObjectOpenHashMap<>();
-    private final CodepointMap<FontSet.SelectedGlyphs> glyphCache = new CodepointMap<>(FontSet.SelectedGlyphs[]::new, FontSet.SelectedGlyphs[][]::new);
+    public final CodepointMap<FontSet.SelectedGlyphs> glyphCache = new CodepointMap<>(FontSet.SelectedGlyphs[]::new, FontSet.SelectedGlyphs[][]::new);
     private final IntFunction<FontSet.SelectedGlyphs> glyphGetter = this::computeGlyphInfo;
     private BakedGlyph missingGlyph = INVISIBLE_MISSING_GLYPH;
     private final Supplier<BakedGlyph> missingGlyphGetter = () -> this.missingGlyph;
@@ -192,7 +192,7 @@ public class FontSet implements AutoCloseable {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record SelectedGlyphs(Supplier<BakedGlyph> any, Supplier<BakedGlyph> nonFishy) {
+    public record SelectedGlyphs(Supplier<BakedGlyph> any, Supplier<BakedGlyph> nonFishy) {
         private Supplier<BakedGlyph> select(final boolean filterFishy) {
             return filterFishy ? this.nonFishy : this.any;
         }

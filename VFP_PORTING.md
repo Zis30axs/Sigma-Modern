@@ -30,11 +30,11 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
   registry sync 内部类: ClientRegistrySyncHandler, RegistrySyncPayload, RegistrySyncManager
 
 ## 阶段计划
-- [ ] A1 pom 增加 repos+deps 并在线验证解析
-- [ ] A2 复制非 mixin 主源码 + api + visuals 到 sigma src
-- [ ] A3 复制资源(assets 等)；fabric.mod.json 仅留档不生效
-- [ ] A4 内嵌 net.fabricmc 最小 API 实现(16 个面)
-- [ ] A5 编译迭代清零(不含 mixin 包时)
+- [x] A1 pom 增加 repos+deps 并在线验证解析
+- [x] A2 复制非 mixin 主源码 + api + visuals（injection/mixin 目录暂缓，逐批转换）
+- [x] A3 复制资源(assets 等)；fabric.mod.json 仅留档不生效
+- [x] A4 内嵌 net.fabricmc 最小 API 实现(15 个文件；registry-sync 三件套无需 shim)
+- [x] A5 编译迭代清零(不含 mixin 包时) ✔ 2026-08-23
 - [ ] B1..Bn mixin 分批转换(按子系统)，每批保持编译绿：
       injection/mixin 内按目录分组逐批；每批完成后提交
 - [ ] C1 入口点接线(Main/Minecraft bootstrap 调用链)
@@ -42,4 +42,5 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
 - [ ] D 收尾：删除临时桩、更新 README、提交推送
 
 ## 运行记录
+- Round2：A 阶段全部完成。访问拓宽器脚本化应用 viafabricplus.accesswidener(33 文件)；net.fabricmc shim 15 文件落地；ViaFabricPlusImpl 元数据/入口点两处移植点编辑；ViaFabricPlusMixinPlugin 去 IMixinConfigPlugin 化；ModMenuScreenFactory 删除(modmenu 缺席且无引用)。
 - Round1(本回合)：完成盘点与本文件；下一步 A1。

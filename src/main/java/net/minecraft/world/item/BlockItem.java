@@ -112,7 +112,7 @@ public class BlockItem extends Item {
         return updateCustomBlockEntityTag(level, player, pos, itemStack);
     }
 
-    protected @Nullable BlockState getPlacementState(final BlockPlaceContext context) {
+    public @Nullable BlockState getPlacementState(final BlockPlaceContext context) {
         BlockState stateForPlacement = this.getBlock().getStateForPlacement(context);
         return stateForPlacement != null && this.canPlace(context, stateForPlacement) ? stateForPlacement : null;
     }

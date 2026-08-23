@@ -119,7 +119,7 @@ public class TestBlock extends BaseEntityBlock implements GameMasterBlock {
     }
 
     @Override
-    protected ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
+    public ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
         ItemStack itemStack = super.getCloneItemStack(level, pos, state, includeData);
         return setModeOnStack(itemStack, state.getValue(MODE));
     }

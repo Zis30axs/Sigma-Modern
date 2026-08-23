@@ -23,7 +23,7 @@ import org.slf4j.Logger;
 @OnlyIn(Dist.CLIENT)
 public class ClientLanguage extends Language {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private final Map<String, String> storage;
+    public final Map<String, String> storage;
     private final boolean defaultRightToLeft;
 
     private ClientLanguage(final Map<String, String> storage, final boolean defaultRightToLeft) {

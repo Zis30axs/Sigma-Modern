@@ -516,7 +516,7 @@ public class Camel extends AbstractHorse {
         return this.isBaby() ? 0.6F : 1.0F;
     }
 
-    private double getBodyAnchorAnimationYOffset(final boolean isFront, final float partialTicks, final EntityDimensions dimensions, final float scale) {
+    public double getBodyAnchorAnimationYOffset(final boolean isFront, final float partialTicks, final EntityDimensions dimensions, final float scale) {
         double ageSitYOffset = this.isBaby() ? 0.09375 : 0.375;
         double baseSitOffset = dimensions.height() - ageSitYOffset;
         float sittingHeightDifference = scale * 1.43F;

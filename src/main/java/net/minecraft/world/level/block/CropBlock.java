@@ -171,7 +171,7 @@ public class CropBlock extends VegetationBlock implements BonemealableBlock {
     }
 
     @Override
-    protected ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
+    public ItemStack getCloneItemStack(final LevelReader level, final BlockPos pos, final BlockState state, final boolean includeData) {
         return new ItemStack(this.getBaseSeedId());
     }
 

@@ -41,6 +41,6 @@ public class GameTestBlockHighlightRenderer {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record Marker(int color, String text, long removeAtTime) {
+    public record Marker(int color, String text, long removeAtTime) {
     }
 }

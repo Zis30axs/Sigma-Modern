@@ -233,11 +233,11 @@ public class RedStoneWireBlock extends Block {
         }
     }
 
-    private RedstoneSide getConnectingSide(final BlockGetter level, final BlockPos pos, final Direction direction) {
+    public RedstoneSide getConnectingSide(final BlockGetter level, final BlockPos pos, final Direction direction) {
         return this.getConnectingSide(level, pos, direction, !level.getBlockState(pos.above()).isRedstoneConductor(level, pos));
     }
 
-    private RedstoneSide getConnectingSide(final BlockGetter level, final BlockPos pos, final Direction direction, final boolean canConnectUp) {
+    public RedstoneSide getConnectingSide(final BlockGetter level, final BlockPos pos, final Direction direction, final boolean canConnectUp) {
         BlockPos relativePos = pos.relative(direction);
         BlockState relativeState = level.getBlockState(relativePos);
         if (canConnectUp) {

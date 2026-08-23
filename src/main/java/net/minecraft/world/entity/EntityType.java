@@ -68,7 +68,7 @@ public class EntityType<T extends Entity> implements EntityTypeTest<Entity, T>, 
     private final String descriptionId;
     private @Nullable Component description;
     private final Optional<ResourceKey<LootTable>> lootTable;
-    private final EntityDimensions dimensions;
+    public EntityDimensions dimensions;
     private final float spawnDimensionsScale;
     private final FeatureFlagSet requiredFeatures;
     private final boolean allowedInPeaceful;
@@ -476,7 +476,7 @@ public class EntityType<T extends Entity> implements EntityTypeTest<Entity, T>, 
         private boolean canSpawnFarFromPlayer;
         private int clientTrackingRange = 5;
         private int updateInterval = 3;
-        private EntityDimensions dimensions = EntityDimensions.scalable(0.6F, 1.8F);
+        public EntityDimensions dimensions = EntityDimensions.scalable(0.6F, 1.8F);
         private float spawnDimensionsScale = 1.0F;
         private EntityAttachments.Builder attachments = EntityAttachments.builder();
         private FeatureFlagSet requiredFeatures = FeatureFlags.VANILLA_SET;

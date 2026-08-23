@@ -10,7 +10,7 @@ public class ChestMenu extends AbstractContainerMenu {
     private final Container container;
     private final int containerRows;
 
-    private ChestMenu(final MenuType<?> menuType, final int containerId, final Inventory inventory, final int rows) {
+    public ChestMenu(final MenuType<?> menuType, final int containerId, final Inventory inventory, final int rows) {
         this(menuType, containerId, inventory, new SimpleContainer(9 * rows), rows);
     }
 

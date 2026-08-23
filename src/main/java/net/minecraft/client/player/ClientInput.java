@@ -8,7 +8,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 @OnlyIn(Dist.CLIENT)
 public class ClientInput {
     public Input keyPresses = Input.EMPTY;
-    protected Vec2 moveVector = Vec2.ZERO;
+    public Vec2 moveVector = Vec2.ZERO;
 
     public void tick() {
     }

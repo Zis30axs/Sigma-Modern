@@ -67,7 +67,7 @@ public class EnderDragon extends Mob implements Enemy {
     private final EnderDragonPart[] subEntities;
     public final EnderDragonPart head;
     private final EnderDragonPart neck;
-    private final EnderDragonPart body;
+    public final EnderDragonPart body;
     private final EnderDragonPart tail1;
     private final EnderDragonPart tail2;
     private final EnderDragonPart tail3;

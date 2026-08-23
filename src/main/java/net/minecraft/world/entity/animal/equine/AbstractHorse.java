@@ -117,7 +117,7 @@ public abstract class AbstractHorse extends Animal implements PlayerRideableJump
     private float eatAnim;
     private float eatAnimO;
     private float standAnim;
-    private float standAnimO;
+    public float standAnimO;
     private float mouthAnim;
     private float mouthAnimO;
     protected boolean canGallop = true;
