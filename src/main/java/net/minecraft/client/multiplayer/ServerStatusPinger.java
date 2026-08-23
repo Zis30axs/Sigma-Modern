@@ -21,6 +21,7 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerNameResolver;
+import net.minecraft.util.debugchart.LocalSampleLogger;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.CommonComponents;
@@ -62,7 +63,15 @@ public class ServerStatusPinger {
             this.onPingFailed(ConnectScreen.UNKNOWN_HOST_MESSAGE, data);
         } else {
             final InetSocketAddress address = resolvedAddress.get();
-            final Connection connection = Connection.connectToServer(address, eventLoopGroupHolder, null);
+            // MODIFIED for porting: was VFP MixinServerStatusPinger#setForcedVersion (@WrapOperation around connectToServer)
+            LocalSampleLogger localSampleLogger = null;
+            final com.viaversion.viafabricplus.injection.access.core.IServerData serverDataAccess = (com.viaversion.viafabricplus.injection.access.core.IServerData) data;
+            if (serverDataAccess.viaFabricPlus$forcedVersion() != null && !serverDataAccess.viaFabricPlus$passedDirectConnectScreen()) {
+                localSampleLogger = new LocalSampleLogger(1);
+                localSampleLogger.viaFabricPlus$setForcedVersion(serverDataAccess.viaFabricPlus$forcedVersion());
+                serverDataAccess.viaFabricPlus$passDirectConnectScreen(false);
+            }
+            final Connection connection = Connection.connectToServer(address, eventLoopGroupHolder, localSampleLogger);
             this.connections.add(connection);
             data.motd = Component.translatable("multiplayer.status.pinging");
             data.playerList = Collections.emptyList();
@@ -174,23 +183,8 @@ public class ServerStatusPinger {
     private void pingLegacyServer(
         final InetSocketAddress resolvedAddress, final ServerAddress rawAddress, final ServerData data, final EventLoopGroupHolder eventLoopGroupHolder
     ) {
-        new Bootstrap().group(eventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
-            @Override
-            protected void initChannel(final Channel channel) {
-                try {
-                    channel.config().setOption(ChannelOption.TCP_NODELAY, true);
-                } catch (ChannelException var3) {
-                }
-
-                channel.pipeline().addLast(new LegacyServerPinger(rawAddress, (protocolVersion, gameVersion, motd, players, maxPlayers) -> {
-                    data.setState(ServerData.State.INCOMPATIBLE);
-                    data.version = Component.literal(gameVersion);
-                    data.motd = Component.literal(motd);
-                    data.status = ServerStatusPinger.formatPlayerCount(players, maxPlayers);
-                    data.players = new ServerStatus.Players(maxPlayers, players, List.of());
-                }));
-            }
-        }).channel(eventLoopGroupHolder.channelCls()).connect(resolvedAddress.getAddress(), resolvedAddress.getPort());
+        // MODIFIED for porting: emptied - was VFP remove_legacy_pinger MixinServerStatusPinger @Overwrite
+        // Legacy pinging is handled by ViaFabricPlus itself.
     }
 
     public static Component formatPlayerCount(final int curPlayers, final int maxPlayers) {

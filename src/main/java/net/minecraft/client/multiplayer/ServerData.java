@@ -7,6 +7,9 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import com.viaversion.viafabricplus.injection.access.core.IServerData;
+import com.viaversion.viafabricplus.save.impl.SettingsSave;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -19,7 +22,11 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class ServerData {
+public class ServerData implements com.viaversion.viafabricplus.injection.access.core.IServerData {
+    // MODIFIED for porting: was VFP MixinServerData @Unique fields
+    private ProtocolVersion viaFabricPlus$forcedVersion = null;
+    private boolean viaFabricPlus$passedDirectConnectScreen;
+    private ProtocolVersion viaFabricPlus$translatingVersion;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_ICON_SIZE = 1024;
     public String name;
@@ -52,6 +59,10 @@ public class ServerData {
         if (this.acceptedCodeOfConduct != 0) {
             tag.putInt("acceptedCodeOfConduct", this.acceptedCodeOfConduct);
         }
+        // MODIFIED for porting: was VFP MixinServerData#saveForcedVersion (@Inject TAIL)
+        if (this.viaFabricPlus$forcedVersion != null) {
+            tag.putString("viafabricplus_forcedversion", this.viaFabricPlus$forcedVersion.getName());
+        }
 
         return tag;
     }
@@ -64,11 +75,48 @@ public class ServerData {
         this.packStatus = packStatus;
     }
 
+    @Override
+    public ProtocolVersion viaFabricPlus$forcedVersion() {
+        return this.viaFabricPlus$forcedVersion;
+    }
+
+    @Override
+    public void viaFabricPlus$forceVersion(final ProtocolVersion version) {
+        this.viaFabricPlus$forcedVersion = version;
+    }
+
+    @Override
+    public boolean viaFabricPlus$passedDirectConnectScreen() {
+        return this.viaFabricPlus$passedDirectConnectScreen;
+    }
+
+    @Override
+    public void viaFabricPlus$passDirectConnectScreen(final boolean state) {
+        this.viaFabricPlus$passedDirectConnectScreen = state;
+    }
+
+    @Override
+    public ProtocolVersion viaFabricPlus$translatingVersion() {
+        return this.viaFabricPlus$translatingVersion;
+    }
+
+    @Override
+    public void viaFabricPlus$setTranslatingVersion(final ProtocolVersion version) {
+        this.viaFabricPlus$translatingVersion = version;
+    }
+
     public static ServerData read(final CompoundTag tag) {
         ServerData server = new ServerData(tag.getStringOr("name", ""), tag.getStringOr("ip", ""), ServerData.Type.OTHER);
         server.setIconBytes(tag.read("icon", ExtraCodecs.BASE64_STRING).orElse(null));
         server.setResourcePackStatus(tag.read(ServerData.ServerPackStatus.FIELD_CODEC).orElse(ServerData.ServerPackStatus.PROMPT));
         server.acceptedCodeOfConduct = tag.getIntOr("acceptedCodeOfConduct", 0);
+        // MODIFIED for porting: was VFP MixinServerData#loadForcedVersion (@Inject TAIL)
+        if (tag.contains("viafabricplus_forcedversion")) {
+            final ProtocolVersion version = SettingsSave.protocolVersionByName(tag.getStringOr("viafabricplus_forcedversion", null));
+            if (version != null) {
+                ((IServerData) server).viaFabricPlus$forceVersion(version);
+            }
+        }
         return server;
     }
 
@@ -108,6 +156,8 @@ public class ServerData {
         this.ip = other.ip;
         this.name = other.name;
         this.iconBytes = other.iconBytes;
+        // MODIFIED for porting: was VFP MixinServerData#syncForcedVersion (@Inject RETURN)
+        this.viaFabricPlus$forceVersion(((IServerData) other).viaFabricPlus$forcedVersion());
     }
 
     public void copyFrom(final ServerData other) {
