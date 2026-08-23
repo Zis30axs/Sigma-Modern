@@ -42,6 +42,16 @@ public class MappedRegistry<T> implements WritableRegistry<T> {
     private final Map<TagKey<T>, HolderSet.Named<T>> frozenTags = new IdentityHashMap<>();
     private MappedRegistry.TagSet<T> allTags = MappedRegistry.TagSet.unbound();
     private @Nullable DataComponentLookup<T> componentLookup;
+    // MODIFIED for porting: VFP runtime registration support (temporary unfreeze)
+    public void vfp$setFrozen(final boolean value) {
+        this.frozen = value;
+    }
+
+    public static void vfp$applyFrozen(final Registry<?> registry, final boolean value) {
+        if (registry instanceof MappedRegistry<?> mapped) {
+            mapped.vfp$setFrozen(value);
+        }
+    }
     private boolean frozen;
     private @Nullable Map<T, Holder.Reference<T>> unregisteredIntrusiveHolders;
 

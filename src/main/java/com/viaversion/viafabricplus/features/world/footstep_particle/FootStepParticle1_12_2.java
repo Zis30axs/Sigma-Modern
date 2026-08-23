@@ -56,7 +56,10 @@ public final class FootStepParticle1_12_2 extends SingleQuadParticle {
     public static void init() {
         final SimpleParticleType footStepType = FabricParticleTypes.simple(true);
 
+        // MODIFIED for porting: temporarily unfreeze the particle registry for VFP runtime registration
+        net.minecraft.core.MappedRegistry.vfp$applyFrozen(BuiltInRegistries.PARTICLE_TYPE, false);
         Registry.register(BuiltInRegistries.PARTICLE_TYPE, ID, footStepType);
+        net.minecraft.core.MappedRegistry.vfp$applyFrozen(BuiltInRegistries.PARTICLE_TYPE, true);
         ParticleProviderRegistry.getInstance().register(footStepType, FootStepParticle1_12_2.Factory::new);
 
         RAW_ID = BuiltInRegistries.PARTICLE_TYPE.getId(footStepType);
