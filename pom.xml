@@ -23,6 +23,22 @@
             <id>forge-maven</id>
             <url>https://maven.minecraftforge.net/</url>
         </repository>
+        <repository>
+            <id>viaversion</id>
+            <url>https://repo.viaversion.com</url>
+        </repository>
+        <repository>
+            <id>lenni0451</id>
+            <url>https://maven.lenni0451.net/everything</url>
+        </repository>
+        <repository>
+            <id>florianreuth</id>
+            <url>https://maven.florianreuth.de/releases</url>
+        </repository>
+        <repository>
+            <id>jitpack</id>
+            <url>https://jitpack.io</url>
+        </repository>
     </repositories>
 
     <!--
@@ -34,6 +50,102 @@
       Explicit transitive entries are intentionally retained to pin the working versions.
     -->
     <dependencies>
+        <!-- ViaFabricPlus protocol stack (mapping-independent pure-Java libraries) -->
+        <dependency>
+            <groupId>com.github.oryxel1</groupId>
+            <artifactId>CubeConverter</artifactId>
+            <version>abecffaaea</version>
+        </dependency>
+        <dependency>
+            <groupId>com.viaversion</groupId>
+            <artifactId>viaversion-common</artifactId>
+            <version>5.12.0-20260819.184210-4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.viaversion</groupId>
+            <artifactId>viabackwards-common</artifactId>
+            <version>5.12.0-20260805.160710-1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.viaversion</groupId>
+            <artifactId>viaaprilfools-common</artifactId>
+            <version>4.2.3-20260820.140819-4</version>
+        </dependency>
+        <dependency>
+            <groupId>net.raphimc</groupId>
+            <artifactId>ViaLegacy</artifactId>
+            <version>3.1.0-20260821.100118-5</version>
+        </dependency>
+        <dependency>
+            <groupId>net.raphimc</groupId>
+            <artifactId>ViaBedrock</artifactId>
+            <version>0.0.29-20260720.172239-5</version>
+            <exclusions>
+                <exclusion><groupId>com.mojang</groupId><artifactId>brigadier</artifactId></exclusion>
+                <exclusion><groupId>at.yawk.lz4</groupId><artifactId>lz4-java</artifactId></exclusion>
+                <exclusion><groupId>io.netty</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>net.raphimc</groupId>
+            <artifactId>MinecraftAuth</artifactId>
+            <version>5.0.1</version>
+            <exclusions>
+                <exclusion><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.netty</groupId>
+            <artifactId>netty-transport-raknet</artifactId>
+            <version>1.7.0</version>
+            <exclusions><exclusion><groupId>io.netty</groupId><artifactId>*</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.netty</groupId>
+            <artifactId>netty-transport-nethernet</artifactId>
+            <version>1.7.0</version>
+            <exclusions><exclusion><groupId>io.netty</groupId><artifactId>*</artifactId></exclusion></exclusions>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>1.0.3</version>
+            <classifier>windows-x86_64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>1.0.3</version>
+            <classifier>windows-aarch64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>1.0.3</version>
+            <classifier>linux-x86_64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>1.0.3</version>
+            <classifier>linux-aarch64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>dev.kastle.webrtc</groupId>
+            <artifactId>webrtc-java</artifactId>
+            <version>1.0.3</version>
+            <classifier>macos-aarch64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>net.lenni0451</groupId>
+            <artifactId>Reflect</artifactId>
+            <version>1.6.4</version>
+        </dependency>
+        <dependency>
+            <groupId>de.florianreuth</groupId>
+            <artifactId>classic4j</artifactId>
+            <version>2.3.0</version>
+        </dependency>
         <dependency>
             <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
