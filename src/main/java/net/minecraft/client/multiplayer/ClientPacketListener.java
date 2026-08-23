@@ -6,6 +6,8 @@ import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.connection.ConnectionDetails;import com.google.common.collect.Lists;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.hash.HashCode;
@@ -397,7 +399,7 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     private ClientLevel level;
     private ClientLevel.ClientLevelData levelData;
     private final Map<UUID, PlayerInfo> playerInfoMap = Maps.newHashMap();
-    private final Set<PlayerInfo> listedPlayers = new ReferenceOpenHashSet<>();
+    private Set<PlayerInfo> listedPlayers = new ReferenceOpenHashSet<>();
     private final ClientAdvancements advancements;
     private final ClientSuggestionProvider suggestionsProvider;
     private final ClientSuggestionProvider restrictedSuggestionsProvider;
@@ -437,6 +439,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
     public ClientPacketListener(final Minecraft minecraft, final Connection connection, final CommonListenerCookie cookie) {
         super(minecraft, connection, cookie);
+        // MODIFIED for porting: was VFP fixPlayerListOrdering (@Inject <init> RETURN) - preserve tab insertion order for <=1.19.1
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_1)) {
+            this.listedPlayers = new java.util.LinkedHashSet<>();
+        }
         this.localGameProfile = cookie.localGameProfile();
         this.registryAccess = cookie.receivedRegistries();
         RegistryOps<HashCode> hashOps = this.registryAccess.createSerializationContext(HashOps.CRC32C_INSTANCE);
@@ -703,7 +709,15 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         if (entity != null) {
             Vec3 pos = packet.values().position();
             entity.getPositionCodec().setBase(pos);
-            if (!entity.isLocalInstanceAuthoritative()) {
+            // MODIFIED for porting: was VFP allowPlayerToBeMovedByEntityPackets (@Redirect isLocalInstanceAuthoritative)
+            final boolean vfp$authority;
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3)
+                || ProtocolTranslator.getTargetVersion() == BedrockProtocolVersion.bedrockLatest) {
+                vfp$authority = entity.getControllingPassenger() instanceof Player p ? p.isLocalPlayer() : !entity.level().isClientSide();
+            } else {
+                vfp$authority = entity.isLocalInstanceAuthoritative();
+            }
+            if (!vfp$authority) {
                 float yRot = packet.values().yRot();
                 float xRot = packet.values().xRot();
                 boolean tooBigToInterpolate = entity.position().distanceToSqr(pos) > 4096.0;
@@ -728,7 +742,7 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         Entity entity = this.level.getEntity(packet.id());
         if (entity == null) {
-            if (this.removedPlayerVehicleId.isPresent() && this.removedPlayerVehicleId.getAsInt() == packet.id()) {
+            if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21) && this.removedPlayerVehicleId.isPresent() && this.removedPlayerVehicleId.getAsInt() == packet.id()) {
                 LOGGER.debug("Trying to teleport entity with id {}, that was formerly player vehicle, applying teleport to player instead", packet.id());
                 setValuesFromPositionPacket(packet.change(), packet.relatives(), this.minecraft.player, false);
                 this.connection
@@ -791,10 +805,21 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         Entity entity = packet.getEntity(this.level);
         if (entity != null) {
-            if (entity.isLocalInstanceAuthoritative()) {
+            // MODIFIED for porting: was VFP allowPlayerToBeMovedByEntityPackets (@Redirect isLocalInstanceAuthoritative)
+            final boolean vfp$authority;
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3)
+                || ProtocolTranslator.getTargetVersion() == BedrockProtocolVersion.bedrockLatest) {
+                vfp$authority = entity.getControllingPassenger() instanceof Player p ? p.isLocalPlayer() : !entity.level().isClientSide();
+            } else {
+                vfp$authority = entity.isLocalInstanceAuthoritative();
+            }
+            if (vfp$authority) {
                 VecDeltaCodec positionCodec = entity.getPositionCodec();
                 Vec3 pos = positionCodec.decode(packet.getXa(), packet.getYa(), packet.getZa());
-                positionCodec.setBase(pos);
+                // MODIFIED for porting: was VFP dontHandleEntityPositionChange (@WrapWithCondition >=1_21_2 runs)
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+                    positionCodec.setBase(pos);
+                }
             } else {
                 if (packet.hasPosition()) {
                     VecDeltaCodec positionCodec = entity.getPositionCodec();
@@ -858,7 +883,14 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             setValuesFromPositionPacket(packet.change(), packet.relatives(), player, false);
         }
 
-        this.connection.send(new ServerboundAcceptTeleportationPacket(packet.id()));
+        // MODIFIED for porting: was VFP changePacketOrder (@WrapWithCondition ordinal0 on Connection.send)
+        final boolean vfp$deferConfirm = ProtocolTranslator.getTargetVersion().equalTo(ProtocolVersion.v1_21_2);
+        ServerboundAcceptTeleportationPacket vfp$teleportConfirm = null;
+        if (!vfp$deferConfirm) {
+            this.connection.send(new ServerboundAcceptTeleportationPacket(packet.id()));
+        } else {
+            vfp$teleportConfirm = new ServerboundAcceptTeleportationPacket(packet.id());
+        }
         this.connection
             .send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), false, false));
         this.minecraft.level.getBlockStatePredictionHandler().onTeleport();
@@ -868,6 +900,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             && this.minecraft.gui.screen() instanceof ILevelLoadingScreen levelLoadingScreen2) {
             levelLoadingScreen2.viaFabricPlus$setReady();
         }
+
+        // MODIFIED for porting: was VFP changePacketOrder (@Inject RETURN) - deferred teleport confirmation
+        if (vfp$teleportConfirm != null) {
+            this.connection.send(vfp$teleportConfirm);
+        }
     }
 
     private static boolean setValuesFromPositionPacket(
@@ -876,8 +913,21 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         PositionMoveRotation currentValues = PositionMoveRotation.of(entity);
         PositionMoveRotation newValues = PositionMoveRotation.calculateAbsolute(currentValues, change, relatives);
         boolean tooBigToInterpolate = currentValues.position().distanceToSqr(newValues.position()) > 4096.0;
-        if (interpolate && !tooBigToInterpolate) {
+        // MODIFIED for porting: was VFP cancelSmallChanges (@Redirect moveOrInterpolateTo <=1_16_1 tiny deltas keep current pos)
+        final boolean vfp$smallChange = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_1)
+            && Math.abs(entity.getX() - newValues.position().x) < 0.03125
+            && Math.abs(entity.getY() - newValues.position().y) < 0.015625
+            && Math.abs(entity.getZ() - newValues.position().z) < 0.03125;
+        if (interpolate && !tooBigToInterpolate && !vfp$smallChange) {
             entity.moveOrInterpolateTo(newValues.position(), newValues.yRot(), newValues.xRot());
+            entity.setDeltaMovement(newValues.deltaMovement());
+            return true;
+        } else if (interpolate && !tooBigToInterpolate) {
+            // MODIFIED for porting: VFP cancelSmallChanges path (<=1_16_1): keep current position, zero interpolation length
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2) && entity.getInterpolation() != null) {
+                entity.getInterpolation().setInterpolationLength(0);
+            }
+            entity.moveOrInterpolateTo(entity.position(), newValues.yRot(), newValues.xRot());
             entity.setDeltaMovement(newValues.deltaMovement());
             return true;
         } else {
@@ -1014,7 +1064,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             this.connection.channel.config().setAutoRead(false);
         }
         this.minecraft.gui.chatListener().flushQueue();
-        this.sendChatAcknowledgement();
+        // MODIFIED for porting: was VFP dontSendChatAck (@WrapWithCondition >=1_20_5 sends)
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+            this.sendChatAcknowledgement();
+        }
         ChatComponent.State chatState = this.minecraft.gui.hud.getChat().storeState();
         this.minecraft.clearClientLevel(new ServerReconfigScreen(RECONFIGURE_SCREEN_MESSAGE, this.connection));
         this.connection
@@ -1123,7 +1176,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         } else {
             Optional<SignedMessageBody> body = packet.body().unpack(this.messageSignatureCache);
             if (body.isEmpty()) {
-                LOGGER.error("Message from player with ID {} referenced unrecognized signature id", packet.sender());
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_2)) {
+                    LOGGER.error("Message from player with ID {} referenced unrecognized signature id", packet.sender());
+                }
+                // MODIFIED for porting: was VFP removeChatPacketError (@WrapWithCondition)
                 this.connection.disconnect(INVALID_PACKET);
             } else {
                 this.messageSignatureCache.push(body.get(), packet.signature());
@@ -1376,7 +1432,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         }
 
         this.setClientLoaded(false);
-        this.startWaitingForNewLevel(newPlayer, this.level, levelLoadingReason);
+        // MODIFIED for porting: was VFP checkDimensionChange (@WrapWithCondition >=1_20_3 or dimension changed runs)
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_3) || dimensionChanged) {
+            this.startWaitingForNewLevel(newPlayer, this.level, levelLoadingReason);
+        }
         newPlayer.setId(oldPlayer.getId());
         this.minecraft.player = newPlayer;
         if (dimensionChanged) {
@@ -1400,7 +1459,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
         if (packet.shouldKeep((byte)1)) {
             newPlayer.getAttributes().assignAllValues(oldPlayer.getAttributes());
-        } else {
+        } else if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21)) {
+            // MODIFIED for porting: was VFP dontApplyBaseValues (@WrapWithCondition >=1_21 runs)
             newPlayer.getAttributes().assignBaseValues(oldPlayer.getAttributes());
         }
 
@@ -1547,7 +1607,14 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         if (this.level.getBlockEntity(pos) instanceof SignBlockEntity sign) {
             this.minecraft.player.openTextEdit(sign, packet.isFrontText());
         } else {
-            LOGGER.warn("Ignoring openTextEdit on an invalid entity: {} at pos {}", this.level.getBlockEntity(pos), pos);
+            // MODIFIED for porting: was VFP openEmptySignEditor (@Redirect <=1_21 opens empty sign)
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+                final SignBlockEntity emptySignBlockEntity = new SignBlockEntity(pos, this.level.getBlockState(pos));
+                emptySignBlockEntity.setLevel(this.level);
+                this.minecraft.player.openTextEdit(emptySignBlockEntity, packet.isFrontText());
+            } else {
+                LOGGER.warn("Ignoring openTextEdit on an invalid entity: {} at pos {}", this.level.getBlockEntity(pos), pos);
+            }
         }
     }
 
@@ -1628,10 +1695,23 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         } else if (event == ClientboundGameEventPacket.CHANGE_GAME_MODE) {
             this.minecraft.gameMode.setLocalMode(GameType.byId(param));
         } else if (event == ClientboundGameEventPacket.WIN_GAME) {
-            this.minecraft.gui.setScreen(new WinScreen(true, () -> {
-                player.connection.send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
-                this.minecraft.gui.setScreen(null);
-            }));
+            // MODIFIED for porting: was VFP handleWinGameState0 (@Redirect <=1_20_5 legacy flow)
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+                if (param == 0) {
+                    player.connection.send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
+                    this.minecraft.gui.setScreen(new net.minecraft.client.gui.screens.LevelLoadingScreen(this.levelLoadTracker, LevelLoadingScreen.Reason.END_PORTAL));
+                } else if (param == 1) {
+                    this.minecraft.gui.setScreen(new WinScreen(true, () -> {
+                        player.connection.send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
+                        this.minecraft.gui.setScreen(null);
+                    }));
+                }
+            } else {
+                this.minecraft.gui.setScreen(new WinScreen(true, () -> {
+                    player.connection.send(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
+                    this.minecraft.gui.setScreen(null);
+                }));
+            }
         } else if (event == ClientboundGameEventPacket.DEMO_EVENT) {
             Options options = this.minecraft.options;
             Component message = null;
@@ -2091,7 +2171,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         for (ClientboundPlayerInfoUpdatePacket.Entry entry : packet.entries()) {
             PlayerInfo info = this.playerInfoMap.get(entry.profileId());
             if (info == null) {
-                LOGGER.warn("Ignoring player info update for unknown player {} ({})", entry.profileId(), packet.actions());
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_19_3)) {
+                    LOGGER.warn("Ignoring player info update for unknown player {} ({})", entry.profileId(), packet.actions());
+                }
+                // MODIFIED for porting: was VFP removeUnknownPlayerListEntryWarning (@WrapWithCondition)
             } else {
                 for (ClientboundPlayerInfoUpdatePacket.Action action : packet.actions()) {
                     this.applyPlayerInfoUpdate(action, entry, info);
@@ -2109,7 +2192,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 break;
             case UPDATE_GAME_MODE:
                 if (info.getGameMode() != entry.gameMode() && this.minecraft.player != null && this.minecraft.player.getUUID().equals(entry.profileId())) {
-                    this.minecraft.player.onGameModeChanged(entry.gameMode());
+                    // MODIFIED for porting: was VFP dontResetVelocity (@Redirect <1_20 skips)
+                    if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20)) {
+                        this.minecraft.player.onGameModeChanged(entry.gameMode());
+                    }
                 }
 
                 info.setGameMode(entry.gameMode());
@@ -2139,7 +2225,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         GameProfile profile = info.getProfile();
         SignatureValidator signatureValidator = this.minecraft.services().profileKeySignatureValidator();
         if (signatureValidator == null) {
-            LOGGER.warn("Ignoring chat session from {} due to missing Services public key", profile.name());
+            // MODIFIED for porting: was VFP removeInvalidSignatureWarning (@WrapWithCondition >=1_19_4 logs)
+            if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+                LOGGER.warn("Ignoring chat session from {} due to missing Services public key", profile.name());
+            }
             info.clearChatSession(this.enforcesSecureChat());
         } else {
             RemoteChatSession.Data chatSessionData = entry.chatSession();
@@ -2243,7 +2332,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 currentTarget = vehicle.position();
             }
 
-            if (target.distanceTo(currentTarget) > 1.0E-5F) {
+            // MODIFIED for porting: was VFP allowSmallValues (@Redirect distanceTo <=1_21_2 always "moved")
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2) || target.distanceTo(currentTarget) > 1.0E-5F) {
                 if (vehicle.isInterpolating()) {
                     vehicle.getInterpolation().cancel();
                 }
@@ -2259,7 +2349,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleOpenBook(final ClientboundOpenBookPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         ItemStack held = this.minecraft.player.getItemInHand(packet.getHand());
-        BookViewScreen.BookAccess bookAccess = BookViewScreen.BookAccess.fromItem(held);
+        // MODIFIED for porting: was VFP dontOpenWriteableBookScreen (@Redirect fromItem <1_20_5 writable books open nothing)
+        BookViewScreen.BookAccess bookAccess = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_5) || held.is(Items.WRITTEN_BOOK)
+            ? BookViewScreen.BookAccess.fromItem(held)
+            : null;
         if (bookAccess != null) {
             this.minecraft.gui.setScreen(new BookViewScreen(bookAccess));
         }
@@ -2509,6 +2602,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         this.serverChunkRadius = packet.getRadius();
         this.minecraft.options.setServerRenderDistance(this.serverChunkRadius);
         this.level.getChunkSource().updateViewRadius(packet.getRadius());
+        // MODIFIED for porting: was VFP emulateSimulationDistance (@Inject RETURN)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17_1)) {
+            this.handleSetSimulationDistance(new ClientboundSetSimulationDistancePacket(packet.getRadius()));
+        }
     }
 
     @Override
@@ -2745,7 +2842,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
     public void sendCommand(final String command) {
         SignableCommand<ClientSuggestionProvider> signableCommand = SignableCommand.of(this.commands.parse(command, this.suggestionsProvider));
-        if (signableCommand.arguments().isEmpty()) {
+        // MODIFIED for porting: was VFP alwaysSignCommands (@Redirect List.isEmpty <=1_20_3 treats as signable)
+        if (!(ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3) && signableCommand.arguments().isEmpty())) {
             this.send(new ServerboundChatCommandPacket(command));
         } else {
             Instant timeStamp = Instant.now();
@@ -2760,9 +2858,24 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     }
 
     public void sendUnattendedCommand(final String command, final @Nullable Screen screenAfterCommand) {
-        switch (this.verifyCommand(command)) {
+        // MODIFIED for porting: was VFP run_command_action dontOpenConfirmationScreens + remove_signed_commands alwaysSignCommands
+        ClientPacketListener.CommandCheckResult viaCheckResult = this.verifyCommand(command);
+        final boolean vfp$legacySigning = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3);
+        if (vfp$legacySigning && (viaCheckResult == ClientPacketListener.CommandCheckResult.PARSE_ERRORS
+            || viaCheckResult == ClientPacketListener.CommandCheckResult.PERMISSIONS_REQUIRED)) {
+            viaCheckResult = ClientPacketListener.CommandCheckResult.NO_ISSUES;
+        }
+
+        switch (viaCheckResult) {
             case NO_ISSUES:
-                this.send(new ServerboundChatCommandPacket(command));
+                if (vfp$legacySigning) {
+                    final Instant viaTimeStamp = Instant.now();
+                    final long viaSalt = Crypt.SaltSupplier.getLong();
+                    final LastSeenMessagesTracker.Update viaUpdate = this.lastSeenMessages.generateAndApplyUpdate();
+                    this.send(new ServerboundChatCommandSignedPacket(command, viaTimeStamp, viaSalt, ArgumentSignatures.EMPTY, viaUpdate.update()));
+                } else {
+                    this.send(new ServerboundChatCommandPacket(command));
+                }
                 this.minecraft.gui.setScreen(screenAfterCommand);
                 break;
             case PARSE_ERRORS:
