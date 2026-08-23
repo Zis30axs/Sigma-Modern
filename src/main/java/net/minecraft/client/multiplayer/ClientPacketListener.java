@@ -1,6 +1,11 @@
 package net.minecraft.client.multiplayer;
 
-import com.google.common.collect.Lists;
+import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viafabricplus.injection.access.networking.downloading_terrain.ILevelLoadingScreen;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.connection.UserConnection;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viaversion.connection.ConnectionDetails;import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.hash.HashCode;
@@ -609,6 +614,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                     );
             }
         }
+    
+        // MODIFIED for porting: was VFP core.integration MixinClientPacketListener#sendConnectionDetails (@Inject RETURN)
+        final UserConnection viaUser = ((IConnection) getConnection()).viaFabricPlus$getUserConnection();
+        if (viaUser != null) {
+            ConnectionDetails.sendConnectionDetails(viaUser, ConnectionDetails.MOD_CHANNEL);
+        }
     }
 
     @Override
@@ -851,6 +862,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         this.connection
             .send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), false, false));
         this.minecraft.level.getBlockStatePredictionHandler().onTeleport();
+    
+        // MODIFIED for porting: was VFP level_loading MixinClientPacketListener#closeDownloadingTerrain (@Inject RETURN)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18)
+            && this.minecraft.gui.screen() instanceof ILevelLoadingScreen levelLoadingScreen2) {
+            levelLoadingScreen2.viaFabricPlus$setReady();
+        }
     }
 
     private static boolean setValuesFromPositionPacket(
@@ -992,6 +1009,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleConfigurationStart(final ClientboundStartConfigurationPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // MODIFIED for porting: was VFP config_state MixinClientPacketListener#disableAutoRead (@Inject HEAD)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+            this.connection.channel.config().setAutoRead(false);
+        }
         this.minecraft.gui.chatListener().flushQueue();
         this.sendChatAcknowledgement();
         ChatComponent.State chatState = this.minecraft.gui.hud.getChat().storeState();
@@ -1022,6 +1043,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             );
         this.send(ServerboundConfigurationAcknowledgedPacket.INSTANCE);
         this.connection.setupOutboundProtocol(ConfigurationProtocols.SERVERBOUND);
+    
+        // MODIFIED for porting: was VFP config_state MixinClientPacketListener#enableAutoRead (@Inject RETURN)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+            this.connection.channel.config().setAutoRead(true);
+        }
     }
 
     @Override
@@ -1192,6 +1218,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleSetSpawn(final ClientboundSetDefaultSpawnPositionPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.minecraft.level.setRespawnData(packet.respawnData());
+    
+        // MODIFIED for porting: was VFP level_loading MixinClientPacketListener#moveDownloadingTerrainClosing (@Inject RETURN)
+        if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_18_2, ProtocolVersion.v1_20_2)
+            && this.minecraft.gui.screen() instanceof ILevelLoadingScreen levelLoadingScreen) {
+            levelLoadingScreen.viaFabricPlus$setReady();
+        }
     }
 
     @Override
@@ -2927,6 +2959,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     }
 
     public boolean hasClientLoaded() {
+        // MODIFIED for porting: was VFP keep_player_loaded MixinClientPacketListener#alwaysLoadPlayer (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+            return true;
+        }
         return this.clientLoaded;
     }
 
