@@ -79,6 +79,7 @@ import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.Hud;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import net.minecraft.client.gui.components.DebugScreenOverlay;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.debug.DebugScreenEntries;
@@ -1230,8 +1231,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             this.monitorManager.close();
             GLFW.glfwTerminate();
         }
+        // MODIFIED for porting: was VFP MixinMinecraft#forceShutdown (@Inject RETURN) - workaround for GH-1218
+        System.exit(0);
     }
-
     /**
      * MODIFIED for porting: was iris's MixinMinecraft_Images#iris$setupImages (@Inject into <init> at TAIL). It registers the
      * "widgets" texture used by iris's GUIs; Fabric API would normally do this automatically, but iris does not use it.
@@ -2176,6 +2178,13 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         Duration worldLoadDuration = Duration.between(worldLoadStart, Instant.now());
         SocketAddress socketAddress = this.singleplayerServer.getConnection().startMemoryChannel();
         Connection connection = Connection.connectToLocalServer(socketAddress);
+            // MODIFIED for porting: was VFP MixinMinecraft#disableProtocolTranslator (@Inject INVOKE before initiate)
+            ProtocolTranslator.setTargetVersion(ProtocolTranslator.NATIVE_VERSION, true);
+            if (connection.isConnected()) {
+                ProtocolTranslator.injectPreviousVersionReset(connection.channel);
+            } else {
+                connection.pendingActions.add(c -> ProtocolTranslator.injectPreviousVersionReset(c.channel));
+            }
         connection.initiateServerboundPlayConnection(
             socketAddress.toString(),
             0,

@@ -25,6 +25,9 @@ import net.minecraft.client.ClientBrandRetriever;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.Screen;
+import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
+import net.raphimc.vialegacy.protocol.release.r1_6_4tor1_7_2_5.storage.ProtocolMetadataStorage;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.PacketSendListener;
@@ -154,6 +157,13 @@ public class ClientHandshakePacketListenerImpl implements ClientLoginPacketListe
     }
 
     private @Nullable Component authenticateServer(final String digest) {
+        // MODIFIED for porting: was VFP MixinClientHandshakePacketListenerImpl#onlyVerifySessionInOnlineMode
+        final IConnection viaConnection = (IConnection) this.connection;
+        if (viaConnection.viaFabricPlus$getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_6_4)
+            && !viaConnection.viaFabricPlus$getUserConnection().get(ProtocolMetadataStorage.class).isAuthenticate()) {
+            // 1.7 -> 1.6 protocol: skip joinServer when the server is in offline mode
+            return null;
+        }
         try {
             this.minecraft.services().sessionService().joinServer(this.minecraft.getUser().getProfileId(), this.minecraft.getUser().getAccessToken(), digest);
             return null;

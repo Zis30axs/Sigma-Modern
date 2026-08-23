@@ -239,7 +239,9 @@ public class Main {
                 ),
                 new GameConfig.QuickPlayData(quickPlayLogPath, quickPlayVariant)
             );
-            Util.startTimerHackThread();
+        // MODIFIED for porting: was VFP MixinMain#bootstrap (@Inject before startTimerHackThread)
+        com.viaversion.viafabricplus.ViaFabricPlusImpl.INSTANCE.init();
+        Util.startTimerHackThread();
             dataFixerOptimization.join();
         } catch (Throwable t) {
             CrashReport report = CrashReport.forThrowable(t, stage);
