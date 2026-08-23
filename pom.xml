@@ -568,6 +568,10 @@
                 <directory>${project.basedir}/res/classpath</directory>
                 <filtering>false</filtering>
             </resource>
+            <resource>
+                <directory>${project.basedir}/src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
         </resources>
     </build>
 </project>
