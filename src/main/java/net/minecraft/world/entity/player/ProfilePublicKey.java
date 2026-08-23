@@ -34,7 +34,38 @@ public record ProfilePublicKey(ProfilePublicKey.Data data) {
         return SignatureValidator.from(this.data.key, "SHA256withRSA");
     }
 
-    public record Data(Instant expiresAt, PublicKey key, byte[] keySignature) {
+    // MODIFIED for porting: converted from record to class - carries VFP legacy chat signature state
+    // (upstream added the state via @Unique mixin field on this type)
+    public static final class Data implements com.viaversion.viafabricplus.injection.access.networking.legacy_chat_signature.IProfilePublicKey_Data {
+        private final Instant expiresAt;
+        private final PublicKey key;
+        private final byte[] keySignature;
+        private byte[] viafabricplus$legacyKeySignature;
+
+        public Data(final Instant expiresAt, final PublicKey key, final byte[] keySignature) {
+            this.expiresAt = expiresAt;
+            this.key = key;
+            this.keySignature = keySignature;
+        }
+        public Instant expiresAt() {
+            return this.expiresAt;
+        }
+        public PublicKey key() {
+            return this.key;
+        }
+        public byte[] keySignature() {
+            return this.keySignature;
+        }
+
+        @Override
+        public byte[] viafabricplus$getLegacyPublicKeySignature() {
+            return this.viafabricplus$legacyKeySignature;
+        }
+
+        @Override
+        public void viafabricplus$setLegacyPublicKeySignature(final byte[] signature) {
+            this.viafabricplus$legacyKeySignature = signature;
+        }
         private static final int MAX_KEY_SIGNATURE_SIZE = 4096;
         public static final Codec<ProfilePublicKey.Data> CODEC = RecordCodecBuilder.create(
             i -> i.group(
