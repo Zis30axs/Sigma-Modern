@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer.resolver;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Optional;
 import net.minecraftforge.api.distmarker.Dist;
