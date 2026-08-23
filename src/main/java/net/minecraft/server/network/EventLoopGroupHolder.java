@@ -1,3 +1,8 @@
+        final EventLoopGroupHolder holder = NIO;
+        // MODIFIED for porting: was VFP bedrock MixinEventLoopGroupHolder#resetConnectingFlag (@Inject remote RETURN)
+        if (holder instanceof com.viaversion.viafabricplus.injection.access.core.bedrock.IEventLoopGroupHolder h) {
+            h.viaFabricPlus$setConnecting(false);
+        }
 package net.minecraft.server.network;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
