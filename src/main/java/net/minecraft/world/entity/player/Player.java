@@ -63,6 +63,8 @@ import net.minecraft.world.entity.ContainerUser;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityEquipment;
 import net.minecraft.world.entity.EntityReference;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -878,7 +880,7 @@ public abstract class Player extends Avatar implements ContainerUser {
 
     @Override
     protected Vec3 maybeBackOffFromEdge(final Vec3 delta, final MoverType moverType) {
-        float maxDownStep = this.maxUpStep();
+        float maxDownStep = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_10) ? 1.0F : this.maxUpStep();
         if (!this.abilities.flying
             && !(delta.y > 0.0)
             && (moverType == MoverType.SELF || moverType == MoverType.PLAYER)
@@ -933,6 +935,14 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     private boolean canFallAtLeast(final double deltaX, final double deltaZ, final double minHeight) {
+        // MODIFIED for porting: was VFP changeOffsetsForSneakingCollisionDetection (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            final double vfpConstant = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3) ? 0.0 : 1.0E-5F;
+            final AABB vfpBox = this.getBoundingBox();
+            return this.level().noCollision(this, new AABB(
+                vfpBox.minX + deltaX, vfpBox.minY - minHeight - vfpConstant, vfpBox.minZ + deltaZ,
+                vfpBox.maxX + deltaX, vfpBox.minY, vfpBox.maxZ + deltaZ));
+        }
         AABB boundingBox = this.getBoundingBox();
         return this.level()
             .noCollision(
