@@ -60,8 +60,8 @@ public final class CPEAdditions {
         EXTENDED_CLASSIC_ITEMS.add(Items.JUKEBOX);
         EXTENDED_CLASSIC_ITEMS.add(Items.STONE_BRICKS);
 
-        allowExtension(ClassicProtocolExtension.ENV_WEATHER_TYPE);
-        EXT_WEATHER_TYPE = createNewPacket(ClassicProtocolExtension.ENV_WEATHER_TYPE, 31, (user, buf) -> buf.readByte());
+        // MODIFIED for porting: ENV_WEATHER_TYPE disabled (needs library mixin; loaderless TODO)
+        // EXT_WEATHER_TYPE = createNewPacket(...);
     }
 
     public static boolean isSnowing() {
