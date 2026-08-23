@@ -348,8 +348,15 @@ public class Block extends BlockBehaviour implements ItemLike {
         return isShapeFullBlock(faceShape);
     }
 
+    // MODIFIED for porting: lithium shapes.blockstate_cache BlockMixin replaces the Guava LoadingCache by lithium's
+    // much cheaper open-addressed cache table.
+    private static final net.caffeinemc.mods.lithium.common.util.collections.Object2BooleanCacheTable<VoxelShape> LITHIUM_FULL_CUBE_CACHE =
+        new net.caffeinemc.mods.lithium.common.util.collections.Object2BooleanCacheTable<>(
+            512, shape -> !Shapes.joinIsNotEmpty(Shapes.block(), shape, BooleanOp.NOT_SAME)
+        );
+
     public static boolean isShapeFullBlock(final VoxelShape shape) {
-        return SHAPE_FULL_BLOCK_CACHE.getUnchecked(shape);
+        return LITHIUM_FULL_CUBE_CACHE.get(shape);
     }
 
     public void animateTick(final BlockState state, final Level level, final BlockPos pos, final RandomSource random) {

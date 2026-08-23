@@ -154,6 +154,28 @@ public final class ProjectileUtil {
         return Math.max(0.0F, Math.min(0.3F, (source.tickCount - 2) / 20.0F));
     }
 
+    /**
+     * MODIFIED for porting: was lithium's entity.projectile_projectile_collisions ProjectileUtilMixin. When a projectile
+     * checks for entities it could hit, only entity types that this projectile type can actually collide with have to be
+     * visited. This matters for huge stacks of projectiles (e.g. thousands of ender pearls), which can never hit each other.
+     */
+    private static java.util.List<Entity> lithium$getEntitiesForCollision(
+        final Level level, final @Nullable Entity searchingEntity, final AABB box, final Predicate<? super Entity> entityFilter
+    ) {
+        if (searchingEntity != null
+            && entityFilter instanceof net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate
+            && net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileEntityClassGroups.OPTIMIZED_PROJECTILES.contains(searchingEntity)) {
+            net.minecraft.world.level.entity.EntitySectionStorage<Entity> cache = net.caffeinemc.mods.lithium.common.world.WorldHelper.getEntityCacheOrNull(level);
+            if (cache != null) {
+                return net.caffeinemc.mods.lithium.common.world.WorldHelper.getEntitiesOfEntityGroupPlusDragonPieces(
+                    level, cache, searchingEntity, net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileEntityClassGroups.CAN_MAYBE_BE_HIT_BY_OPTIMIZED_PROJECTILE, box, entityFilter
+                );
+            }
+        }
+
+        return level.getEntities(searchingEntity, box, entityFilter);
+    }
+
     public static @Nullable EntityHitResult getEntityHitResult(
         final Level level,
         final Entity source,
@@ -167,7 +189,8 @@ public final class ProjectileUtil {
         Optional<Vec3> nearestLocation = Optional.empty();
         Entity hitEntity = null;
 
-        for (Entity entity : level.getEntities(source, targetSearchArea, matching)) {
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions ProjectileUtilMixin#getEntitiesForCollision
+        for (Entity entity : lithium$getEntitiesForCollision(level, source, targetSearchArea, matching)) {
             AABB bb = entity.getBoundingBox().inflate(entityMargin);
             Optional<Vec3> location = bb.clip(from, to);
             if (location.isPresent()) {

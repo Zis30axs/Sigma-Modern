@@ -20,6 +20,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import malte0811.ferritecore.impl.FastMapStateHolderImpl; // MODIFIED for porting
 import net.minecraft.world.level.block.state.properties.Property;
 import org.jspecify.annotations.Nullable;
 
@@ -85,19 +86,20 @@ public class StateDefinition<O, S extends StateHolder<O, S>> {
         List<T> propertyValues = property.getPossibleValues();
         int valueCount = propertyValues.size();
         ImmutableList.Builder<S> states = ImmutableList.builderWithExpectedSize(valueCount);
-        S[] propertyNeighbours = (S[])(new StateHolder[valueCount]);
-        S[][] neighbours = (S[][])(new StateHolder[][]{propertyNeighbours});
 
         for (int i = 0; i < valueCount; i++) {
             T propertyValue = (T)propertyValues.get(i);
             assert property.getInternalIndex(propertyValue) == i;
             S blockState = (S)factory.create(owner, propertyKeys, new Comparable[]{propertyValue});
             states.add(blockState);
-            propertyNeighbours[i] = blockState;
-            blockState.initializeNeighbors(neighbours);
+            // MODIFIED for porting: FerriteCore skips the neighbor array (and the arrays that would hold it) and
+            // initializes a shared FastMap for the finished state list instead.
         }
 
-        return states.build();
+        // MODIFIED for porting: FerriteCore wraps the builder result to hand the finished states to the FastMap
+        ImmutableList<S> builtStates = states.build();
+        FastMapStateHolderImpl.initializeFastMap(builtStates);
+        return builtStates;
     }
 
     private static <O, S extends StateHolder<O, S>> ImmutableList<S> createMultiPropertyStates(
@@ -121,8 +123,9 @@ public class StateDefinition<O, S extends StateHolder<O, S>> {
             states.add(blockState);
         }
 
-        StateDefinition.StateCollection<S> stateCollection = new StateDefinition.StateCollection<>(statesByValues, new HashMap<>());
-        statesByValues.forEach((valuesx, state) -> state.initializeNeighbors(stateCollection.fillNeighborsForState(propertyKeys, valuesx)));
+        // MODIFIED for porting: FerriteCore replaces the whole neighbor-filling pass (the StateCollection and the
+        // per-state S[][] arrays it produces) with a single shared FastMap.
+        FastMapStateHolderImpl.initializeFastMap(statesByValues.values());
         return states.build();
     }
 

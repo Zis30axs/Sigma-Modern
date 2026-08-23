@@ -19,7 +19,14 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class CommandEncoder {
+// MODIFIED for porting: implements sodium's CommandEncoderAccessor (mixin.core.CommandEncoderAccessor)
+public class CommandEncoder implements net.caffeinemc.mods.sodium.mixin.core.CommandEncoderAccessor {
+    // MODIFIED for porting: was sodium's CommandEncoderAccessor @Accessor("backend")
+    @Override
+    public CommandEncoderBackend sodium$getBackend() {
+        return this.backend;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     private final GpuDeviceBackend device;
     private final CommandEncoderBackend backend;

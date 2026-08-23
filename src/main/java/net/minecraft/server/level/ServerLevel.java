@@ -182,7 +182,10 @@ import net.minecraft.world.waypoints.WaypointTransmitter;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGetter {
+public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGetter, net.caffeinemc.mods.lithium.mixin.util.accessors.ServerLevelAccessor, // MODIFIED for porting: lithium ServerLevelAccessor
+    net.caffeinemc.mods.lithium.mixin.util.entity_movement_tracking.ServerLevelAccessor, // MODIFIED for porting: lithium util.entity_movement_tracking
+    net.caffeinemc.mods.lithium.mixin.minimal_nonvanilla.spawning.ServerLevelAccessor, // MODIFIED for porting: lithium minimal_nonvanilla.spawning (same accessor)
+    net.caffeinemc.mods.lithium.common.world.ServerWorldExtended { // MODIFIED for porting: lithium entity.inactive_navigations
     public static final BlockPos END_SPAWN_POINT = new BlockPos(100, 50, 0);
     public static final IntProvider RAIN_DELAY = UniformInt.of(12000, 180000);
     public static final IntProvider RAIN_DURATION = UniformInt.of(12000, 24000);
@@ -208,7 +211,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
     private final LevelTicks<Block> blockTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
     private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
     private final PathTypeCache pathTypesByPosCache = new PathTypeCache();
-    private final Set<Mob> navigatingMobs = new ObjectOpenHashSet<>();
+    // MODIFIED for porting: lithium entity.inactive_navigations ServerLevelMixin#init replaces this with a
+    // ReferenceOpenHashSet (identity based, faster iteration/lookup).
+    private final Set<Mob> navigatingMobs = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
     private volatile boolean isUpdatingNavigations;
     protected final Raids raids;
     private final ObjectLinkedOpenHashSet<BlockEventData> blockEvents = new ObjectLinkedOpenHashSet<>();
@@ -347,6 +352,26 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         EnvironmentAttributeSystem previous = this.environmentAttributes;
         this.environmentAttributes = environmentAttributes;
         return previous;
+    }
+
+    /**
+     * MODIFIED for porting: was lithium's entity.inactive_navigations ServerLevelMixin. Tracks the navigations that currently
+     * have a path, so that collision shape changes only have to notify those.
+     */
+    @Override
+    public void lithium$setNavigationActive(final Mob mobEntity) {
+        this.lithium$getData().activeNavigations().add(((net.caffeinemc.mods.lithium.common.entity.NavigatingEntity)mobEntity).lithium$getRegisteredNavigation());
+    }
+
+    @Override
+    public void lithium$setNavigationInactive(final Mob mobEntity) {
+        this.lithium$getData().activeNavigations().remove(((net.caffeinemc.mods.lithium.common.entity.NavigatingEntity)mobEntity).lithium$getRegisteredNavigation());
+    }
+
+    // MODIFIED for porting: was lithium's ServerLevelAccessor accessor Mixin
+    @Override
+    public PersistentEntitySectionManager<Entity> getEntityManager() {
+        return this.entityManager;
     }
 
     public void tick(final BooleanSupplier haveTime) {
@@ -504,7 +529,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
 
         for (int i = 0; i < tickSpeed; i++) {
             if (this.random.nextInt(48) == 0) {
-                this.tickPrecipitation(this.getBlockRandomPos(minX, 0, minZ, 15));
+                // MODIFIED for porting: lithium alloc.chunk_random ServerLevelMixin#redirectTickGetRandomPosInChunk
+                // replaces every getBlockRandomPos call in this method by the allocation-free variant.
+                this.lithium$getRandomPosInChunk(minX, 0, minZ, 15, this.lithium$randomPosInChunkCachedPos);
+                this.tickPrecipitation(this.lithium$randomPosInChunkCachedPos);
             }
         }
 
@@ -518,17 +546,25 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                     int sectionY = chunk.getSectionYFromSectionIndex(sectionIndex);
                     int minYInSection = SectionPos.sectionToBlockCoord(sectionY);
 
-                    for (int i = 0; i < tickSpeed; i++) {
-                        BlockPos pos = this.getBlockRandomPos(minX, minYInSection, minZ, 15);
+                    // MODIFIED for porting: lithium world.chunk_ticking.random_block_ticking ServerLevelMixin#lithiumRandomTick
+                    // replaces the initial value of this loop counter. When lithium handles the random ticks of this
+                    // section itself it returns tickSpeed, which skips the vanilla loop entirely.
+                    for (int i = this.lithium$randomTick(0, section, tickSpeed, minX, minYInSection, minZ); i < tickSpeed; i++) {
+                        // MODIFIED for porting: lithium alloc.chunk_random ServerLevelMixin (see above)
+                        this.lithium$getRandomPosInChunk(minX, minYInSection, minZ, 15, this.lithium$randomPosInChunkCachedPos);
+                        BlockPos pos = this.lithium$randomPosInChunkCachedPos;
                         profiler.push("randomTick");
                         BlockState blockState = section.getBlockState(pos.getX() - minX, pos.getY() - minYInSection, pos.getZ() - minZ);
                         if (blockState.isRandomlyTicking()) {
-                            blockState.randomTick(this, pos, this.random);
+                            // MODIFIED for porting: lithium alloc.chunk_random ServerLevelMixin#immutablePos - the cached
+                            // mutable position must not escape into block/fluid tick code.
+                            blockState.randomTick(this, pos.immutable(), this.random);
                         }
 
                         FluidState fluidState = blockState.getFluidState();
                         if (fluidState.isRandomlyTicking()) {
-                            fluidState.randomTick(this, pos, this.random);
+                            // MODIFIED for porting: lithium alloc.chunk_random ServerLevelMixin#immutablePos2
+                            fluidState.randomTick(this, pos.immutable(), this.random);
                         }
 
                         profiler.pop();
@@ -538,6 +574,69 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         }
 
         profiler.pop();
+    }
+
+    // MODIFIED for porting: lithium alloc.chunk_random ServerLevelMixin @Unique field
+    private final BlockPos.MutableBlockPos lithium$randomPosInChunkCachedPos = new BlockPos.MutableBlockPos();
+
+    // MODIFIED for porting: lithium world.chunk_ticking.random_block_ticking ServerLevelMixin.
+    // Magic number tuned to switch between vanilla and lithium's implementation. Lithium's implementation is only faster
+    // when the number of random tickable blocks in a section is relatively low.
+    private static final int LITHIUM_MAX_COUNT_FOR_BLOCK_SEARCH_AFTER_RANDOM_CHANCE = (int)(4096 * 0.09375);
+
+    /**
+     * MODIFIED for porting: lithium world.chunk_ticking.random_block_ticking ServerLevelMixin#lithiumRandomTick.
+     * Chunk sections keep a counter of the random tickable positions they contain. When that count is low, pick a random
+     * tickable block directly instead of picking random positions and testing them. The chance to pick any block at all
+     * stays N in 4096 (N = number of random tickable blocks), so the random tick distribution is unchanged.
+     */
+    private int lithium$randomTick(
+        final int original,
+        final LevelChunkSection section,
+        final int randomTickSpeed,
+        final int sectionBlockX,
+        final int sectionBlockY,
+        final int sectionBlockZ
+    ) {
+        short randomTickableStatesCount = ((net.caffeinemc.mods.lithium.common.block.BlockCountingSection)section)
+            .lithium$getCount(net.caffeinemc.mods.lithium.common.block.BlockStateFlags.RANDOM_TICKING);
+        if (randomTickableStatesCount <= LITHIUM_MAX_COUNT_FOR_BLOCK_SEARCH_AFTER_RANDOM_CHANCE) {
+            for (int p = 0; p < randomTickSpeed; p++) {
+                int randomBlockIndex = this.lithium$getRandomBlockIndexForRandomTick();
+                if (randomBlockIndex < randomTickableStatesCount) {
+                    net.caffeinemc.mods.lithium.common.world.section.RandomTickingSectionDataHelper.randomTickNthBlock(
+                        section,
+                        randomBlockIndex,
+                        ((net.caffeinemc.mods.lithium.common.world.section.LithiumSectionData)section).lithium$getSectionData().getRandomTickableBlocksByY(),
+                        this,
+                        sectionBlockX,
+                        sectionBlockY,
+                        sectionBlockZ,
+                        this.random
+                    );
+                    randomTickableStatesCount = ((net.caffeinemc.mods.lithium.common.block.BlockCountingSection)section)
+                        .lithium$getCount(net.caffeinemc.mods.lithium.common.block.BlockStateFlags.RANDOM_TICKING);
+                }
+            }
+
+            // High return value cancels the vanilla code
+            return randomTickSpeed;
+        }
+
+        // Run the vanilla code instead, due to it being faster when many random tickable blocks are present.
+        return original;
+    }
+
+    /**
+     * MODIFIED for porting: lithium world.chunk_ticking.random_block_ticking ServerLevelMixin.
+     * [VanillaCopy] from getBlockRandomPos, but without BlockPos allocation.
+     *
+     * @return random block index in range [0..4095]
+     */
+    private int lithium$getRandomBlockIndexForRandomTick() {
+        this.randValue = this.randValue * 3 + 1013904223;
+        int r = this.randValue >> 2;
+        return (r & 15) | (r >> 8 & 0xF00) | (r >> 4 & 0xF0);
     }
 
     public void tickThunder(final LevelChunk chunk) {
@@ -580,6 +679,15 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
     public void tickPrecipitation(final BlockPos pos) {
         BlockPos topPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, pos);
         BlockPos belowPos = topPos.below();
+        // MODIFIED for porting: lithium world.chunk_ticking.precipitation ServerLevelMixin cancels this method before the
+        // (expensive) biome lookup when neither ice nor snow could possibly be placed here.
+        BlockState lithium$belowState = this.getBlockState(belowPos);
+        boolean lithium$couldFreeze = lithium$belowState.getFluidState().getType() == net.minecraft.world.level.material.Fluids.WATER
+            && lithium$belowState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock;
+        if (!lithium$couldFreeze && !this.isRaining()) {
+            return;
+        }
+
         Biome biome = this.getBiome(topPos).value();
         if (biome.shouldFreeze(this, belowPos)) {
             this.setBlockAndUpdate(belowPos, Blocks.ICE.defaultBlockState());
@@ -1145,10 +1253,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         if (Shapes.joinIsNotEmpty(oldShape, newShape, BooleanOp.NOT_SAME)) {
             List<PathNavigation> navigationsToUpdate = new ObjectArrayList<>();
 
-            for (Mob navigatingMob : this.navigatingMobs) {
-                PathNavigation pathNavigation = navigatingMob.getNavigation();
-                if (pathNavigation.shouldRecomputePath(pos)) {
-                    navigationsToUpdate.add(pathNavigation);
+            // MODIFIED for porting: lithium entity.inactive_navigations ServerLevelMixin#getActiveListeners (redirects the
+            // iterator of navigatingMobs to an empty one) and #updateActiveListeners (fills the list from the tracked set of
+            // navigations that actually have a path). Navigations without a path never react to the update.
+            for (PathNavigation activeNavigation : this.lithium$getData().activeNavigations()) {
+                if (activeNavigation.shouldRecomputePath(pos)) {
+                    navigationsToUpdate.add(activeNavigation);
                 }
             }
 
@@ -1234,14 +1344,30 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         };
         Vec3 center = new Vec3(x, y, z);
         ServerExplosion explosion = new ServerExplosion(this, source, damageSource, damageCalculator, center, r, fire, blockInteraction);
-        int blockCount = explosion.explode();
+        // MODIFIED for porting: lithium world.explosions.block_raycast.skip_air.no_air_counting ServerLevelMixin
+        // (#delayExploding / #runDelayedExplosion / #runDelayedExplosionWithoutCountingBlocks). The exploded block count is
+        // only needed if at least one player is close enough to be sent the explosion packet. When the explosion skips air
+        // blocks, running it is therefore delayed until that is known: if nobody needs the count, the explosion does not
+        // even have to deduplicate and count the skipped air positions.
+        boolean lithium$delayedExplosion = explosion instanceof net.caffeinemc.mods.lithium.common.explosion.LithiumExplosion lithium$explosion && lithium$explosion.lithium$isSkippingAir();
+        int blockCount = lithium$delayedExplosion ? -1 : explosion.explode();
         ParticleOptions explosionParticle = explosion.isSmall() ? smallExplosionParticles : largeExplosionParticles;
 
         for (ServerPlayer player : this.players) {
             if (player.distanceToSqr(center) < 4096.0) {
+                if (lithium$delayedExplosion) {
+                    blockCount = explosion.explode();
+                    lithium$delayedExplosion = false;
+                }
+
                 Optional<Vec3> playerKnockback = Optional.ofNullable(explosion.getHitPlayers().get(player));
                 player.connection.send(new ClientboundExplodePacket(center, r, blockCount, playerKnockback, explosionParticle, explosionSound, blockParticles));
             }
+        }
+
+        if (lithium$delayedExplosion) {
+            ((net.caffeinemc.mods.lithium.common.explosion.LithiumExplosion)explosion).lithium$setSkipAirWithoutCounting();
+            explosion.explode();
         }
     }
 
@@ -1659,7 +1785,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         CsvOutput csvOutput = CsvOutput.builder().addColumn("x").addColumn("y").addColumn("z").addColumn("type").build(output);
 
         for (TickingBlockEntity ticker : this.blockEntityTickers) {
+            // MODIFIED for porting: lithium world.block_entity_ticking.sleeping ServerLevelMixin#getPosOrOrigin - a
+            // sleeping ticker reports a null position.
             BlockPos blockPos = ticker.getPos();
+            if (blockPos == null) {
+                blockPos = BlockPos.ZERO;
+            }
+
             csvOutput.writeRow(blockPos.getX(), blockPos.getY(), blockPos.getZ(), ticker.getType());
         }
     }
@@ -1894,7 +2026,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
         return this.getGameRules().get(GameRules.SPAWNER_BLOCKS_WORK);
     }
 
-    private final class EntityCallbacks implements LevelCallback<Entity> {
+    public final class EntityCallbacks implements LevelCallback<Entity> { // MODIFIED for porting: lithium.accesswidener made this class accessible
         public void onCreated(final Entity entity) {
             if (entity instanceof WaypointTransmitter waypoint && waypoint.isTransmittingWaypoint()) {
                 ServerLevel.this.getWaypointManager().trackWaypoint(waypoint);
@@ -1940,6 +2072,14 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                     );
                 }
 
+                // MODIFIED for porting: lithium entity.inactive_navigations ServerLevel$EntityCallbacksMixin
+                // #startListeningOnEntityLoad
+                PathNavigation lithium$navigation = mob.getNavigation();
+                mob.lithium$setRegisteredToWorld(lithium$navigation);
+                if (lithium$navigation.getPath() != null) {
+                    ServerLevel.this.lithium$setNavigationActive(mob);
+                }
+
                 ServerLevel.this.navigatingMobs.add(mob);
             }
 
@@ -1966,6 +2106,16 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                     Util.logAndPauseIfInIde(
                         "onTrackingStart called during navigation iteration", new IllegalStateException("onTrackingStart called during navigation iteration")
                     );
+                }
+
+                // MODIFIED for porting: lithium entity.inactive_navigations ServerLevel$EntityCallbacksMixin
+                // #stopListeningOnEntityUnload
+                if (mob.lithium$isRegisteredToWorld()) {
+                    if (mob.lithium$getRegisteredNavigation().getPath() != null) {
+                        ServerLevel.this.lithium$setNavigationInactive(mob);
+                    }
+
+                    mob.lithium$setRegisteredToWorld(null);
                 }
 
                 ServerLevel.this.navigatingMobs.remove(mob);

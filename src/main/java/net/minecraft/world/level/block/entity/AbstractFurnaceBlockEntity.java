@@ -38,7 +38,25 @@ import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, StackedContentsCompatible, RecipeCraftingHolder {
+public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity
+    implements WorldlyContainer,
+    StackedContentsCompatible,
+    RecipeCraftingHolder,
+    net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker, // MODIFIED for porting: lithium util.inventory_change_listening (events handled in BaseContainerBlockEntity)
+    net.caffeinemc.mods.lithium.api.inventory.LithiumInventory, // MODIFIED for porting: lithium block.hopper InventoryAccessors
+    net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity { // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.furnace
+    // MODIFIED for porting: the next two methods were lithium's block.hopper InventoryAccessors Mixin, which
+    // exposes the raw stack list so lithium can swap in its own LithiumStackList.
+    @Override
+    public NonNullList<ItemStack> getInventoryLithium() {
+        return this.items;
+    }
+
+    @Override
+    public void setInventoryLithium(final NonNullList<ItemStack> inventory) {
+        this.items = inventory;
+    }
+
     protected static final int SLOT_INPUT = 0;
     protected static final int SLOT_FUEL = 1;
     protected static final int SLOT_RESULT = 2;
@@ -61,6 +79,58 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
     private int litTimeRemaining;
     private int litTotalTime;
     private int cookingTimer;
+
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.furnace AbstractFurnaceBlockEntityMixin
+    // A block entity that has nothing to do parks itself by swapping the ticker inside its tick wrapper for a
+    // no-op one, and is woken up again by the events below.
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
+    // MODIFIED for porting: lithium furnace AbstractFurnaceBlockEntityMixin#isLit / #checkSleep
+    private boolean lithium$isLit() {
+        return this.litTimeRemaining > 0;
+    }
+
+    private void lithium$checkSleep(final BlockState state) {
+        if (!this.lithium$isLit()
+            && this.cookingTimer == 0
+            && (state.is(net.minecraft.world.level.block.Blocks.FURNACE)
+                || state.is(net.minecraft.world.level.block.Blocks.BLAST_FURNACE)
+                || state.is(net.minecraft.world.level.block.Blocks.SMOKER))
+            && this.level != null) {
+            this.lithium$startSleeping();
+        }
+    }
+
+    // MODIFIED for porting: lithium furnace AbstractFurnaceBlockEntityMixin#lithium$handleSetChanged
+    @Override
+    public void lithium$handleSetChanged() {
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
+    }
+
     private int cookingTotalTime;
     protected final ContainerData dataAccess = new ContainerData() {
         @Override
@@ -122,6 +192,10 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
         this.litTotalTime = input.getShortOr("lit_total_time", (short)0);
         this.recipesUsed.clear();
         this.recipesUsed.putAll(input.read("RecipesUsed", RECIPES_USED_CODEC).orElse(Map.of()));
+            // MODIFIED for porting: lithium furnace AbstractFurnaceBlockEntityMixin#wakeUpAfterFromTag (RETURN)
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
     }
 
     @Override
@@ -203,6 +277,9 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
         if (changed) {
             setChanged(level, pos, state);
         }
+
+        // MODIFIED for porting: lithium furnace AbstractFurnaceBlockEntityMixin#checkSleep (RETURN of serverTick)
+        entity.lithium$checkSleep(state);
     }
 
     private static void consumeFuel(final NonNullList<ItemStack> items, final ItemStack fuel) {
@@ -298,6 +375,10 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
             this.cookingTimer = 0;
             this.setChanged();
         }
+            // MODIFIED for porting: lithium furnace AbstractFurnaceBlockEntityMixin#handleSetChanged (RETURN of
+        // setItem). Workaround for the vanilla bug where furnaces are not marked for saving when their
+        // inventory is modified at a slot != 0 (CaffeineMC/lithium#765); the furnace still wakes up correctly.
+        this.lithium$handleSetChanged();
     }
 
     @Override

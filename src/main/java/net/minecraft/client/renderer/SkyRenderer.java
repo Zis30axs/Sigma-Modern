@@ -249,7 +249,35 @@ public class SkyRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * MODIFIED for porting: iris MixinSkyRenderer @Unique helpers - the sun path rotation a shader pack asks for, and the world
+     * rendering phase the pack sees.
+     */
+    private static float iris$getSunPathRotation() {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable() == null) {
+            return 0.0F;
+        }
+
+        return net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable().getSunPathRotation();
+    }
+
+    private static void iris$setPhase(final net.irisshaders.iris.pipeline.WorldRenderingPhase phase) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable() == null) {
+            return;
+        }
+
+        net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable().setPhase(phase);
+    }
+
     public void renderSkyDisc(final int skyColor) {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$renderSky$beginNormalSky (@Inject HEAD). Upstream's comment:
+        // none of the vanilla sky is rendered until after this call, so anything rendered before it is CUSTOM_SKY.
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.SKY);
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#redirectRenderSkyDisc (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.sky) {
+            return;
+        }
+
         GpuBufferSlice dynamicTransforms = RenderSystem.getDynamicUniforms()
             .writeTransform(RenderSystem.getModelViewMatrixCopy(), ARGB.vector4fFromARGB32(skyColor));
         GpuTextureView colorTexture = this.renderTarget.getColorTextureView();
@@ -297,6 +325,9 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     public void renderDarkDisc() {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$setVoidRenderStage (@Inject HEAD)
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.VOID);
+
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
         modelViewStack.translate(0.0F, 12.0F, 0.0F);
@@ -328,6 +359,9 @@ public class SkyRenderer implements AutoCloseable {
     ) {
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-90.0F));
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$renderSky$tiltSun (@Inject at the first INVOKE of
+        // PoseStack#mulPose(Quaternionfc), shift AFTER) - shader packs can tilt the sun's path.
+        poseStack.mulPose(Axis.ZP.rotationDegrees(iris$getSunPathRotation()));
         poseStack.pushPose();
         poseStack.mulPose(Axis.XP.rotation(sunAngle));
         this.renderSun(rainBrightness, poseStack);
@@ -347,6 +381,19 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     private void renderSun(final float rainBrightness, final PoseStack poseStack) {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$beforeDrawSun (@Inject HEAD, cancellable) and
+        // #iris$setSunRenderStage (@Inject HEAD)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && !net.irisshaders.iris.Iris.getPipelineManager().getPipeline().map(net.irisshaders.iris.pipeline.WorldRenderingPipeline::shouldRenderSun).orElse(true)) {
+            return;
+        }
+
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.SUN);
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#renderSun (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.sun) {
+            return;
+        }
+
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
         modelViewStack.mul(poseStack.last().pose());
@@ -374,6 +421,19 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     private void renderMoon(final MoonPhase moonPhase, final float rainBrightness, final PoseStack poseStack) {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$beforeDrawMoon (@Inject HEAD, cancellable) and
+        // #iris$setMoonRenderStage (@Inject HEAD)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && !net.irisshaders.iris.Iris.getPipelineManager().getPipeline().map(net.irisshaders.iris.pipeline.WorldRenderingPipeline::shouldRenderMoon).orElse(true)) {
+            return;
+        }
+
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.MOON);
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#renderMoon (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.moon) {
+            return;
+        }
+
         int baseVertex = moonPhase.index() * 4;
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
@@ -402,6 +462,13 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     private void renderStars(final float starBrightness, final PoseStack poseStack) {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$setStarRenderStage (@Inject HEAD)
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.STARS);
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#renderStars (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.stars) {
+            return;
+        }
+
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
         modelViewStack.mul(poseStack.last().pose());
@@ -427,6 +494,29 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     public void renderSunriseAndSunset(final PoseStack poseStack, final float sunAngle, final int sunriseAndSunsetColor) {
+        // MODIFIED for porting: was iris's MixinSkyRenderer#iris$setSunsetRenderStage (@Inject HEAD)
+        iris$setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.SUNSET);
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#renderSunriseAndSunset (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.sun) {
+            return;
+        }
+
+        // MODIFIED for porting: was iris's sky MixinDimensionSpecialEffects#iris$getSunriseColor (@Inject HEAD, cancellable) -
+        // no sunrise/sunset tint while blindness is active or the camera is submerged, so the fog illusion is not broken.
+        // Merged with sodium-extra's guard above: both simply cancel, so they are independent.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            boolean irisBlockSky = ((net.irisshaders.iris.mixin.LevelRendererAccessor)net.minecraft.client.Minecraft.getInstance().levelRenderer)
+                .getLevelRenderState()
+                .cameraRenderState
+                .entityRenderState
+                .doesMobEffectBlockSky;
+            if (irisBlockSky
+                || net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().getFluidInCamera()
+                    != net.minecraft.world.level.material.FogType.NONE) {
+                return;
+            }
+        }
+
         float alpha = ARGB.alphaFloat(sunriseAndSunsetColor);
         if (!(alpha <= 0.001F)) {
             poseStack.pushPose();
@@ -458,6 +548,11 @@ public class SkyRenderer implements AutoCloseable {
     }
 
     public void renderEndSky() {
+        // MODIFIED for porting: was sodium-extra's sky MixinSkyRenderer#preRenderEndSky (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.sky) {
+            return;
+        }
+
         RenderSystem.AutoStorageIndexBuffer autoIndices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
         GpuBuffer indexBuffer = autoIndices.getBuffer(36);
         GpuTextureView colorTexture = this.renderTarget.getColorTextureView();

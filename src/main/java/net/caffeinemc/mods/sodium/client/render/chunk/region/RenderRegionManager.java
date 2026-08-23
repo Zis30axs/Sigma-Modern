@@ -1,0 +1,278 @@
+package net.caffeinemc.mods.sodium.client.render.chunk.region;
+
+import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
+import net.caffeinemc.mods.sodium.client.gpu.arena.PendingUpload;
+import net.caffeinemc.mods.sodium.client.gpu.arena.staging.MojangStagingBuffer;
+import net.caffeinemc.mods.sodium.client.gpu.arena.staging.StagingBuffer;
+import net.caffeinemc.mods.sodium.client.render.chunk.IntPool;
+import net.caffeinemc.mods.sodium.client.render.chunk.RenderSection;
+import net.caffeinemc.mods.sodium.client.render.chunk.UniformBufferManager;
+import net.caffeinemc.mods.sodium.client.render.chunk.compile.BuilderTaskOutput;
+import net.caffeinemc.mods.sodium.client.render.chunk.compile.ChunkBuildOutput;
+import net.caffeinemc.mods.sodium.client.render.chunk.compile.ChunkSortOutput;
+import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionMeshParts;
+import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
+import net.caffeinemc.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
+import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.SharedIndexSorter;
+import net.minecraft.client.Minecraft;
+import net.minecraft.util.profiling.Profiler;
+import net.minecraft.util.profiling.ProfilerFiller;
+import org.jspecify.annotations.NonNull;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+
+public class RenderRegionManager {
+    private final Long2ReferenceOpenHashMap<RenderRegion> regions = new Long2ReferenceOpenHashMap<>();
+
+    private final StagingBuffer stagingBuffer;
+    private final IntPool freeIds = new IntPool();
+
+    public RenderRegionManager() {
+        this.stagingBuffer = createStagingBuffer();
+    }
+
+    public void update(UniformBufferManager ubm) {
+        this.stagingBuffer.flip();
+
+        Iterator<RenderRegion> it = this.regions.values()
+                .iterator();
+
+        while (it.hasNext()) {
+            RenderRegion region = it.next();
+            region.update();
+
+            if (region.isEmpty()) {
+                region.delete();
+                if (region.getId() != -1) {
+                    this.freeIds.release(region.getId());
+                    ubm.clearRegionTimes(region.getId());
+                }
+
+                it.remove();
+            }
+        }
+    }
+
+    public void uploadResults(Collection<BuilderTaskOutput> results, UniformBufferManager uniforms) {
+        for (var entry : this.createMeshUploadQueues(results)) {
+            this.uploadResults(entry.getKey(), entry.getValue(), uniforms);
+        }
+    }
+
+    private void uploadResults(RenderRegion region, Collection<BuilderTaskOutput> results, UniformBufferManager uniforms) {
+        var uploads = new ArrayList<PendingSectionMeshUpload>();
+        var indexUploads = new ArrayList<PendingSectionIndexBufferUpload>();
+
+        for (BuilderTaskOutput result : results) {
+            int renderSectionIndex = result.section.getSectionIndex();
+
+            if (result.section.isDisposed()) {
+                throw new IllegalStateException("Render section is disposed");
+            }
+
+            if (result instanceof ChunkBuildOutput chunkBuildOutput) {
+                int meshTime = -1;
+
+                if (result.section.consumeFade()) {
+                    meshTime = Math.toIntExact(System.currentTimeMillis() - region.getCreationTime());
+                }
+
+                for (TerrainRenderPass pass : DefaultTerrainRenderPasses.ALL) {
+                    var storage = region.getStorage(pass);
+
+                    if (storage != null) {
+                        storage.removeVertexData(renderSectionIndex);
+                        region.clearCachedBatchFor(pass);
+                    }
+
+                    BuiltSectionMeshParts mesh = chunkBuildOutput.getMesh(pass);
+
+                    if (mesh != null) {
+                        uploads.add(new PendingSectionMeshUpload(result.section, meshTime, mesh, pass,
+                                new PendingUpload(mesh.getVertexData())));
+                    }
+                }
+            }
+
+            if (result instanceof ChunkSortOutput indexDataOutput && indexDataOutput.containsNewIndexData()) {
+                var sorter = indexDataOutput.getSorter();
+                if (sorter instanceof SharedIndexSorter sharedIndexSorter) {
+                    var storage = region.createStorage(DefaultTerrainRenderPasses.TRANSLUCENT);
+                    storage.removeIndexData(renderSectionIndex);
+
+                    // clear batch cache if it's newly using the shared index buffer and was not previously.
+                    // updates to the shared index buffer which cause the batch cache to be invalidated are handled with needsSharedIndexUpdate
+                    if (storage.setSharedIndexUsage(renderSectionIndex, sharedIndexSorter.quadCount())) {
+                        region.clearCachedBatchFor(DefaultTerrainRenderPasses.TRANSLUCENT);
+                    }
+                } else {
+                    var storage = region.getStorage(DefaultTerrainRenderPasses.TRANSLUCENT);
+                    if (storage != null) {
+                        storage.removeIndexData(renderSectionIndex);
+                        storage.setSharedIndexUsage(renderSectionIndex, 0);
+
+                        // always clear batch cache on uploads of new index data
+                        region.clearCachedBatchFor(DefaultTerrainRenderPasses.TRANSLUCENT);
+                    }
+
+                    if (sorter == null) {
+                        continue;
+                    }
+                    // when a non-present TranslucentData is used like NoData, the indexBuffer is null
+                    var buffer = sorter.getIndexBuffer();
+                    if (buffer == null) {
+                        continue;
+                    }
+
+                    indexUploads.add(new PendingSectionIndexBufferUpload(result.section, new PendingUpload(buffer)));
+                }
+            }
+        }
+
+        ProfilerFiller profiler = Profiler.get();
+
+        // If we have nothing to upload, abort!
+        var translucentStorage = region.getStorage(DefaultTerrainRenderPasses.TRANSLUCENT);
+        var needsSharedIndexUpdate = translucentStorage != null && translucentStorage.needsSharedIndexUpdate();
+        if (uploads.isEmpty() && indexUploads.isEmpty() && !needsSharedIndexUpdate) {
+            return;
+        }
+
+        var cameraPosition = Minecraft.getInstance().gameRenderer.mainCamera().position();
+
+        var resources = region.createResources();
+        var regionFillFractionInv = region.getFillFractionInv();
+
+        profiler.push("upload_vertices");
+
+        if (!uploads.isEmpty()) {
+            var arena = resources.getGeometryArena();
+            boolean bufferChanged = arena.upload(uploads.stream()
+                    .map(upload -> upload.vertexUpload), regionFillFractionInv);
+
+            // If any of the buffers changed, the tessellation will need to be updated
+            // Once invalidated the tessellation will be re-created on the next attempted use
+            if (bufferChanged) {
+                region.onBufferResized();
+                // MODIFIED for porting: was iris's compat.sodium MixinRenderRegionManager#iris$forceClear (@Redirect on
+                // RenderRegion#clearAllCachedBatches) - the shadow-pass batch caches have to be cleared too.
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    ((net.irisshaders.iris.mixinterface.ShadowRenderRegion)region).iris$forceClearAllBatches();
+                } else {
+                    region.clearAllCachedBatches();
+                }
+            }
+
+            // Collect the upload results
+            for (PendingSectionMeshUpload upload : uploads) {
+                var storage = region.createStorage(upload.pass);
+                if (upload.relativeBuiltTime != -1) { // We don't want the animation to happen again on chunks changing!
+                    double dx = upload.section.getCenterX() - cameraPosition.x;
+                    double dy = upload.section.getCenterY() - cameraPosition.y;
+                    double dz = upload.section.getCenterZ() - cameraPosition.z;
+                    double distanceToPlayer = dx * dx + dy * dy + dz * dz;
+
+                    int relativeBuiltTime = distanceToPlayer < 768.0 ? -1 : upload.relativeBuiltTime;
+
+                    // TODO: improve the plumbing of this to be less cumbersome
+                    uniforms.writeMeshTimes(region.getOrAcquireId(this.freeIds), upload.section.getSectionIndex(), relativeBuiltTime);
+                }
+                storage.setVertexData(upload.section.getSectionIndex(),
+                        upload.vertexUpload.getResult(), upload.meshData.getVertexSegments());
+            }
+        }
+
+        profiler.popPush("upload_indices");
+        var indexBufferChanged = false;
+
+        if (!indexUploads.isEmpty()) {
+            var arena = resources.getIndexArena();
+            indexBufferChanged = arena.upload(indexUploads.stream()
+                    .map(upload -> upload.indexBufferUpload), regionFillFractionInv);
+
+            for (PendingSectionIndexBufferUpload upload : indexUploads) {
+                var storage = region.createStorage(DefaultTerrainRenderPasses.TRANSLUCENT);
+                storage.setIndexData(upload.section.getSectionIndex(), upload.indexBufferUpload.getResult());
+            }
+        }
+
+        if (needsSharedIndexUpdate) {
+            indexBufferChanged |= translucentStorage.updateSharedIndexData(resources.getIndexArena(), regionFillFractionInv);
+        }
+
+        if (indexBufferChanged) {
+            region.onIndexBufferResized();
+            region.clearCachedBatchFor(DefaultTerrainRenderPasses.TRANSLUCENT);
+        }
+
+        profiler.pop();
+    }
+
+    private Reference2ReferenceMap.FastEntrySet<RenderRegion, List<BuilderTaskOutput>> createMeshUploadQueues(Collection<BuilderTaskOutput> results) {
+        var map = new Reference2ReferenceOpenHashMap<RenderRegion, List<BuilderTaskOutput>>();
+
+        for (var result : results) {
+            var queue = map.computeIfAbsent(result.section.getRegion(), k -> new ArrayList<>());
+            queue.add(result);
+        }
+
+        return map.reference2ReferenceEntrySet();
+    }
+
+    public void delete() {
+        for (RenderRegion region : this.regions.values()) {
+            region.delete();
+            if (region.getId() != -1) this.freeIds.release(region.getId());
+        }
+
+        this.regions.clear();
+        this.stagingBuffer.delete();
+    }
+
+    public Collection<RenderRegion> getLoadedRegions() {
+        return this.regions.values();
+    }
+
+    public StagingBuffer getStagingBuffer() {
+        return this.stagingBuffer;
+    }
+
+    public RenderRegion createForChunk(int chunkX, int chunkY, int chunkZ) {
+        return this.create(chunkX >> RenderRegion.REGION_WIDTH_SH,
+                chunkY >> RenderRegion.REGION_HEIGHT_SH,
+                chunkZ >> RenderRegion.REGION_LENGTH_SH);
+    }
+
+    public RenderRegion getForChunk(int chunkX, int chunkY, int chunkZ) {
+        return this.regions.get(RenderRegion.key(chunkX >> RenderRegion.REGION_WIDTH_SH,
+                chunkY >> RenderRegion.REGION_HEIGHT_SH,
+                chunkZ >> RenderRegion.REGION_LENGTH_SH));
+    }
+
+    @NonNull
+    private RenderRegion create(int x, int y, int z) {
+        var key = RenderRegion.key(x, y, z);
+        var instance = this.regions.get(key);
+
+        if (instance == null) {
+            this.regions.put(key, instance = new RenderRegion(x, y, z, this.stagingBuffer));
+        }
+
+        return instance;
+    }
+
+    private record PendingSectionMeshUpload(RenderSection section, int relativeBuiltTime, BuiltSectionMeshParts meshData, TerrainRenderPass pass, PendingUpload vertexUpload) {
+    }
+
+    private record PendingSectionIndexBufferUpload(RenderSection section, PendingUpload indexBufferUpload) {
+    }
+
+    private static StagingBuffer createStagingBuffer() {
+        return new MojangStagingBuffer(32_000_000);
+    }
+}

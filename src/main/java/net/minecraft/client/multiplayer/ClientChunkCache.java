@@ -65,6 +65,9 @@ public class ClientChunkCache extends ChunkSource {
             LevelChunk currentChunk = this.storage.getChunk(index);
             if (isValidChunk(currentChunk, pos.x(), pos.z())) {
                 this.storage.drop(index, currentChunk);
+                // MODIFIED for porting: sodium core.world.map ClientChunkCacheMixin#onChunkUnloaded
+                // (INVOKE Storage#drop, shift AFTER)
+                net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder.get(this.level).onChunkStatusRemoved(pos.x(), pos.z(), net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus.FLAG_HAS_BLOCK_DATA);
             }
         }
     }
@@ -124,6 +127,9 @@ public class ClientChunkCache extends ChunkSource {
         }
 
         this.level.onChunkLoaded(pos);
+        // MODIFIED for porting: sodium core.world.map ClientChunkCacheMixin#onChunkLoaded
+        // (INVOKE ClientLevel#onChunkLoaded, shift AFTER)
+        net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder.get(this.level).onChunkStatusAdded(chunkX, chunkZ, net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus.FLAG_HAS_BLOCK_DATA);
         return chunk;
     }
 

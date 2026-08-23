@@ -53,7 +53,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class IntegratedServer extends MinecraftServer {
+public class IntegratedServer extends MinecraftServer
+    implements me.flashyreese.mods.sodiumextra.mixin.fog.AccessorIntegratedServer { // MODIFIED for porting: sodium-extra AccessorIntegratedServer
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MIN_SIM_DISTANCE = 2;
     public static final int MAX_PLAYERS = 8;
@@ -296,6 +297,12 @@ public class IntegratedServer extends MinecraftServer {
     public void setWorldAllowCommands(final boolean allowCommands) {
         this.getWorldData().setAllowCommands(allowCommands);
         this.updateCommandsAllowedForOtherPlayers();
+    }
+
+    // MODIFIED for porting: was sodium-extra's fog AccessorIntegratedServer @Invoker("commandsAllowedForOtherPlayers")
+    @Override
+    public boolean sodiumExtra$commandsAllowedForOtherPlayers() {
+        return this.commandsAllowedForOtherPlayers();
     }
 
     public boolean commandsAllowedForOtherPlayers() {

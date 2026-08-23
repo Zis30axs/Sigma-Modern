@@ -34,7 +34,9 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public final class OptionInstance<T> {
+// MODIFIED for porting: iris.accesswidener declares `extendable class OptionInstance`, so it lost its final (iris's
+// ShadowDistanceOption extends it)
+public class OptionInstance<T> {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final OptionInstance.Enum<Boolean> BOOLEAN_VALUES = new OptionInstance.Enum<>(ImmutableList.of(Boolean.TRUE, Boolean.FALSE), Codec.BOOL);
     public static final OptionInstance.CaptionBasedToString<Boolean> BOOLEAN_TO_STRING = (var0, b) -> b

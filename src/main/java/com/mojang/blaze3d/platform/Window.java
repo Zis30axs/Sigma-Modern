@@ -132,7 +132,19 @@ public final class Window implements AutoCloseable {
         try (GLFWErrorScope var9 = new GLFWErrorScope(glfwErrors)) {
             backend.setWindowHints();
             GLFW.glfwWindowHint(131076, 0);
-            windowHandle = GLFW.glfwCreateWindow(width, height, title, monitor, 0L);
+            // MODIFIED for porting: sodium workarounds.context_creation WindowMixin#wrapGlfwCreateWindow (@Redirect).
+            // The NVIDIA and AMD driver workarounds have to be installed in the environment while the GL context is
+            // created, and removed again afterwards.
+            net.caffeinemc.mods.sodium.client.compatibility.workarounds.nvidia.NvidiaWorkarounds.applyEnvironmentChanges();
+            net.caffeinemc.mods.sodium.client.compatibility.workarounds.amd.AmdWorkarounds.applyEnvironmentChanges();
+
+            try {
+                windowHandle = GLFW.glfwCreateWindow(width, height, title, monitor, 0L);
+            } finally {
+                net.caffeinemc.mods.sodium.client.compatibility.workarounds.nvidia.NvidiaWorkarounds.undoEnvironmentChanges();
+                net.caffeinemc.mods.sodium.client.compatibility.workarounds.amd.AmdWorkarounds.undoEnvironmentChanges();
+            }
+
             if (windowHandle == 0L) {
                 backend.handleWindowCreationErrors(glfwErrors.firstError());
             }
@@ -282,6 +294,9 @@ public final class Window implements AutoCloseable {
                     this.minimized = false;
                     this.framebufferWidth = newWidth;
                     this.framebufferHeight = newFrameBufferHeight;
+                    // MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinWindow#afterFramebufferResize
+                    // (@Inject at FIELD framebufferHeight PUTFIELD, shift AFTER)
+                    this.sodiumExtra$scaleFramebufferSize();
 
                     try {
                         this.eventHandler.framebufferSizeChanged();
@@ -306,6 +321,54 @@ public final class Window implements AutoCloseable {
         outHeight[0] = this.isSoftScreen() ? outHeight[0] - 1 : outHeight[0];
         this.framebufferWidth = outWidth[0] > 0 ? outWidth[0] : 1;
         this.framebufferHeight = outHeight[0] > 0 ? outHeight[0] : 1;
+        // MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinWindow#afterUpdateFrameBufferSize
+        // (@Inject RETURN)
+        this.sodiumExtra$scaleInitialFramebufferSize();
+    }
+
+    /**
+     * MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinWindow#scaleInitialFramebufferSize (@Unique).
+     * <p>
+     * OpenGL only: the Cocoa non-Retina window hint gives us the correct reduced drawable, but the first
+     * refreshFramebufferSize() during startup can leave Minecraft's Window framebuffer fields at the Retina backing size. A
+     * manual resize fixes it through the normal callback path; pinning the initial values to the logical window size avoids
+     * the startup-only stretched/offset GUI without changing resize behavior.
+     */
+    private void sodiumExtra$scaleInitialFramebufferSize() {
+        if (!me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.REDUCE_RESOLUTION_ON_MAC) {
+            return;
+        }
+
+        me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.rememberWindowSize(this.width, this.height);
+
+        if (me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.shouldUseWindowSizeForInitialFramebuffer()) {
+            this.framebufferWidth = Math.max(1, this.width);
+            this.framebufferHeight = Math.max(1, this.height);
+            return;
+        }
+
+        this.sodiumExtra$scaleFramebufferSize();
+    }
+
+    /**
+     * MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinWindow#scaleFramebufferSize (@Unique).
+     * <p>
+     * Vulkan/MoltenVK still needs Window's framebuffer dimensions reduced. OpenGL is excluded here because GLFW already
+     * provided the reduced drawable and a second halving was confirmed to render 1440p as 720p.
+     */
+    private void sodiumExtra$scaleFramebufferSize() {
+        if (!me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.REDUCE_RESOLUTION_ON_MAC) {
+            return;
+        }
+
+        me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.rememberWindowSize(this.width, this.height);
+
+        if (!me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.shouldReduceFramebuffer(this.framebufferWidth, this.framebufferHeight, this.width, this.height)) {
+            return;
+        }
+
+        this.framebufferWidth = me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.reduce(this.framebufferWidth);
+        this.framebufferHeight = me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.reduce(this.framebufferHeight);
     }
 
     private void onResize(final long handle, final int newWidth, final int newHeight) {

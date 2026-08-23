@@ -89,8 +89,12 @@ public class AtlasManager implements AutoCloseable, PreparableReloadListener, Sp
 
     @Override
     public TextureAtlasSprite get(final SpriteId sprite) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking AtlasManagerMixin#sodium$catchUsedSprites
+        // (RETURN) - this is used to catch the fire sprite when an entity is on fire and there are no fire blocks in the
+        // scene.
         TextureAtlasSprite result = this.spriteLookup.get(sprite);
         if (result != null) {
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(result);
             return result;
         } else {
             Identifier atlasTextureId = sprite.atlasLocation();
@@ -98,7 +102,9 @@ public class AtlasManager implements AutoCloseable, PreparableReloadListener, Sp
             if (atlasEntry == null) {
                 throw new IllegalArgumentException("Invalid atlas texture id: " + atlasTextureId);
             } else {
-                return atlasEntry.atlas().missingSprite();
+                TextureAtlasSprite missingSprite = atlasEntry.atlas().missingSprite();
+                net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(missingSprite);
+                return missingSprite;
             }
         }
     }

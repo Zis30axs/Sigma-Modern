@@ -190,7 +190,16 @@ public interface VibrationSystem {
         }
     }
 
-    class Listener implements GameEventListener {
+    // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.sculk_sensor_shrieker
+    // VibrationSystemListenerMixin lets a parked sculk block entity be woken up when a vibration is scheduled.
+    class Listener implements GameEventListener, net.caffeinemc.mods.lithium.common.block.entity.sleeping_sculk.GameEventListenerWithCallback {
+        private Runnable lithium$listener;
+
+        @Override
+        public void lithium$setGameEventCallback(final Runnable listener) {
+            this.lithium$listener = listener;
+        }
+
         private final VibrationSystem system;
 
         public Listener(final VibrationSystem system) {
@@ -253,6 +262,11 @@ public interface VibrationSystem {
             final Vec3 origin,
             final Vec3 dest
         ) {
+            // MODIFIED for porting: lithium sculk_sensor_shrieker VibrationSystemListenerMixin#onCurrentVibrationUpdate (HEAD)
+            if (this.lithium$listener != null) {
+                this.lithium$listener.run();
+            }
+
             data.selectionStrategy.addCandidate(new VibrationInfo(event, (float)origin.distanceTo(dest), origin, context.sourceEntity()), level.getGameTime());
         }
 

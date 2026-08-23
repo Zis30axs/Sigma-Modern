@@ -34,7 +34,9 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public abstract class EntityRenderer<T extends Entity, S extends EntityRenderState> {
+// MODIFIED for porting: implements sodium's EntityRendererAccessor (mixin.core.render.world.EntityRendererAccessor)
+public abstract class EntityRenderer<T extends Entity, S extends EntityRenderState>
+    implements net.caffeinemc.mods.sodium.mixin.core.render.world.EntityRendererAccessor {
     private static final float SHADOW_POWER_FALLOFF_Y = 0.5F;
     private static final float MAX_SHADOW_RADIUS = 32.0F;
     public static final float NAMETAG_SCALE = 0.025F;
@@ -75,7 +77,9 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
             boundingBox = new AABB(entity.getX() - 2.0, entity.getY() - 2.0, entity.getZ() - 2.0, entity.getX() + 2.0, entity.getY() + 2.0, entity.getZ() + 2.0);
         }
 
-        if (culler.isVisible(boundingBox)) {
+        // MODIFIED for porting: sodium features.render.entity.cull EntityRendererMixin#preShouldRender (@WrapOperation on
+        // the first Frustum#isVisible call) - additionally cull entities whose chunk section sodium knows is not visible.
+        if (sodium$isEntityVisible(this, entity) && culler.isVisible(boundingBox)) {
             return true;
         }
 
@@ -88,6 +92,23 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
         }
 
         return false;
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's features.render.entity.cull EntityRendererMixin#preShouldRender. Returns true when
+     * sodium's renderer is not available, so vanilla's own frustum check decides on its own.
+     */
+    private static <T extends Entity, S extends EntityRenderState> boolean sodium$isEntityVisible(final EntityRenderer<T, S> renderer, final T entity) {
+        net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer sodium$renderer =
+            net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer.instanceNullable();
+        return sodium$renderer == null || sodium$renderer.isEntityVisible(renderer, entity);
+    }
+
+    // MODIFIED for porting: was sodium's EntityRendererAccessor @Invoker("getBoundingBoxForCulling")
+    @Override
+    @SuppressWarnings("unchecked")
+    public AABB sodium$getBoundingBoxForCulling(final Entity entity) {
+        return this.getBoundingBoxForCulling((T)entity);
     }
 
     protected AABB getBoundingBoxForCulling(final T entity) {

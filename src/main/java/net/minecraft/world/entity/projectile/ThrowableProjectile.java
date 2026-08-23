@@ -47,7 +47,10 @@ public abstract class ThrowableProjectile extends Projectile {
         this.handleFirstTickBubbleColumn();
         this.applyGravity();
         this.applyInertia();
-        HitResult result = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions ThrowableProjectileMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
+        HitResult result = ProjectileUtil.getHitResultOnMoveVector(this, new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity));
         Vec3 newPosition;
         if (result.getType() != HitResult.Type.MISS) {
             newPosition = result.getLocation();

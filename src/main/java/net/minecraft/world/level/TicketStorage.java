@@ -41,6 +41,24 @@ public class TicketStorage extends SavedData {
         Identifier.withDefaultNamespace("chunk_tickets"), TicketStorage::new, CODEC, DataFixTypes.SAVED_DATA_FORCED_CHUNKS
     );
     private final Long2ObjectOpenHashMap<List<Ticket>> tickets;
+    /**
+     * MODIFIED for porting: lithium minimal_nonvanilla.world.expiring_chunk_tickets TicketStorageMixin. Every position that
+     * holds at least one ticket which can expire is mirrored here, so purging expired tickets only has to iterate those
+     * positions instead of every position with any ticket. The lists are the same objects as in {@link #tickets}.
+     */
+    private final Long2ObjectOpenHashMap<List<Ticket>> lithium$positionsWithExpiringTicket = new Long2ObjectOpenHashMap<>();
+
+    private static boolean lithium$canNoneExpire(final List<Ticket> tickets) {
+        if (!tickets.isEmpty()) {
+            for (Ticket ticket : tickets) {
+                if (ticket.getType().hasTimeout()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
     private final Long2ObjectOpenHashMap<List<Ticket>> deactivatedTickets;
     private LongSet chunksWithForcedTickets = new LongOpenHashSet();
     private TicketStorage.@Nullable ChunkUpdated loadingChunkUpdatedListener;
@@ -157,6 +175,11 @@ public class TicketStorage extends SavedData {
 
         int oldSimulationTicketLevel = getTicketLevelAt(tickets, true);
         int oldLoadingTicketLevel = getTicketLevelAt(tickets, false);
+        // MODIFIED for porting: lithium expiring_chunk_tickets TicketStorageMixin#registerExpiringTicket
+        if (ticket.getType().hasTimeout()) {
+            this.lithium$positionsWithExpiringTicket.put(key, tickets);
+        }
+
         tickets.add(ticket);
         if (SharedConstants.DEBUG_VERBOSE_SERVER_EVENTS) {
             LOGGER.debug("ATI {} {}", ChunkPos.unpack(key), ticket);
@@ -246,6 +269,11 @@ public class TicketStorage extends SavedData {
             return false;
         }
 
+        // MODIFIED for porting: lithium expiring_chunk_tickets TicketStorageMixin#unregisterExpiringTicket
+        if (ticket.getType().hasTimeout() && lithium$canNoneExpire(tickets)) {
+            this.lithium$positionsWithExpiringTicket.remove(key);
+        }
+
         if (tickets.isEmpty()) {
             this.tickets.remove(key);
         }
@@ -306,7 +334,13 @@ public class TicketStorage extends SavedData {
     }
 
     public void removeTicketIf(final TicketStorage.TicketPredicate predicate, final @Nullable Long2ObjectOpenHashMap<List<Ticket>> removedTickets) {
-        ObjectIterator<Entry<List<Ticket>>> ticketsPerChunkIterator = this.tickets.long2ObjectEntrySet().fastIterator();
+        // MODIFIED for porting: lithium expiring_chunk_tickets TicketStorageMixin#getExpiringTicketsByPosition - when
+        // purging expired tickets (removedTickets == null) only the positions that actually have an expiring ticket are
+        // visited; every other call keeps iterating all ticket positions.
+        Long2ObjectOpenHashMap<List<Ticket>> lithium$iteratedPositions = removedTickets == null
+            ? this.lithium$positionsWithExpiringTicket
+            : this.tickets;
+        ObjectIterator<Entry<List<Ticket>>> ticketsPerChunkIterator = lithium$iteratedPositions.long2ObjectEntrySet().fastIterator();
         boolean removedForced = false;
 
         while (ticketsPerChunkIterator.hasNext()) {
@@ -349,7 +383,24 @@ public class TicketStorage extends SavedData {
                 }
 
                 this.setDirty();
-                if (entry.getValue().isEmpty()) {
+                // MODIFIED for porting: lithium expiring_chunk_tickets TicketStorageMixin#removeIfNoTickables and
+                // #fixOtherCollection - keep the two maps consistent with each other.
+                boolean lithium$isEmpty = entry.getValue().isEmpty();
+                if (!lithium$isEmpty) {
+                    if (lithium$canNoneExpire(entry.getValue())) {
+                        if (removedTickets == null) {
+                            ticketsPerChunkIterator.remove();
+                        } else {
+                            this.lithium$positionsWithExpiringTicket.remove(chunkPos);
+                        }
+                    }
+                } else {
+                    if (removedTickets == null) {
+                        this.tickets.remove(chunkPos);
+                    } else {
+                        this.lithium$positionsWithExpiringTicket.remove(chunkPos);
+                    }
+
                     ticketsPerChunkIterator.remove();
                 }
             }

@@ -36,7 +36,7 @@ public class PoiRecord {
         return this.freeTickets;
     }
 
-    protected boolean acquireTicket() {
+    public boolean acquireTicket() { // MODIFIED for porting: lithium.accesswidener widened access
         if (this.freeTickets <= 0) {
             return false;
         }

@@ -22,27 +22,14 @@ public abstract class RedstoneWireEvaluator {
         return this.wireBlock.getBlockSignal(level, pos);
     }
 
-    protected int getWireSignal(final BlockPos pos, final BlockState state) {
+    public int getWireSignal(final BlockPos pos, final BlockState state) { // MODIFIED for porting: lithium.accesswidener widened access
         return state.is(this.wireBlock) ? state.getValue(RedStoneWireBlock.POWER) : 0;
     }
 
     protected int getIncomingWireSignal(final Level level, final BlockPos pos) {
-        int wireSignal = 0;
-
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
-            BlockPos neighborPos = pos.relative(direction);
-            BlockState neighborState = level.getBlockState(neighborPos);
-            wireSignal = Math.max(wireSignal, this.getWireSignal(neighborPos, neighborState));
-            BlockPos abovePos = pos.above();
-            if (neighborState.isRedstoneConductor(level, neighborPos) && !level.getBlockState(abovePos).isRedstoneConductor(level, abovePos)) {
-                BlockPos aboveNeighborPos = neighborPos.above();
-                wireSignal = Math.max(wireSignal, this.getWireSignal(aboveNeighborPos, level.getBlockState(aboveNeighborPos)));
-            } else if (!neighborState.isRedstoneConductor(level, neighborPos)) {
-                BlockPos belowNeighborPos = neighborPos.below();
-                wireSignal = Math.max(wireSignal, this.getWireSignal(belowNeighborPos, level.getBlockState(belowNeighborPos)));
-            }
-        }
-
-        return Math.max(0, wireSignal - 1);
+        // MODIFIED for porting: lithium block.redstone_wire RedstoneWireEvaluatorMixin#getIncomingWireSignalFaster
+        // (HEAD, cancellable, so the vanilla body below was unreachable) - avoids reading the same neighbouring blocks
+        // several times.
+        return net.caffeinemc.mods.lithium.common.block.redstone.RedstoneWirePowerCalculations.getNeighborWireSignal(this.wireBlock, this, level, pos);
     }
 }

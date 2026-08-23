@@ -25,7 +25,57 @@ import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
-public class ChestBlockEntity extends RandomizableContainerBlockEntity implements LidBlockEntity {
+public class ChestBlockEntity extends RandomizableContainerBlockEntity
+    implements LidBlockEntity,
+    net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker, // MODIFIED for porting: lithium util.inventory_change_listening
+    net.caffeinemc.mods.lithium.api.inventory.LithiumInventory, // MODIFIED for porting: lithium block.hopper InventoryAccessors
+    net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity { // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.chest_animation
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.chest_animation ChestBlockEntityMixin
+    // A block entity that has nothing to do parks itself by swapping the ticker inside its tick wrapper for a
+    // no-op one, and is woken up again by the events below.
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
+    // MODIFIED for porting: lithium chest_animation ChestBlockEntityMixin#checkSleep. Once the lid animation has
+    // finished it stays unchanged until the next triggerEvent, which is where the block entity is woken up again.
+    private void lithium$checkSleep() {
+        if (this.getOpenNess(0.0F) == this.getOpenNess(1.0F)) {
+            this.lithium$startSleeping();
+        }
+    }
+    // MODIFIED for porting: the next two methods were lithium's block.hopper InventoryAccessors Mixin, which
+    // exposes the raw stack list so lithium can swap in its own LithiumStackList.
+    @Override
+    public NonNullList<ItemStack> getInventoryLithium() {
+        return this.items;
+    }
+
+    @Override
+    public void setInventoryLithium(final NonNullList<ItemStack> inventory) {
+        this.items = inventory;
+    }
+
     private static final int EVENT_SET_OPEN_COUNT = 1;
     private static final Component DEFAULT_NAME = Component.translatable("container.chest");
     private NonNullList<ItemStack> items = NonNullList.withSize(27, ItemStack.EMPTY);
@@ -99,6 +149,9 @@ public class ChestBlockEntity extends RandomizableContainerBlockEntity implement
 
     public static void lidAnimateTick(final Level level, final BlockPos pos, final BlockState state, final ChestBlockEntity entity) {
         entity.chestLidController.tickLid();
+        // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.chest_animation
+        // ChestBlockEntityMixin#sleepOnAnimationEnd (RETURN)
+        entity.lithium$checkSleep();
     }
 
     private static void playSound(final Level level, final BlockPos worldPosition, final BlockState blockState, final SoundEvent event) {
@@ -120,6 +173,11 @@ public class ChestBlockEntity extends RandomizableContainerBlockEntity implement
     @Override
     public boolean triggerEvent(final int b0, final int b1) {
         if (b0 == 1) {
+            // MODIFIED for porting: lithium chest_animation ChestBlockEntityMixin#wakeUpOnSyncedBlockEvent
+            if (this.lithium$getSleepingTicker() != null) {
+                this.wakeUpNow();
+            }
+
             this.chestLidController.shouldBeOpen(b1 > 0);
             return true;
         } else {
@@ -154,9 +212,18 @@ public class ChestBlockEntity extends RandomizableContainerBlockEntity implement
         return this.items;
     }
 
+    // MODIFIED for porting: was lithium-fabric's util.inventory_change_listening ChestBlockEntityMixin - a chest
+    // that switches between the single and double variant has to invalidate its inventory listeners.
+    @Override
+    public void lithium$handleSetBlockState() {
+        this.lithium$emitRemoved();
+    }
+
     @Override
     protected void setItems(final NonNullList<ItemStack> items) {
         this.items = items;
+        // MODIFIED for porting: lithium util.inventory_change_listening StackListReplacementTracking (RETURN of setItems)
+        this.lithium$emitStackListReplaced();
     }
 
     @Override

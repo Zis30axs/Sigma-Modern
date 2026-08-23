@@ -42,6 +42,27 @@ public class ItemFeatureRenderer extends RenderTypeFeatureRenderer<ItemFeatureRe
     }
 
     private void prepareSubmit(final ItemFeatureRenderer.Submit submit, final boolean foil) {
+        // MODIFIED for porting: was iris's entity_render_context MixinItemFeatureRenderer#iris$set (@Inject HEAD) and
+        // #iris$clear (@Inject RETURN) - the submit carries the entity/block-entity/item ids the pack needs.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            ((net.irisshaders.iris.mixinterface.ModelStorage)(Object)submit).iris$set();
+
+            try {
+                this.iris$prepareSubmit(submit, foil);
+            } finally {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(0);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(0);
+            }
+
+            return;
+        }
+
+        this.iris$prepareSubmit(submit, foil);
+    }
+
+    // MODIFIED for porting: original vanilla body of prepareSubmit
+    private void iris$prepareSubmit(final ItemFeatureRenderer.Submit submit, final boolean foil) {
         if (foil) {
             this.prepareFoilSubmit(submit);
         } else if (submit.outlineColor() != 0) {
@@ -122,16 +143,163 @@ public class ItemFeatureRenderer extends RenderTypeFeatureRenderer<ItemFeatureRe
     }
 
     @OnlyIn(Dist.CLIENT)
-    public record Submit(
-        PoseStack.Pose pose,
-        ItemDisplayContext displayContext,
-        int lightCoords,
-        int overlayCoords,
-        int outlineColor,
-        int[] tintLayers,
-        List<BakedQuad> quads,
-        ItemStackRenderState.FoilType foilType
-    ) implements TranslucentSubmit {
+    /**
+     * MODIFIED for porting: iris's entity_render_context MixinItemSubmit adds four mutable {@code @Unique} fields to this record
+     * (see the ModelStorage block below), which a record cannot have. It was therefore rewritten as a plain final class with
+     * the same components and accessors; {@code equals}, {@code hashCode} and {@code toString} are implemented exactly as
+     * the record's generated ones (the captured ids are set after construction and are deliberately not part of them).
+     */
+    public static final class Submit implements TranslucentSubmit, net.irisshaders.iris.mixinterface.ModelStorage {
+        private final PoseStack.Pose pose;
+        private final ItemDisplayContext displayContext;
+        private final int lightCoords;
+        private final int overlayCoords;
+        private final int outlineColor;
+        private final int[] tintLayers;
+        private final List<BakedQuad> quads;
+        private final ItemStackRenderState.FoilType foilType;
+
+        public Submit(
+            final PoseStack.Pose pose,
+            final ItemDisplayContext displayContext,
+            final int lightCoords,
+            final int overlayCoords,
+            final int outlineColor,
+            final int[] tintLayers,
+            final List<BakedQuad> quads,
+            final ItemStackRenderState.FoilType foilType
+        ) {
+            this.pose = pose;
+            this.displayContext = displayContext;
+            this.lightCoords = lightCoords;
+            this.overlayCoords = overlayCoords;
+            this.outlineColor = outlineColor;
+            this.tintLayers = tintLayers;
+            this.quads = quads;
+            this.foilType = foilType;
+        }
+
+        public PoseStack.Pose pose() {
+            return this.pose;
+        }
+
+        public ItemDisplayContext displayContext() {
+            return this.displayContext;
+        }
+
+        public int lightCoords() {
+            return this.lightCoords;
+        }
+
+        public int overlayCoords() {
+            return this.overlayCoords;
+        }
+
+        public int outlineColor() {
+            return this.outlineColor;
+        }
+
+        public int[] tintLayers() {
+            return this.tintLayers;
+        }
+
+        public List<BakedQuad> quads() {
+            return this.quads;
+        }
+
+        public ItemStackRenderState.FoilType foilType() {
+            return this.foilType;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) {
+                return true;
+            }
+
+            if (!(o instanceof Submit other)) {
+                return false;
+            }
+
+            return java.util.Objects.equals(this.pose, other.pose)
+                && java.util.Objects.equals(this.displayContext, other.displayContext)
+                && this.lightCoords == other.lightCoords
+                && this.overlayCoords == other.overlayCoords
+                && this.outlineColor == other.outlineColor
+                && java.util.Arrays.equals(this.tintLayers, other.tintLayers)
+                && java.util.Objects.equals(this.quads, other.quads)
+                && java.util.Objects.equals(this.foilType, other.foilType);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects
+                .hash(
+                this.pose,
+                this.displayContext,
+                this.lightCoords,
+                this.overlayCoords,
+                this.outlineColor,
+                java.util.Arrays.hashCode(this.tintLayers),
+                this.quads,
+                this.foilType
+                );
+        }
+
+        @Override
+        public String toString() {
+            return "Submit[pose="
+                + this.pose
+                + ", displayContext="
+                + this.displayContext
+                + ", lightCoords="
+                + this.lightCoords
+                + ", overlayCoords="
+                + this.overlayCoords
+                + ", outlineColor="
+                + this.outlineColor
+                + ", tintLayers="
+                + java.util.Arrays.toString(this.tintLayers)
+                + ", quads="
+                + this.quads
+                + ", foilType="
+                + this.foilType
+                + "]";
+        }
+
+        /**
+         * MODIFIED for porting: iris entity_render_context MixinItemSubmit @Unique fields (its ModelStorage implementation) - each
+         * submit remembers the entity / block-entity / item id that was current when it was created, so the ids can be restored
+         * when the submit is actually built (which happens much later, in a different order).
+         */
+        private int iris$entityId;
+
+        private int iris$beId;
+
+        private int iris$itemId;
+
+        private boolean iris$isRenderingBEs;
+
+        @Override
+        public void iris$capture() {
+            this.iris$entityId = net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedEntity();
+            this.iris$beId = net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity();
+            this.iris$itemId = net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedItem();
+            this.iris$isRenderingBEs = net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs;
+        }
+
+        @Override
+        public void iris$set() {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(this.iris$entityId);
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(this.iris$beId);
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(this.iris$itemId);
+        }
+
+        @Override
+        public boolean iris$wasBE() {
+            return this.iris$isRenderingBEs;
+        }
+
         public boolean hasTranslucency() {
             for (BakedQuad quad : this.quads()) {
                 if (quad.materialInfo().itemRenderType().hasBlending()) {

@@ -24,11 +24,21 @@ public record GlyphRenderTypes(RenderType normal, RenderType seeThrough, RenderT
         return new GlyphRenderTypes(RenderTypes.text(name), RenderTypes.textSeeThrough(name), RenderTypes.textPolygonOffset(name), RenderPipelines.GUI_TEXT);
     }
 
+    /**
+     * MODIFIED for porting: was iris's entity_render_context MixinGlyphRenderType#iris$select (@WrapMethod) - text drawn as part
+     * of a block entity is tagged so the shader pack sees it as block-entity geometry.
+     */
     public RenderType select(final Font.DisplayMode mode) {
-        return switch (mode) {
+        RenderType renderType = switch (mode) {
             case NORMAL -> this.normal;
             case SEE_THROUGH -> this.seeThrough;
             case POLYGON_OFFSET -> this.polygonOffset;
         };
+
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs) {
+            renderType = net.irisshaders.iris.layer.OuterWrappedRenderType.wrapExactlyOnce("iris:block_entity", renderType, net.irisshaders.iris.layer.BlockEntityRenderStateShard.INSTANCE);
+        }
+
+        return renderType;
     }
 }

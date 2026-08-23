@@ -22,9 +22,29 @@ import org.lwjgl.vulkan.VkDrawIndexedIndirectCommand;
 import org.lwjgl.vulkan.VkDrawIndirectCommand;
 
 @OnlyIn(Dist.CLIENT)
-public class RenderPass implements AutoCloseable {
+// MODIFIED for porting: implements sodium's RenderPassAccessor (mixin.core.RenderPassAccessor)
+// MODIFIED for porting: iris injects this interface into the class (loom:injected_interfaces in fabric.mod.json)
+public class RenderPass implements AutoCloseable, net.caffeinemc.mods.sodium.mixin.core.RenderPassAccessor,
+    net.irisshaders.iris.mixinterface.RenderPassInterface {
+    // MODIFIED for porting: was sodium's RenderPassAccessor @Accessor
+    @Override
+    public RenderPassBackend getBackend() {
+        return this.backend;
+    }
+
     public static final int MAX_VERTEX_BUFFERS = 16;
     private final RenderPassBackend backend;
+
+    // MODIFIED for porting: was iris's MixinRenderPass3 - RenderPass forwards the custom pass to its backend
+    @Override
+    public net.irisshaders.iris.mixinterface.CustomPass iris$getCustomPass() {
+        return this.backend.iris$getCustomPass();
+    }
+
+    @Override
+    public void iris$setCustomPass(final net.irisshaders.iris.mixinterface.CustomPass pass) {
+        this.backend.iris$setCustomPass(pass);
+    }
     private final GpuDeviceBackend device;
     private final DeviceFeatures deviceFeatures;
     private final DeviceLimits deviceLimits;

@@ -93,6 +93,15 @@ public class VulkanBackend implements GpuBackend {
 
     @Override
     public void setWindowHints() {
+        // MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinVulkanBackend#preSetWindowHints (@Inject HEAD)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.REDUCE_RESOLUTION_ON_MAC) {
+            me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.useVulkanBackend();
+
+            if (me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.isEnabled()) {
+                GLFW.glfwWindowHint(GLFW.GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW.GLFW_FALSE);
+            }
+        }
+
         GLFW.glfwWindowHint(139265, 0);
     }
 

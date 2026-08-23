@@ -100,6 +100,49 @@ public class HopperBlock extends BaseEntityBlock {
     protected void onPlace(final BlockState state, final Level level, final BlockPos pos, final BlockState oldState, final boolean movedByPiston) {
         if (!oldState.is(state.getBlock())) {
             this.checkPoweredState(level, pos, state);
+            // MODIFIED for porting: lithium block.hopper HopperBlockMixin#workAroundVanillaUpdateSuppression
+            // (INVOKE checkPoweredState, shift AFTER) - invalidate the caches of nearby hoppers when placing an
+            // update-suppressed hopper.
+            if (level.getBlockState(pos) != state) {
+                for (Direction direction : UPDATE_SHAPE_ORDER) {
+                    if (((net.caffeinemc.mods.lithium.common.world.blockentity.BlockEntityGetter)level).lithium$getLoadedExistingBlockEntity(pos.relative(direction)) instanceof net.caffeinemc.mods.lithium.common.hopper.UpdateReceiver updateReceiver) {
+                        updateReceiver.lithium$invalidateCacheOnNeighborUpdate(direction == Direction.DOWN);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * MODIFIED for porting: lithium block.hopper HopperBlockMixin#lithium$handleShapeUpdate. Invalidate the cache when
+     * composters change state.
+     */
+    @Override
+    public void lithium$handleShapeUpdate(
+        final net.minecraft.world.level.LevelReader levelReader,
+        final BlockState myBlockState,
+        final BlockPos myPos,
+        final BlockPos posFrom,
+        final BlockState newState
+    ) {
+        if (!levelReader.isClientSide() && newState.getBlock() instanceof net.minecraft.world.WorldlyContainerHolder) {
+            this.lithium$updateHopper(levelReader, myBlockState, myPos, posFrom);
+        }
+    }
+
+    // MODIFIED for porting: lithium block.hopper HopperBlockMixin#updateHopper
+    private void lithium$updateHopper(
+        final net.minecraft.world.level.LevelReader level, final BlockState myBlockState, final BlockPos myPos, final BlockPos posFrom
+    ) {
+        Direction facing = myBlockState.getValue(FACING);
+        boolean above = posFrom.getY() == myPos.getY() + 1;
+        if (above
+            || posFrom.getX() == myPos.getX() + facing.getStepX()
+                && posFrom.getY() == myPos.getY() + facing.getStepY()
+                && posFrom.getZ() == myPos.getZ() + facing.getStepZ()) {
+            if (((net.caffeinemc.mods.lithium.common.world.blockentity.BlockEntityGetter)level).lithium$getLoadedExistingBlockEntity(myPos) instanceof net.caffeinemc.mods.lithium.common.hopper.UpdateReceiver updateReceiver) {
+                updateReceiver.lithium$invalidateCacheOnNeighborUpdate(above);
+            }
         }
     }
 
@@ -119,6 +162,13 @@ public class HopperBlock extends BaseEntityBlock {
     protected void neighborChanged(
         final BlockState state, final Level level, final BlockPos pos, final Block block, final @Nullable Orientation orientation, final boolean movedByPiston
     ) {
+        // MODIFIED for porting: lithium block.hopper HopperBlockMixin#updateBlockEntity (HEAD) - invalidate the cache when
+        // the neighbouring block is replaced.
+        if (!level.isClientSide()
+            && ((net.caffeinemc.mods.lithium.common.world.blockentity.BlockEntityGetter)level).lithium$getLoadedExistingBlockEntity(pos) instanceof net.caffeinemc.mods.lithium.common.hopper.UpdateReceiver updateReceiver) {
+            updateReceiver.lithium$invalidateCacheOnUndirectedNeighborUpdate();
+        }
+
         this.checkPoweredState(level, pos, state);
     }
 

@@ -21,6 +21,9 @@ import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
 public class WingsLayer<S extends HumanoidRenderState, M extends EntityModel<S>> extends RenderLayer<S, M> {
+    // MODIFIED for porting: iris entity_render_context MixinElytraLayer @Unique constant
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_ELYTRA_CAPE_LOCATION = new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "elytra_with_cape");
+
     private final ElytraModel elytraModel;
     private final ElytraModel elytraBabyModel;
     private final EquipmentLayerRenderer equipmentRenderer;
@@ -40,6 +43,24 @@ public class WingsLayer<S extends HumanoidRenderState, M extends EntityModel<S>>
         if (equippable != null && !equippable.assetId().isEmpty()) {
             Identifier playerElytraTexture = getPlayerElytraTexture(state);
             ElytraModel model = state.isBaby ? this.elytraBabyModel : this.elytraModel;
+            // MODIFIED for porting: was iris's entity_render_context MixinElytraLayer#changeId (@Inject at the INVOKE of
+            // PoseStack#pushPose) - the elytra, or the cape drawn in its place, gets its own item id for the pack.
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                if (state instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState irisAvatarState
+                    && irisAvatarState.skin.cape() != null
+                    && irisAvatarState.showCape) {
+                    net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                        .setCurrentRenderedItem(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(IRIS_ELYTRA_CAPE_LOCATION));
+                } else {
+                    net.minecraft.resources.Identifier irisLocation = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(net.minecraft.world.item.Items.ELYTRA);
+                    net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                        .setCurrentRenderedItem(
+                            net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new net.irisshaders.iris.shaderpack.materialmap.NamespacedId(irisLocation.getNamespace(), irisLocation.getPath()))
+                        );
+                }
+            }
+
             poseStack.pushPose();
             poseStack.translate(0.0F, 0.0F, 0.125F);
             this.equipmentRenderer
@@ -57,6 +78,11 @@ public class WingsLayer<S extends HumanoidRenderState, M extends EntityModel<S>>
                     0
                 );
             poseStack.popPose();
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context MixinElytraLayer#changeId2 (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
         }
     }
 

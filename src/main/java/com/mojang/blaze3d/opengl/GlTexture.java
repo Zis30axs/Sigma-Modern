@@ -9,6 +9,18 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public class GlTexture extends GpuTexture implements FrameBufferAttachment {
+    // MODIFIED for porting: iris MixinGpuTexture (restored minimal)
+    @Override
+    public int iris$getGlId() {
+        return this.glId();
+    }
+
+    private boolean iris$mipmapNonLinear;
+
+    @Override
+    public void iris$markMipmapNonLinear() {
+        this.iris$mipmapNonLinear = true;
+    }
     private static final int EMPTY = -1;
     protected final int id;
     private final FrameBufferCache frameBufferCache;

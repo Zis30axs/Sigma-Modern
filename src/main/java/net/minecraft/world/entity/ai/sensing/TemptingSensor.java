@@ -35,19 +35,28 @@ public class TemptingSensor extends Sensor<PathfinderMob> {
     }
 
     protected void doTick(final ServerLevel level, final PathfinderMob body) {
+        // MODIFIED for porting: lithium ai.sensor.replace_streams.tempting TemptingSensorMixin#doTick (@Overwrite) -
+        // the stream pipeline (including the full sort) is replaced by a single pass that keeps the closest match.
         Brain<?> brain = body.getBrain();
         TargetingConditions targeting = TEMPT_TARGETING.copy().range((float)body.getAttributeValue(Attributes.TEMPT_RANGE));
-        List<Player> players = level.players()
-            .stream()
-            .filter(EntitySelector.NO_SPECTATORS)
-            .filter(playerx -> targeting.test(level, body, playerx))
-            .filter(p -> this.playerHoldingTemptation(body, p))
-            .filter(playerx -> !body.hasPassenger(playerx))
-            .sorted(Comparator.comparingDouble(body::distanceToSqr))
-            .collect(Collectors.toList());
-        if (!players.isEmpty()) {
-            Player player = players.get(0);
-            brain.setMemory(MemoryModuleType.TEMPTING_PLAYER, player);
+        Player closestPlayer = null;
+        double minDist = Double.MAX_VALUE;
+
+        for (net.minecraft.server.level.ServerPlayer serverPlayer : level.players()) {
+            if (EntitySelector.NO_SPECTATORS.test(serverPlayer)
+                && targeting.test(level, body, serverPlayer)
+                && this.playerHoldingTemptation(body, serverPlayer)
+                && !body.hasPassenger(serverPlayer)) {
+                double dist = body.distanceToSqr(serverPlayer);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestPlayer = serverPlayer;
+                }
+            }
+        }
+
+        if (closestPlayer != null) {
+            brain.setMemory(MemoryModuleType.TEMPTING_PLAYER, closestPlayer);
         } else {
             brain.eraseMemory(MemoryModuleType.TEMPTING_PLAYER);
         }

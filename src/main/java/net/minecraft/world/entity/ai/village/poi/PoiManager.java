@@ -40,11 +40,16 @@ import net.minecraft.world.level.chunk.storage.SectionStorage;
 import net.minecraft.world.level.chunk.storage.SimpleRegionStorage;
 import org.jspecify.annotations.Nullable;
 
-public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
+// MODIFIED for porting: implements lithium's PointOfInterestStorageExtended (ai.poi PoiManagerMixin). The POI queries
+// below are rewritten without streams and only visit sections that are inside the spherical search radius.
+public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> implements net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestStorageExtended {
     public static final int MAX_VILLAGE_DISTANCE = 6;
     public static final int VILLAGE_SECTION_SIZE = 1;
     private final PoiManager.DistanceTracker distanceTracker;
     private final LongSet loadedChunks = new LongOpenHashSet();
+    // MODIFIED for porting: lithium ai.poi.fast_portals PoiManagerMixin @Unique fields
+    private final LongSet lithium$preloadedCenterChunks = new LongOpenHashSet();
+    private int lithium$preloadRadius = 0;
 
     public PoiManager(
         final RegionStorageInfo info,
@@ -77,7 +82,8 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
     }
 
     public long getCountInRange(final Predicate<Holder<PoiType>> predicate, final BlockPos center, final int radius, final PoiManager.Occupancy occupancy) {
-        return this.getInRange(predicate, center, radius, occupancy).count();
+        // MODIFIED for porting: lithium ai.poi PoiManagerMixin#getCountInRange (@Overwrite) - avoid stream-heavy code
+        return this.lithium$withinSquareInL2Range(predicate, center, radius, occupancy).size();
     }
 
     public boolean existsAtPosition(final ResourceKey<PoiType> poiType, final BlockPos blockPos) {
@@ -94,11 +100,15 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
         });
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#getInRange (@Overwrite). Gets all POI in the sphere around center
+     * with the given radius, ordered by {@code PoiOrdering.InSquare#INSTANCE}, using a spliterator that only visits chunk
+     * sections which actually hold records.
+     */
     public Stream<PoiRecord> getInRange(
         final Predicate<Holder<PoiType>> predicate, final BlockPos center, final int radius, final PoiManager.Occupancy occupancy
     ) {
-        int radiusSqr = radius * radius;
-        return this.getInSquare(predicate, center, radius, occupancy).filter(r -> r.getPos().distSqr(center) <= radiusSqr);
+        return java.util.stream.StreamSupport.stream(new net.caffeinemc.mods.lithium.common.world.interests.iterator.SphereChunkOrderedPoiSetSpliterator(radius, center, this, predicate, occupancy), false);
     }
 
     @VisibleForDebug
@@ -140,6 +150,11 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
         return this.findAllWithType(predicate, filter, center, radius, occupancy).sorted(Comparator.comparingDouble(p -> p.getSecond().distSqr(center)));
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#find (@Overwrite), by 2No2Name. Avoid stream code and avoid
+     * searching sections outside the spherical radius. The returned element is the minimal element wrt.
+     * {@code PoiOrdering.InSquare#INSTANCE} that is within the spherical radius.
+     */
     public Optional<BlockPos> find(
         final Predicate<Holder<PoiType>> predicate,
         final Predicate<BlockPos> filter,
@@ -147,34 +162,101 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
         final int radius,
         final PoiManager.Occupancy occupancy
     ) {
-        return this.findAll(predicate, filter, center, radius, occupancy).findFirst();
+        long radiusSq = (long)radius * (long)radius;
+        int minChunkX = center.getX() - radius - 1 >> 4;
+        int maxChunkX = center.getX() + radius + 1 >> 4;
+        int minChunkZ = center.getZ() - radius - 1 >> 4;
+        int maxChunkZ = center.getZ() + radius + 1 >> 4;
+        int chunkX = minChunkX;
+        int chunkZ = minChunkZ;
+
+        while (chunkZ <= maxChunkZ) {
+            long minChunkToBlockDistanceL2Sq = net.caffeinemc.mods.lithium.common.util.Distances.getMinChunkToBlockDistanceL2Sq(center, chunkX, chunkZ);
+            if (minChunkToBlockDistanceL2Sq <= radiusSq) {
+                // dY² = distance² - dX² - dZ²
+                long deltaYSqMargin = radiusSq - minChunkToBlockDistanceL2Sq;
+                PoiRecord firstMatch = this.<PoiType, PoiManager.Occupancy, PoiRecord>lithium$getFirstInRangeInChunkColumn(
+                    chunkX,
+                    chunkZ,
+                    deltaYSqMargin,
+                    center,
+                    radiusSq,
+                    (poiSection, pos, typeFilter, posPredicate, occupancyStatus, maxDistSq) -> ((net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestSetExtended)poiSection)
+                        .lithium$getFirstMatchingPoint(pos, maxDistSq, typeFilter, posPredicate, occupancyStatus),
+                    predicate,
+                    filter,
+                    occupancy
+                );
+                if (firstMatch != null) {
+                    return Optional.of(firstMatch.getPos());
+                }
+            }
+
+            chunkX++;
+            if (chunkX > maxChunkX) {
+                chunkZ++;
+                chunkX = minChunkX;
+            }
+        }
+
+        return Optional.empty();
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#findClosest (@Overwrite), by 2No2Name. The returned element is the
+     * minimal element wrt. {@code PoiOrdering.L2ThenInSquare#INSTANCE} that is within the spherical radius.
+     */
     public Optional<BlockPos> findClosest(
         final Predicate<Holder<PoiType>> predicate, final BlockPos center, final int radius, final PoiManager.Occupancy occupancy
     ) {
-        return this.getInRange(predicate, center, radius, occupancy).map(PoiRecord::getPos).min(Comparator.comparingDouble(pos -> pos.distSqr(center)));
+        return this.findClosest(predicate, null, center, radius, occupancy);
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#findClosestWithType (@Overwrite), by 2No2Name. Avoid stream code,
+     * search in-range sections only and search closer sections first.
+     */
     public Optional<Pair<Holder<PoiType>, BlockPos>> findClosestWithType(
         final Predicate<Holder<PoiType>> predicate, final BlockPos center, final int radius, final PoiManager.Occupancy occupancy
     ) {
-        return this.getInRange(predicate, center, radius, occupancy)
-            .min(Comparator.comparingDouble(r -> r.getPos().distSqr(center)))
-            .map(p -> Pair.of(p.getPoiType(), p.getPos()));
+        int radiusSq = radius * radius;
+        PoiRecord closestPoi = new net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream(
+            predicate,
+            occupancy,
+            null,
+            center,
+            radius,
+            this,
+            (pos, pos2) -> net.caffeinemc.mods.lithium.common.util.Distances.isWithinSphereRadius(pos, radiusSq, pos2),
+            net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream.POINT_COMPARATOR
+        ).getFirst();
+        return closestPoi == null ? Optional.empty() : Optional.of(Pair.of(closestPoi.getPoiType(), closestPoi.getPos()));
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#findClosest (@Overwrite), by 2No2Name. Avoid stream code and avoid
+     * evaluating the (possibly expensive) position predicate unnecessarily. The returned element is the minimal element wrt.
+     * {@code PoiOrdering.L2ThenInSquare#INSTANCE} that is within the spherical radius.
+     */
     public Optional<BlockPos> findClosest(
         final Predicate<Holder<PoiType>> predicate,
-        final Predicate<BlockPos> filter,
+        final @Nullable Predicate<BlockPos> filter,
         final BlockPos center,
         final int radius,
         final PoiManager.Occupancy occupancy
     ) {
-        return this.getInRange(predicate, center, radius, occupancy)
-            .map(PoiRecord::getPos)
-            .filter(filter)
-            .min(Comparator.comparingDouble(pos -> pos.distSqr(center)));
+        int radiusSq = radius * radius;
+        PoiRecord closest = new net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream(
+            predicate,
+            occupancy,
+            filter == null ? null : poi -> filter.test(poi.getPos()),
+            center,
+            radius,
+            this,
+            (pos, pos2) -> net.caffeinemc.mods.lithium.common.util.Distances.isWithinSphereRadius(pos, radiusSq, pos2),
+            net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream.POINT_COMPARATOR
+        ).getFirst();
+        return closest == null ? Optional.empty() : Optional.of(closest.getPos());
     }
 
     public Optional<BlockPos> take(
@@ -197,8 +279,130 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
         final int radius,
         final RandomSource random
     ) {
-        List<PoiRecord> collect = Util.toShuffledList(this.getInRange(predicate, center, radius, occupancy), random);
-        return collect.stream().filter(poi -> filter.test(poi.getPos())).findFirst().map(PoiRecord::getPos);
+        // MODIFIED for porting: lithium ai.poi PoiManagerMixin#getRandom (@Overwrite) - retrieve all points of interest in
+        // one operation and shuffle in place, consuming the shuffled prefix lazily. Like vanilla the random distribution is
+        // uniform, but it does not return the same point as vanilla for the same pseudo-random seed.
+        List<PoiRecord> list = this.lithium$withinSquareInL2Range(predicate, center, radius, occupancy);
+
+        for (int i = list.size() - 1; i >= 0; i--) {
+            // shuffle by swapping randomly
+            PoiRecord currentPOI = list.set(random.nextInt(i + 1), list.get(i));
+            // move to the end of the unconsumed part of the list
+            list.set(i, currentPOI);
+            // consume while shuffling, abort shuffling when a result was found
+            if (filter.test(currentPOI.getPos())) {
+                return Optional.of(currentPOI.getPos());
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * MODIFIED for porting: lithium ai.poi PoiManagerMixin#lithium$getNClosestFirstWithType. Elements are minimal N wrt.
+     * {@code PoiOrdering.L2ThenInSquare#INSTANCE}.
+     */
+    @Override
+    public java.util.Collection<Pair<Holder<PoiType>, BlockPos>> lithium$getNClosestFirstWithType(
+        final Predicate<Holder<PoiType>> typeFilter,
+        final Predicate<BlockPos> posFilter,
+        final BlockPos center,
+        final int radius,
+        final PoiManager.Occupancy status,
+        final long n
+    ) {
+        int radiusSq = radius * radius;
+        net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream poisInRange = new net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream(
+            typeFilter,
+            status,
+            poiRecord -> posFilter.test(poiRecord.getPos()),
+            center,
+            radius,
+            this,
+            (pos, pos2) -> net.caffeinemc.mods.lithium.common.util.Distances.isWithinSphereRadius(pos, radiusSq, pos2),
+            net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream.POINT_COMPARATOR
+        );
+        java.util.ArrayList<Pair<Holder<PoiType>, BlockPos>> collectedPois = new java.util.ArrayList<>();
+
+        for (int i = 0; i < n; i++) {
+            if (!poisInRange.tryAdvance(poi -> collectedPois.add(Pair.of(poi.getPoiType(), poi.getPos())))) {
+                break;
+            }
+        }
+
+        return collectedPois;
+    }
+
+    // MODIFIED for porting: lithium ai.poi PoiManagerMixin#lithium$takeAt
+    @Override
+    public Optional<BlockPos> lithium$takeAt(
+        final Predicate<Holder<PoiType>> typeFilter, final BiPredicate<Holder<PoiType>, BlockPos> biPredicate, final BlockPos blockPos
+    ) {
+        Optional<PoiSection> poiSection = this.getOrLoad(SectionPos.asLong(blockPos));
+        if (poiSection.isPresent()) {
+            PoiRecord poiRecord = ((net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestSetExtended)poiSection.get()).lithium$getAt(blockPos);
+            if (poiRecord != null && typeFilter.test(poiRecord.getPoiType())) {
+                poiRecord.acquireTicket();
+                return Optional.of(poiRecord.getPos());
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    // MODIFIED for porting: lithium ai.poi PoiManagerMixin#lithium$findNearestForPortalLogic
+    @Override
+    public Optional<PoiRecord> lithium$findNearestForPortalLogic(
+        final BlockPos origin,
+        final int radius,
+        final Holder<PoiType> type,
+        final PoiManager.Occupancy status,
+        final Predicate<PoiRecord> afterSortPredicate,
+        final net.minecraft.world.level.border.WorldBorder worldBorder
+    ) {
+        boolean worldBorderIsFarAway = worldBorder == null || worldBorder.getDistanceToBorder(origin.getX(), origin.getZ()) > radius + 3;
+        Predicate<PoiRecord> poiPredicateAfterSorting = worldBorderIsFarAway
+            ? afterSortPredicate
+            : poi -> worldBorder.isWithinBounds(poi.getPos()) && afterSortPredicate.test(poi);
+        Predicate<Holder<PoiType>> typePredicate = new net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter(type);
+        PoiRecord nearestPoi = new net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream(
+            typePredicate,
+            status,
+            poiPredicateAfterSorting,
+            origin,
+            radius,
+            this,
+            (pos, pos2) -> net.caffeinemc.mods.lithium.common.util.Distances.isWithinCubeRadius(pos, radius, pos2),
+            net.caffeinemc.mods.lithium.common.world.interests.iterator.NearbyPointOfInterestStream.NEGATIVE_Y_POINT_COMPARATOR
+        ).getFirst();
+        return nearestPoi == null ? Optional.empty() : Optional.of(nearestPoi);
+    }
+
+    // MODIFIED for porting: lithium ai.poi PoiManagerMixin#withinSquareInL2Range
+    private java.util.ArrayList<PoiRecord> lithium$withinSquareInL2Range(
+        final Predicate<Holder<PoiType>> predicate, final BlockPos origin, final int radius, final PoiManager.Occupancy status
+    ) {
+        int radiusSq = Math.multiplyExact(radius, radius);
+        int minChunkX = origin.getX() - radius - 1 >> 4;
+        int minChunkZ = origin.getZ() - radius - 1 >> 4;
+        int maxChunkX = origin.getX() + radius + 1 >> 4;
+        int maxChunkZ = origin.getZ() + radius + 1 >> 4;
+        java.util.ArrayList<PoiRecord> points = new java.util.ArrayList<>();
+        java.util.function.Consumer<PoiRecord> collector = point -> {
+            if (net.caffeinemc.mods.lithium.common.util.Distances.isWithinSphereRadius(origin, radiusSq, point.getPos())) {
+                points.add(point);
+            }
+        };
+
+        for (int x = minChunkX; x <= maxChunkX; x++) {
+            for (int z = minChunkZ; z <= maxChunkZ; z++) {
+                for (PoiSection set : this.lithium$getInChunkColumn(x, z)) {
+                    ((net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestSetExtended)set).lithium$collectMatchingPoints(predicate, status, collector);
+                }
+            }
+        }
+
+        return points;
     }
 
     public boolean release(final BlockPos pos) {
@@ -278,15 +482,87 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> {
             );
     }
 
+    /**
+     * MODIFIED for porting: lithium ai.poi.fast_portals PoiManagerMixin#ensureLoadedAndValid (@Overwrite), by Crec0,
+     * 2No2Name and jcw780.
+     * <p>
+     * Streams in this method cause unnecessary lag; rewriting it without streams gains considerable performance, noticeable
+     * when a large amount of entities travel through nether portals. Caching whether all surrounding chunks are loaded is
+     * more efficient than caching the state of single chunks only.
+     * <p>
+     * For a chunk to be loaded, the chunk must have at least one section that either has no POI section or whose POI section
+     * is not valid. Vanilla iterates sections by x, y and then z; in order to use the lithium column lookup, the loads are
+     * sorted by the lowest y section then x in each z row.
+     */
     public void ensureLoadedAndValid(final LevelReader reader, final BlockPos center, final int radius) {
-        SectionPos.aroundChunk(
-                ChunkPos.containing(center), Math.floorDiv(radius, 16), this.levelHeightAccessor.getMinSectionY(), this.levelHeightAccessor.getMaxSectionY()
-            )
-            .map(pos -> Pair.of(pos, this.getOrLoad(pos.asLong())))
-            .filter(poiSection -> !poiSection.getSecond().map(PoiSection::isValid).orElse(false))
-            .map(p -> p.getFirst().chunk())
-            .filter(pos -> this.loadedChunks.add(pos.pack()))
-            .forEach(pos -> reader.getChunk(pos.x(), pos.z(), ChunkStatus.EMPTY));
+        if (this.lithium$preloadRadius != radius) {
+            // Usually there is only one preload radius per PoiManager. Just in case another mod adjusts it dynamically, we
+            // avoid assuming its value.
+            this.lithium$preloadedCenterChunks.clear();
+            this.lithium$preloadRadius = radius;
+        }
+
+        long chunkPos = ChunkPos.pack(center);
+        if (this.lithium$preloadedCenterChunks.contains(chunkPos)) {
+            return;
+        }
+
+        int chunkX = SectionPos.blockToSectionCoord(center.getX());
+        int chunkZ = SectionPos.blockToSectionCoord(center.getZ());
+        int chunkRadius = Math.floorDiv(radius, 16);
+        long[] sectionsYXPacked = new long[2 * chunkRadius + 1];
+        int maxYSectionIndexExclusive = net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.getMaxYSectionIndexExclusive(reader);
+
+        for (int z = chunkZ - chunkRadius, zMax = chunkZ + chunkRadius; z <= zMax; z++) {
+            int loadingChunkCounter = 0;
+
+            for (int x = chunkX - chunkRadius, xMax = chunkX + chunkRadius; x <= xMax; x++) {
+                int lowestSection = this.lithium$getLowestEmptyOrInvalidSection(reader, x, z);
+                if (lowestSection < maxYSectionIndexExclusive && this.loadedChunks.add(ChunkPos.pack(x, z))) {
+                    sectionsYXPacked[loadingChunkCounter++] = lithium$packYX(lowestSection, x);
+                }
+            }
+
+            // Sort by signed Y, signed X as tie-break
+            it.unimi.dsi.fastutil.longs.LongArrays.quickSort(sectionsYXPacked, 0, loadingChunkCounter);
+
+            for (int chunkIndex = 0; chunkIndex < loadingChunkCounter; chunkIndex++) {
+                reader.getChunk(lithium$unpackX(sectionsYXPacked[chunkIndex]), z, ChunkStatus.EMPTY);
+            }
+        }
+
+        this.lithium$preloadedCenterChunks.add(chunkPos);
+    }
+
+    // MODIFIED for porting: lithium ai.poi.fast_portals PoiManagerMixin#unpackX
+    private static int lithium$unpackX(final long packedYX) {
+        return (int)((packedYX & 0xFFFFFFFFL) + Integer.MIN_VALUE);
+    }
+
+    /**
+     * MODIFIED for porting: lithium ai.poi.fast_portals PoiManagerMixin#packYX. Pack YX for sorting, two's complement
+     * conversion applied for sorting by signed X.
+     */
+    private static long lithium$packYX(final long y, final long x) {
+        return y << 32 | x - Integer.MIN_VALUE;
+    }
+
+    // MODIFIED for porting: lithium ai.poi.fast_portals PoiManagerMixin#lithium$getLowestEmptyOrInvalidSection
+    private int lithium$getLowestEmptyOrInvalidSection(final LevelReader reader, final int x, final int z) {
+        java.util.BitSet column = this.lithium$getNonEmptyPOISections(x, z);
+        int lowestUnsetSection = column.nextClearBit(0);
+        int setSectionIndex = -1;
+
+        while ((setSectionIndex = column.nextSetBit(setSectionIndex + 1)) != -1 && setSectionIndex < lowestUnsetSection) {
+            Optional<PoiSection> section = this.lithium$getElementAt(
+                SectionPos.asLong(x, net.caffeinemc.mods.lithium.common.util.Pos.SectionYCoord.fromSectionIndex(reader, setSectionIndex), z)
+            );
+            if (section.isPresent() && !section.get().isValid()) {
+                return setSectionIndex;
+            }
+        }
+
+        return lowestUnsetSection;
     }
 
     private final class DistanceTracker extends SectionTracker {

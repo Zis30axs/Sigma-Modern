@@ -32,6 +32,13 @@ public class BlindnessFogEnvironment extends MobEffectFogEnvironment {
                 fog.cloudEnd = distance * 0.8F;
             }
         }
+
+        // MODIFIED for porting: was sodium-extra's fog MixinBlindnessFogEnvironment#postSetupFog (@Inject TAIL)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG && me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.shouldModifyProtectedGameplayFog()) {
+            me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyProtectedGameplayFog(
+                fog, me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getProtectedGameplayFogDistance(me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.ProtectedFogType.BLINDNESS), 0.25F, 0.8F
+            );
+        }
     }
 
     @Override

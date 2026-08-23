@@ -79,12 +79,24 @@ public class AABB {
         return new AABB(this.minX, this.minY, this.minZ, this.maxX, this.maxY, maxZ);
     }
 
+    // MODIFIED for porting: lithium math.fast_util AABBMixin replaces the Axis dispatch by an ordinal switch
     public double min(final Direction.Axis axis) {
-        return axis.choose(this.minX, this.minY, this.minZ);
+        return switch (axis.ordinal()) {
+            case 0 -> this.minX;
+            case 1 -> this.minY;
+            case 2 -> this.minZ;
+            default -> throw new IllegalArgumentException();
+        };
     }
 
+    // MODIFIED for porting: lithium math.fast_util AABBMixin replaces the Axis dispatch by an ordinal switch
     public double max(final Direction.Axis axis) {
-        return axis.choose(this.maxX, this.maxY, this.maxZ);
+        return switch (axis.ordinal()) {
+            case 0 -> this.maxX;
+            case 1 -> this.maxY;
+            case 2 -> this.maxZ;
+            default -> throw new IllegalArgumentException();
+        };
     }
 
     @Override

@@ -212,6 +212,12 @@ public class ModelBlockRenderer {
         final BlockPos pos,
         final BakedQuad quad
     ) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking ModelBlockRendererMixin#preRenderQuad (HEAD), by
+        // embeddedt - ensures sprites rendered through renderSmooth/renderFlat in immediate mode are marked as active.
+        if (quad.materialInfo().sprite() != null) {
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(quad.materialInfo().sprite());
+        }
+
         int tintIndex = quad.materialInfo().tintIndex();
         if (tintIndex != -1) {
             this.quadInstance.multiplyColor(this.getTintColor(level, state, pos, tintIndex));

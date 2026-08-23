@@ -586,14 +586,31 @@ public abstract class AbstractArrow extends Projectile {
     }
 
     protected @Nullable EntityHitResult findHitEntity(final Vec3 from, final Vec3 to) {
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions AbstractArrowMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
         return ProjectileUtil.getEntityHitResult(
-            this.level(), this, from, to, this.getBoundingBox().expandTowards(this.getDeltaMovement()).inflate(1.0), this::canHitEntity
+            this.level(),
+            this,
+            from,
+            to,
+            this.getBoundingBox().expandTowards(this.getDeltaMovement()).inflate(1.0),
+            new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity)
         );
     }
 
     protected Collection<EntityHitResult> findHitEntities(final Vec3 from, final Vec3 to) {
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions AbstractArrowMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
         return ProjectileUtil.getManyEntityHitResult(
-            this.level(), this, from, to, this.getBoundingBox().expandTowards(this.getDeltaMovement()).inflate(1.0), this::canHitEntity, false
+            this.level(),
+            this,
+            from,
+            to,
+            this.getBoundingBox().expandTowards(this.getDeltaMovement()).inflate(1.0),
+            new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity),
+            false
         );
     }
 

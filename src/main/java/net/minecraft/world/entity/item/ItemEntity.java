@@ -36,7 +36,13 @@ import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-public class ItemEntity extends Entity implements TraceableEntity {
+// MODIFIED for porting: lithium util.item_component_and_count_tracking ItemEntityMixin forwards the change
+// notifications of the carried ItemStack to whoever subscribed to this item entity.
+public class ItemEntity extends Entity
+    implements TraceableEntity,
+    net.caffeinemc.mods.lithium.mixin.util.accessors.ItemEntityAccessor, // MODIFIED for porting: lithium ItemEntityAccessor
+    net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemEntity>,
+    net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.CountChangeSubscriber<ItemStack> {
     private static final EntityDataAccessor<ItemStack> DATA_ITEM = SynchedEntityData.defineId(ItemEntity.class, EntityDataSerializers.ITEM_STACK);
     private static final float FLOAT_HEIGHT = 0.1F;
     public static final float EYE_HEIGHT = 0.2125F;
@@ -51,7 +57,17 @@ public class ItemEntity extends Entity implements TraceableEntity {
     private int health = 5;
     private @Nullable EntityReference<Entity> thrower;
     private @Nullable UUID target;
+    // MODIFIED for porting: lithium util.item_component_and_count_tracking ItemEntityMixin @Unique fields.
+    // lithium$subscriberData stores the subscriber's data unless the subscriber is a Multi (then it is 0).
+    private net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemEntity> lithium$subscriber;
+    private int lithium$subscriberData;
     public final float bobOffs = this.random.nextFloat() * (float) Math.PI * 2.0F;
+
+    // MODIFIED for porting: was lithium's ItemEntityAccessor accessor Mixin
+    @Override
+    public UUID lithium$getOwner() {
+        return this.target;
+    }
 
     public ItemEntity(final EntityType<? extends ItemEntity> type, final Level level) {
         super(type, level);
@@ -381,7 +397,94 @@ public class ItemEntity extends Entity implements TraceableEntity {
         return this.getEntityData().get(DATA_ITEM);
     }
 
+    // MODIFIED for porting: the following block of methods was lithium's ItemEntityMixin
+    private void lithium$startTrackingChanges() {
+        ItemStack stack = this.getItem();
+        if (!stack.isEmpty()) {
+            ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemStack>)(Object)stack).lithium$subscribe(this, 0);
+        }
+    }
+
+    @Override
+    public void lithium$subscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemEntity> subscriber, final int subscriberData) {
+        if (this.lithium$subscriber == null) {
+            this.lithium$startTrackingChanges();
+        }
+
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.combine(this.lithium$subscriber, this.lithium$subscriberData, subscriber, subscriberData);
+        if (this.lithium$subscriber instanceof net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.Multi<?>) {
+            this.lithium$subscriberData = 0;
+        } else {
+            this.lithium$subscriberData = subscriberData;
+        }
+    }
+
+    @Override
+    public int lithium$unsubscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemEntity> subscriber) {
+        int retval = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.dataOf(this.lithium$subscriber, subscriber, this.lithium$subscriberData);
+        this.lithium$subscriberData = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.dataWithout(this.lithium$subscriber, subscriber, this.lithium$subscriberData);
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.without(this.lithium$subscriber, subscriber);
+        if (this.lithium$subscriber == null) {
+            ItemStack stack = this.getItem();
+            if (!stack.isEmpty()) {
+                ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemStack>)(Object)stack).lithium$unsubscribe(this);
+            }
+        }
+
+        return retval;
+    }
+
+    @Override
+    public void lithium$notify(final ItemStack publisher, final int subscriberData) {
+        if (publisher != this.getItem()) {
+            throw new IllegalStateException("Received notification from an unexpected publisher");
+        }
+
+        if (this.lithium$subscriber != null) {
+            this.lithium$subscriber.lithium$notify(this, this.lithium$subscriberData);
+        }
+    }
+
+    @Override
+    public void lithium$forceUnsubscribe(final ItemStack publisher, final int subscriberData) {
+        if (this.lithium$subscriber != null) {
+            this.lithium$subscriber.lithium$forceUnsubscribe(this, this.lithium$subscriberData);
+            this.lithium$subscriber = null;
+            this.lithium$subscriberData = 0;
+        }
+    }
+
+    @Override
+    public void lithium$notifyCount(final ItemStack publisher, final int subscriberData, final int newCount) {
+        if (publisher != this.getItem()) {
+            throw new IllegalStateException("Received notification from an unexpected publisher");
+        }
+
+        if (this.lithium$subscriber instanceof net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.CountChangeSubscriber<ItemEntity> lithium$countChangeSubscriber) {
+            lithium$countChangeSubscriber.lithium$notifyCount(this, this.lithium$subscriberData, newCount);
+        }
+    }
+
     public void setItem(final ItemStack itemStack) {
+        // MODIFIED for porting: lithium ItemEntityMixin#beforeSetStack (HEAD of setItem)
+        if (this.lithium$subscriber != null) {
+            ItemStack lithium$oldStack = this.getItem();
+            if (lithium$oldStack != itemStack) {
+                if (!lithium$oldStack.isEmpty()) {
+                    ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemStack>)(Object)lithium$oldStack).lithium$unsubscribe(this);
+                }
+
+                if (!itemStack.isEmpty()) {
+                    ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemStack>)(Object)itemStack).lithium$subscribe(this, this.lithium$subscriberData);
+                    this.lithium$subscriber.lithium$notify(this, this.lithium$subscriberData);
+                } else {
+                    this.lithium$subscriber.lithium$forceUnsubscribe(this, this.lithium$subscriberData);
+                    this.lithium$subscriber = null;
+                    this.lithium$subscriberData = 0;
+                }
+            }
+        }
+
         this.getEntityData().set(DATA_ITEM, itemStack);
     }
 

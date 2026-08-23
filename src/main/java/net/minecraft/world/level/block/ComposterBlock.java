@@ -373,14 +373,17 @@ public class ComposterBlock extends Block implements WorldlyContainerHolder {
         }
     }
 
-    private static class EmptyContainer extends SimpleContainer implements WorldlyContainer {
+    // MODIFIED for porting: lithium block.hopper ComposterMixin$ComposterBlockDummyInventoryMixin - marks this as an
+    // inventory that only depends on the block state, so hoppers can cache it.
+    private static class EmptyContainer extends SimpleContainer implements WorldlyContainer, net.caffeinemc.mods.lithium.common.hopper.BlockStateOnlyInventory {
         public EmptyContainer() {
             super(0);
         }
 
+        // MODIFIED for porting: lithium alloc.composter ComposterMixin$ComposterBlockDummyInventoryMixin
         @Override
         public int[] getSlotsForFace(final Direction direction) {
-            return new int[0];
+            return net.caffeinemc.mods.lithium.common.util.ArrayConstants.EMPTY;
         }
 
         @Override
@@ -394,7 +397,8 @@ public class ComposterBlock extends Block implements WorldlyContainerHolder {
         }
     }
 
-    private static class InputContainer extends SimpleContainer implements WorldlyContainer {
+    // MODIFIED for porting: lithium block.hopper ComposterMixin$ComposterBlockComposterInventoryMixin
+    private static class InputContainer extends SimpleContainer implements WorldlyContainer, net.caffeinemc.mods.lithium.common.hopper.BlockStateOnlyInventory {
         private final BlockState state;
         private final LevelAccessor level;
         private final BlockPos pos;
@@ -412,9 +416,10 @@ public class ComposterBlock extends Block implements WorldlyContainerHolder {
             return 1;
         }
 
+        // MODIFIED for porting: lithium alloc.composter ComposterMixin$ComposterBlockComposterInventoryMixin
         @Override
         public int[] getSlotsForFace(final Direction direction) {
-            return direction == Direction.UP ? new int[]{0} : new int[0];
+            return direction == Direction.UP ? net.caffeinemc.mods.lithium.common.util.ArrayConstants.ZERO : net.caffeinemc.mods.lithium.common.util.ArrayConstants.EMPTY;
         }
 
         @Override
@@ -434,12 +439,17 @@ public class ComposterBlock extends Block implements WorldlyContainerHolder {
                 this.changed = true;
                 BlockState newState = ComposterBlock.addItem(null, this.state, this.level, this.pos, contents);
                 this.level.levelEvent(1500, this.pos, newState != this.state ? 1 : 0);
+                // MODIFIED for porting: lithium block.hopper ComposterMixin$ComposterBlockComposterInventoryMixin#resetDirty
+                // (INVOKE removeItemNoUpdate) - fixes composter inventories staying blocked forever for no reason, which
+                // would make them not cacheable.
+                this.changed = false;
                 this.removeItemNoUpdate(0);
             }
         }
     }
 
-    private static class OutputContainer extends SimpleContainer implements WorldlyContainer {
+    // MODIFIED for porting: lithium block.hopper ComposterMixin$ComposterBlockFullComposterInventoryMixin
+    private static class OutputContainer extends SimpleContainer implements WorldlyContainer, net.caffeinemc.mods.lithium.common.hopper.BlockStateOnlyInventory {
         private final BlockState state;
         private final LevelAccessor level;
         private final BlockPos pos;
@@ -457,9 +467,10 @@ public class ComposterBlock extends Block implements WorldlyContainerHolder {
             return 1;
         }
 
+        // MODIFIED for porting: lithium alloc.composter ComposterMixin$ComposterBlockFullComposterInventoryMixin
         @Override
         public int[] getSlotsForFace(final Direction direction) {
-            return direction == Direction.DOWN ? new int[]{0} : new int[0];
+            return direction == Direction.DOWN ? net.caffeinemc.mods.lithium.common.util.ArrayConstants.ZERO : net.caffeinemc.mods.lithium.common.util.ArrayConstants.EMPTY;
         }
 
         @Override

@@ -149,7 +149,29 @@ public class VideoSettingsScreen extends OptionsSubScreen {
         this.list.addBig(this.options.graphicsPreset());
         this.list.addSmall(qualityOptions(this.options));
         this.list.addHeader(PREFERENCES_HEADER);
-        this.list.addSmall(preferenceOptions(this.options));
+        // MODIFIED for porting: was iris's gui MixinVideoSettingsScreen#iris$addShaderPackScreenButton (@ModifyArg index 0
+        // on OptionsList#addSmall) - appends the shader pack button and iris's own render distance option to the last group.
+        this.list.addSmall(this.iris$appendOptions(preferenceOptions(this.options)));
+    }
+
+    // MODIFIED for porting: the body of iris's gui MixinVideoSettingsScreen#iris$addShaderPackScreenButton
+    private OptionInstance<?>[] iris$appendOptions(final OptionInstance<?>[] original) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return original;
+        }
+
+        OptionInstance<?>[] options = new OptionInstance[original.length + 2];
+        System.arraycopy(original, 0, options, 0, original.length);
+        options[options.length - 2] = new OptionInstance<>(
+            "options.iris.shaderPackSelection",
+            OptionInstance.cachedConstantTooltip(Component.empty()),
+            (arg, object) -> Component.empty(),
+            OptionInstance.BOOLEAN_VALUES,
+            true,
+            parent -> this.minecraft.gui.setScreen(new net.irisshaders.iris.gui.screen.ShaderPackScreen(this))
+        );
+        options[options.length - 1] = net.irisshaders.iris.gui.option.IrisVideoSettings.RENDER_DISTANCE;
+        return options;
     }
 
     @Override

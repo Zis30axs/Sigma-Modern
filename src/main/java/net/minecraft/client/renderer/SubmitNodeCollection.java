@@ -140,12 +140,16 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
         final int backgroundColor,
         final int outlineColor
     ) {
-        this.texts
-            .submit(
-                new TextFeatureRenderer.Submit(
-                    new Matrix4f(poseStack.last().pose()), x, y, string, dropShadow, displayMode, lightCoords, color, backgroundColor, outlineColor
-                )
-            );
+        TextFeatureRenderer.Submit irisTextSubmit = new TextFeatureRenderer.Submit(
+            new Matrix4f(poseStack.last().pose()), x, y, string, dropShadow, displayMode, lightCoords, color, backgroundColor, outlineColor
+        );
+        // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$capture5 (@WrapOperation around
+        // SimpleFeatureRenderPhase#submit in submitText)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            ((net.irisshaders.iris.mixinterface.ModelStorage)irisTextSubmit).iris$capture();
+        }
+
+        this.texts.submit(irisTextSubmit);
     }
 
     @Override
@@ -163,7 +167,7 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
         final Model<? super S> model,
         final S state,
         final PoseStack poseStack,
-        final RenderType renderType,
+        RenderType renderType,
         final int lightCoords,
         final int overlayCoords,
         final int tintedColor,
@@ -171,11 +175,23 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
         final int outlineColor,
         final ModelFeatureRenderer.@Nullable CrumblingOverlay crumblingOverlay
     ) {
+        // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$changeRenderType (@WrapMethod
+        // on submitModel) - a model submitted while block entities are being rendered is tagged as block-entity geometry.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs) {
+            renderType = net.irisshaders.iris.layer.OuterWrappedRenderType.wrapExactlyOnce("iris:block_entity", renderType, net.irisshaders.iris.layer.BlockEntityRenderStateShard.INSTANCE);
+        }
+
         PoseStack.Pose pose = poseStack.last().copy();
         if (!renderType.isOutline()) {
             ModelFeatureRenderer.Submit<S> submit = new ModelFeatureRenderer.Submit<>(
                 renderType, pose, model, state, lightCoords, overlayCoords, tintedColor, sprite, null
             );
+            // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$capture (@Inject at the
+            // INVOKE of RenderTypes#waterMask, with @Local Submit)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                ((net.irisshaders.iris.mixinterface.ModelStorage)submit).iris$capture();
+            }
+
             if (renderType == RenderTypes.waterMask()) {
                 this.waterMask.submit(submit);
             } else if (renderType.hasBlending()) {
@@ -238,6 +254,12 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
             BlockModelFeatureRenderer.Submit submit = new BlockModelFeatureRenderer.Submit(
                 pose, renderType, modelParts, tintLayers, lightCoords, overlayCoords, -1, null
             );
+            // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$capture6 (@WrapOperation
+            // around RenderType#hasBlending in submitBlockModel, with @Local Submit)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                ((net.irisshaders.iris.mixinterface.ModelStorage)submit).iris$capture();
+            }
+
             if (renderType.hasBlending()) {
                 this.translucentBlocksAndItems.submit(submit);
             } else {
@@ -309,6 +331,12 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
     ) {
         PoseStack.Pose pose = poseStack.last().copy();
         ItemFeatureRenderer.Submit submit = new ItemFeatureRenderer.Submit(pose, displayContext, lightCoords, overlayCoords, 0, tintLayers, quads, foilType);
+        // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$capture4 (@Inject at the INVOKE
+        // of ItemFeatureRenderer$Submit#hasTranslucency, with @Local Submit)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            ((net.irisshaders.iris.mixinterface.ModelStorage)submit).iris$capture();
+        }
+
         if (submit.hasTranslucency()) {
             this.translucentBlocksAndItems.submit(submit);
         } else {
@@ -334,8 +362,15 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
 
     @Override
     public void submitCustomGeometry(
-        final PoseStack poseStack, final RenderType renderType, final SubmitNodeCollector.CustomGeometryRenderer customGeometryRenderer
+        final PoseStack poseStack, RenderType renderType, final SubmitNodeCollector.CustomGeometryRenderer customGeometryRenderer
     ) {
+        // MODIFIED for porting: was iris's entity_render_context MixinModelStorageTrigger#iris$changeRenderType2 (@WrapMethod on
+        // submitCustomGeometry). Its #iris$capture7 (@WrapOperation around RenderType#hasBlending) is not needed here: the
+        // Submit constructor already captures (see MixinCustomGeometrySubmit#iris$capture2), which happens before this point.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs) {
+            renderType = net.irisshaders.iris.layer.OuterWrappedRenderType.wrapExactlyOnce("iris:block_entity", renderType, net.irisshaders.iris.layer.BlockEntityRenderStateShard.INSTANCE);
+        }
+
         CustomFeatureRenderer.Submit submit = new CustomFeatureRenderer.Submit(poseStack.last().copy(), renderType, customGeometryRenderer);
         if (renderType.isOutline()) {
             this.outline.submit(submit);

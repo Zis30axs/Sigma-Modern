@@ -13,7 +13,8 @@ import org.lwjgl.system.MemoryUtil.MemoryAllocator;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class ByteBufferBuilder implements AutoCloseable {
+// MODIFIED for porting: was iris's MixinByteBufferBuilder - exposes the raw buffer pointer through MojangBufferAccessor
+public class ByteBufferBuilder implements AutoCloseable, net.irisshaders.iris.vertices.MojangBufferAccessor {
     private static final MemoryPool MEMORY_POOL = TracyClient.createMemoryPool("ByteBufferBuilder");
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final MemoryAllocator ALLOCATOR = MemoryUtil.getAllocator(false);
@@ -21,6 +22,12 @@ public class ByteBufferBuilder implements AutoCloseable {
     private static final int MAX_GROWTH_SIZE = 2097152;
     private static final int BUFFER_FREED_GENERATION = -1;
     private long pointer;
+
+    // MODIFIED for porting: was iris's MixinByteBufferBuilder (its MojangBufferAccessor implementation)
+    @Override
+    public long getPointer() {
+        return this.pointer;
+    }
     private long capacity;
     private final long maxCapacity;
     private long writeOffset;

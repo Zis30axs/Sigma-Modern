@@ -109,7 +109,28 @@ public class RenderSystem {
         return pollingEvents.get() && Util.getMillis() - pollEventsWaitStart.get() > 200L;
     }
 
+    // MODIFIED for porting: iris statelisteners MixinRenderSystem @Unique fields plus its static initializer
+    private static Runnable iris$fogStartListener;
+
+    private static Runnable iris$fogEndListener;
+
+    static {
+        net.irisshaders.iris.gl.state.StateUpdateNotifiers.fogStartNotifier = listener -> iris$fogStartListener = listener;
+        net.irisshaders.iris.gl.state.StateUpdateNotifiers.fogEndNotifier = listener -> iris$fogEndListener = listener;
+    }
+
     public static void setShaderFog(final GpuBufferSlice fog) {
+        // MODIFIED for porting: was iris's statelisteners MixinRenderSystem#iris$onFogStart (@Inject HEAD)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (iris$fogStartListener != null) {
+                iris$fogStartListener.run();
+            }
+
+            if (iris$fogEndListener != null) {
+                iris$fogEndListener.run();
+            }
+        }
+
         shaderFog = fog;
     }
 
@@ -153,6 +174,14 @@ public class RenderSystem {
         DEVICE = device;
         dynamicUniforms = new DynamicUniforms();
         samplerCache.initialize();
+        // MODIFIED for porting: was iris's MixinRenderSystem#iris$onRendererInit (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.duringRenderSystemInit();
+            net.irisshaders.iris.gl.GLDebug.reloadDebugState();
+            net.irisshaders.iris.gl.IrisRenderSystem.initRenderer();
+            net.irisshaders.iris.samplers.IrisSamplers.initRenderer();
+            net.irisshaders.iris.Iris.onRenderSystemInit();
+        }
     }
 
     public static void shutdownRenderer() {

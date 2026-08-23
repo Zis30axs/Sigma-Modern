@@ -1,11 +1,14 @@
 package net.minecraft.world.phys.shapes;
 
 import com.mojang.math.OctahedralGroup;
+import malte0811.ferritecore.mixin.accessors.DiscreteVSAccess; // MODIFIED for porting
 import net.minecraft.core.AxisCycle;
 import net.minecraft.core.Direction;
 import org.joml.Vector3i;
 
-public abstract class DiscreteVoxelShape {
+// MODIFIED for porting: DiscreteVSAccess was FerriteCore's accessor Mixin; getXSize/getYSize/getZSize below already
+// satisfy it, so no new members are needed.
+public abstract class DiscreteVoxelShape implements DiscreteVSAccess {
     private static final Direction.Axis[] AXIS_VALUES = Direction.Axis.values();
     protected final int xSize;
     protected final int ySize;

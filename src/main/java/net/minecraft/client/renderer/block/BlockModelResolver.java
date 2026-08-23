@@ -22,6 +22,11 @@ public class BlockModelResolver {
         renderState.clear();
         this.modelManager.getBlockModelSet().get(blockState).update(renderState, blockState, displayContext, 42L);
         renderState.blockLightCoords = blockState.emissiveRendering() ? 15728880 : LightCoordsUtil.pack(blockState.getLightEmission(), 0);
+        // MODIFIED for porting: was iris's entity_render_context BlockModelResolverMixin#iris$setBlock (@Inject TAIL) - the
+        // render state remembers which block it belongs to, so the shader pack can identify it.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            ((net.irisshaders.iris.mixinterface.BlockModelRenderStateExtension)renderState).setBlock(blockState);
+        }
     }
 
     public void updateForItemFrame(final BlockModelRenderState renderState, final boolean isGlowing, final boolean map) {

@@ -38,7 +38,9 @@ public class DefaultRedstoneWireEvaluator extends RedstoneWireEvaluator {
     }
 
     private int calculateTargetStrength(final Level level, final BlockPos pos) {
-        int blockSignal = this.getBlockSignal(level, pos);
-        return blockSignal == 15 ? blockSignal : Math.max(blockSignal, this.getIncomingWireSignal(level, pos));
+        // MODIFIED for porting: lithium block.redstone_wire DefaultRedstoneWireEvaluatorMixin#calculateTargetStrengthFaster
+        // (HEAD, cancellable) - the wire and non-wire power calculations are combined into a single pass so that the blocks
+        // around the wire are only read once.
+        return net.caffeinemc.mods.lithium.common.block.redstone.RedstoneWirePowerCalculations.getNeighborSignal(this.wireBlock, this, level, pos, false, false);
     }
 }

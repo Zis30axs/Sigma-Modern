@@ -93,6 +93,9 @@ public class AtlasGlyphProvider {
             final float z,
             final int color
         ) {
+            // MODIFIED for porting: sodium features.textures.animations.tracking AtlasGlyphProviderMixin#preRenderSprite
+            // (HEAD)
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(this.sprite);
             float x0 = offsetX + this.left();
             float x1 = offsetX + this.right();
             float y0 = offsetY + this.top();

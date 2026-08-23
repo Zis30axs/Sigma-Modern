@@ -76,6 +76,20 @@ public class EquipmentLayerRenderer {
             for (EquipmentClientInfo.Layer layer : layers) {
                 int color = getColorForLayer(layer, dyeColor);
                 if (color != 0) {
+                    // MODIFIED for porting: was iris's entity_render_context MixinEquipmentLayerRenderer#changeId (@Inject at
+                    // the INVOKE of EquipmentClientInfo$Layer#usePlayerTexture, with @Local(argsOnly) ItemStack)
+                    if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                        Identifier irisLocation = itemStack.get(DataComponents.ITEM_MODEL);
+                        if (irisLocation == null) {
+                            irisLocation = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(itemStack.getItem());
+                        }
+
+                        net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                            .setCurrentRenderedItem(
+                                net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new net.irisshaders.iris.shaderpack.materialmap.NamespacedId(irisLocation.getNamespace(), irisLocation.getPath()))
+                            );
+                    }
+
                     Identifier layerTexture = layer.usePlayerTexture() && playerTextureOverride != null
                         ? playerTextureOverride
                         : this.layerTextureLookup.apply(new EquipmentLayerRenderer.LayerTextureKey(layerType, layer));
@@ -114,11 +128,35 @@ public class EquipmentLayerRenderer {
 
             ArmorTrim trim = itemStack.get(DataComponents.TRIM);
             if (trim != null && layerType != EquipmentClientInfo.LayerType.HUMANOID_BABY) {
+                // MODIFIED for porting: was iris's entity_render_context MixinEquipmentLayerRenderer#changeTrimTemp (@Inject at
+                // the FIELD read of trimSpriteLookup, with @Local ArmorTrim) - the trim material gets its own temporary item id.
+                // Upstream's "// TODO 1.21.5 check" note is carried over.
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                    // TODO 1.21.5 check
+                    net.irisshaders.iris.helpers.EntityState
+                        .interposeItemId(
+                            net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE
+                                .getItemIds()
+                                .applyAsInt(new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "trim_" + trim.material().value().assets().base().suffix()))
+                        );
+                }
+
                 TextureAtlasSprite sprite = this.trimSpriteLookup.apply(new EquipmentLayerRenderer.TrimSpriteKey(trim, layerType, equipmentAssetId));
                 RenderType renderType = Sheets.armorTrimsSheet(trim.pattern().value().decal());
                 submitNodeCollector.order(nextOrder++)
                     .submitModel(model, state, poseStack, renderType, lightCoords, OverlayTexture.NO_OVERLAY, -1, sprite, outlineColor, null);
+                // MODIFIED for porting: was iris's entity_render_context MixinEquipmentLayerRenderer#changeTrimTemp2 (@Inject at
+                // the third INVOKE of OrderedSubmitNodeCollector#submitModel, shift AFTER) - that third call is exactly the trim
+                // one above.
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                    net.irisshaders.iris.helpers.EntityState.restoreItemId();
+                }
             }
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context MixinEquipmentLayerRenderer#changeId2 (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
         }
     }
 

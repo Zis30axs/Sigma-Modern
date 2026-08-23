@@ -30,6 +30,27 @@ import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 public abstract class AbstractChestBoat extends AbstractBoat implements HasCustomInventoryScreen, ContainerEntity {
+    /**
+     * MODIFIED for porting: was lithium's block.hopper AbstractChestBoatMixin (an @Intrinsic override of rideTick, which
+     * vanilla does not declare here). While the boat is being carried by its vehicle, the movement listeners are muted and
+     * only notified once at the end of the tick.
+     */
+    @Override
+    public void rideTick() {
+        net.minecraft.world.level.entity.EntityInLevelCallback changeListener = this.getChangeListener();
+        if (changeListener instanceof net.caffeinemc.mods.lithium.common.tracking.entity.ToggleableMovementTracker toggleableMovementTracker) {
+            net.minecraft.world.phys.Vec3 beforeTickPos = this.position();
+            int beforeMovementNotificationMask = toggleableMovementTracker.lithium$setNotificationMask(0);
+            super.rideTick();
+            toggleableMovementTracker.lithium$setNotificationMask(beforeMovementNotificationMask);
+            if (!beforeTickPos.equals(this.position())) {
+                changeListener.onMove();
+            }
+        } else {
+            super.rideTick();
+        }
+    }
+
     private static final int CONTAINER_SIZE = 27;
     private NonNullList<ItemStack> itemStacks = NonNullList.withSize(27, ItemStack.EMPTY);
     private @Nullable ResourceKey<LootTable> lootTable;

@@ -4,7 +4,29 @@ import java.util.function.IntConsumer;
 import org.apache.commons.lang3.Validate;
 import org.jspecify.annotations.Nullable;
 
-public class SimpleBitStorage implements BitStorage {
+// MODIFIED for porting: lithium chunk.serialization SimpleBitStorageMixin adds the specialized compaction routine
+public class SimpleBitStorage implements BitStorage, net.caffeinemc.mods.lithium.common.world.chunk.CompactingPackedIntegerArray,
+    net.caffeinemc.mods.sodium.client.world.BitStorageExtension { // MODIFIED for porting: sodium core.world.chunk SimpleBitStorageMixin
+    // MODIFIED for porting: was sodium's core.world.chunk SimpleBitStorageMixin
+    @Override
+    public <T> void sodium$unpack(final T[] out, final net.minecraft.world.level.chunk.Palette<T> palette) {
+        int idx = 0;
+
+        for (long word : this.data) {
+            long l = word;
+
+            for (int j = 0; j < this.valuesPerLong; j++) {
+                out[idx] = java.util.Objects.requireNonNull(
+                    palette.valueFor((int)(l & this.mask)), "Palette does not contain entry for value in storage"
+                );
+                l >>= this.bits;
+                if (++idx >= this.size) {
+                    return;
+                }
+            }
+        }
+    }
+
     private static final int[] MAGIC = new int[]{
         -1,
         -1,
@@ -271,8 +293,8 @@ public class SimpleBitStorage implements BitStorage {
 
     @Override
     public int getAndSet(final int index, final int value) {
-        Validate.inclusiveBetween(0L, this.size - 1, index);
-        Validate.inclusiveBetween(0L, this.mask, value);
+        // MODIFIED for porting: lithium chunk.no_validation SimpleBitStorageMixin#skipValidation removes the
+        // Validate.inclusiveBetween range checks from the three hot accessors.
         int cellIndex = this.cellIndex(index);
         long cellValue = this.data[cellIndex];
         int bitIndex = (index - cellIndex * this.valuesPerLong) * this.bits;
@@ -283,8 +305,7 @@ public class SimpleBitStorage implements BitStorage {
 
     @Override
     public void set(final int index, final int value) {
-        Validate.inclusiveBetween(0L, this.size - 1, index);
-        Validate.inclusiveBetween(0L, this.mask, value);
+        // MODIFIED for porting: lithium chunk.no_validation SimpleBitStorageMixin#skipValidation
         int cellIndex = this.cellIndex(index);
         long cellValue = this.data[cellIndex];
         int bitIndex = (index - cellIndex * this.valuesPerLong) * this.bits;
@@ -293,11 +314,51 @@ public class SimpleBitStorage implements BitStorage {
 
     @Override
     public int get(final int index) {
-        Validate.inclusiveBetween(0L, this.size - 1, index);
+        // MODIFIED for porting: lithium chunk.no_validation SimpleBitStorageMixin#skipValidation
         int cellIndex = this.cellIndex(index);
         long cellValue = this.data[cellIndex];
         int bitIndex = (index - cellIndex * this.valuesPerLong) * this.bits;
         return (int)(cellValue >> bitIndex & this.mask);
+    }
+
+    // MODIFIED for porting: was lithium's chunk.serialization SimpleBitStorageMixin#lithium$compact
+    @Override
+    public <T> void lithium$compact(
+        final net.minecraft.world.level.chunk.Palette<T> srcPalette,
+        final net.minecraft.world.level.chunk.Palette<T> dstPalette,
+        final short[] out
+    ) {
+        if (this.size >= Short.MAX_VALUE) {
+            throw new IllegalStateException("Array too large");
+        }
+
+        if (this.size != out.length) {
+            throw new IllegalStateException("Array size mismatch");
+        }
+
+        net.minecraft.world.level.chunk.PaletteResize<T> noResizeExpected = net.minecraft.world.level.chunk.PaletteResize.noResizeExpected();
+        short[] mappings = new short[(int)(this.mask + 1)];
+        int idx = 0;
+
+        for (long word : this.data) {
+            long bits = word;
+
+            for (int elementIdx = 0; elementIdx < this.valuesPerLong; elementIdx++) {
+                int value = (int)(bits & this.mask);
+                int remappedId = mappings[value];
+                if (remappedId == 0) {
+                    remappedId = dstPalette.idFor(srcPalette.valueFor(value), noResizeExpected) + 1;
+                    mappings[value] = (short)remappedId;
+                }
+
+                out[idx] = (short)(remappedId - 1);
+                bits >>= this.bits;
+                idx++;
+                if (idx >= this.size) {
+                    return;
+                }
+            }
+        }
     }
 
     @Override

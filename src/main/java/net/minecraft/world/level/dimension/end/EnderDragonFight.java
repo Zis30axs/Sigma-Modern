@@ -89,6 +89,14 @@ public class EnderDragonFight extends SavedData {
         .aisle("       ", "  ###  ", " ##### ", " ##### ", " ##### ", "  ###  ", "       ")
         .where('#', BlockInWorld.hasState(BlockPredicate.forBlock(Blocks.BEDROCK)))
         .build();
+
+    // MODIFIED for porting: lithium block_pattern_matching EnderDragonFightMixin#setPatternToDragonPattern. Upstream does
+    // this in an @Inject at the RETURN of the constructor; an instance initializer right after the field is equivalent.
+    // Small todo (upstream's): this hardcoded count breaks mod compatibility when the exit portal pattern is modified.
+    {
+        ((net.caffeinemc.mods.lithium.common.world.block_pattern_matching.BlockPatternExtended)this.exitPortalPattern)
+            .lithium$setRequiredBlock(Blocks.BEDROCK, 41);
+    }
     private int ticksSinceDragonSeen;
     private int aliveCrystals;
     private int ticksSinceCrystalsScanned;

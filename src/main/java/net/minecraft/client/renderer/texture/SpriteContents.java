@@ -44,7 +44,44 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class SpriteContents implements AutoCloseable, Stitcher.Entry {
+// MODIFIED for porting: implements sodium's SpriteContentsExtension (features.textures.animations.tracking
+// SpriteContentsMixin), which lets sodium only tick the animations of sprites that were actually used in the last frame.
+public class SpriteContents implements Stitcher.Entry, AutoCloseable, net.caffeinemc.mods.sodium.client.render.texture.SpriteContentsExtension,
+    net.irisshaders.iris.mixin.texture.SpriteContentsAccessor,
+    net.irisshaders.iris.pbr.texture.SpriteContentsExtension { // MODIFIED for porting: iris texture SpriteContentsAccessor + pbr SpriteContentsExtension
+    // MODIFIED for porting: sodium features.textures.animations.tracking SpriteContentsMixin @Unique field
+    private boolean sodium$active;
+
+    @Override
+    public void sodium$setActive(final boolean value) {
+        // MODIFIED for porting: was iris's texture pbr MixinSpriteContents#iris$onTailMarkActive (@Inject TAIL on sodium's
+        // own sodium$setActive, declared @Dynamic("Added by Sodium") with require = 0) - the PBR sprites of an active sprite
+        // have to be marked active too, or sodium would stop uploading their animations.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this.iris$pbrHolder != null) {
+            TextureAtlasSprite irisNormalSprite = this.iris$pbrHolder.getNormalSprite();
+            TextureAtlasSprite irisSpecularSprite = this.iris$pbrHolder.getSpecularSprite();
+            if (irisNormalSprite != null) {
+                net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(irisNormalSprite);
+            }
+
+            if (irisSpecularSprite != null) {
+                net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(irisSpecularSprite);
+            }
+        }
+
+        this.sodium$active = value;
+    }
+
+    @Override
+    public boolean sodium$hasAnimation() {
+        return this.animatedTexture != null;
+    }
+
+    @Override
+    public boolean sodium$isActive() {
+        return this.sodium$active;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final int UBO_SIZE = new Std140SizeCalculator().putMat4f().putMat4f().putFloat().putFloat().putInt().get();
     private final Identifier name;
@@ -53,6 +90,12 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
     private final NativeImage originalImage;
     private NativeImage[] byMipLevel;
     private final SpriteContents.@Nullable AnimatedTexture animatedTexture;
+
+    // MODIFIED for porting: was iris's texture SpriteContentsAccessor @Accessor("animatedTexture")
+    @Override
+    public SpriteContents.AnimatedTexture getAnimatedTexture() {
+        return this.animatedTexture;
+    }
     private final List<MetadataSectionType.WithValue<?>> additionalMetadata;
     private final MipmapStrategy mipmapStrategy;
     private final float alphaCutoffBias;
@@ -85,9 +128,45 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
         this.transparency = image.computeTransparency();
     }
 
+    /**
+     * MODIFIED for porting: iris texture pbr MixinSpriteContents @Unique field (its pbr SpriteContentsExtension
+     * implementation).
+     */
+    private net.irisshaders.iris.pbr.texture.PBRSpriteHolder iris$pbrHolder;
+
+    @Override
+    public net.irisshaders.iris.pbr.texture.PBRSpriteHolder getPBRHolder() {
+        return this.iris$pbrHolder;
+    }
+
+    @Override
+    public net.irisshaders.iris.pbr.texture.PBRSpriteHolder getOrCreatePBRHolder() {
+        if (this.iris$pbrHolder == null) {
+            this.iris$pbrHolder = new net.irisshaders.iris.pbr.texture.PBRSpriteHolder();
+        }
+
+        return this.iris$pbrHolder;
+    }
+
     public void increaseMipLevel(final int mipLevel) {
         try {
-            this.byMipLevel = MipmapGenerator.generateMipLevels(
+            // MODIFIED for porting: was iris's texture MixinSpriteContents#iris$redirectMipmapGeneration (@WrapOperation
+            // around MipmapGenerator#generateMipLevels) - a PBR texture format can supply its own mipmap generator.
+            NativeImage[] irisCustomMips = null;
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this instanceof net.irisshaders.iris.pbr.mipmap.CustomMipmapGenerator.Provider provider) {
+                net.irisshaders.iris.pbr.mipmap.CustomMipmapGenerator generator = provider.getMipmapGenerator();
+                if (generator != null) {
+                    try {
+                        irisCustomMips = generator.generateMipLevels(this.byMipLevel, mipLevel);
+                    } catch (Exception e) {
+                        net.irisshaders.iris.Iris.logger.error("ERROR MIPMAPPING", e);
+                    }
+                }
+            }
+
+            this.byMipLevel = irisCustomMips != null
+                ? irisCustomMips
+                : MipmapGenerator.generateMipLevels(
                 this.name, this.byMipLevel, mipLevel, this.mipmapStrategy, this.alphaCutoffBias, this.transparency
             );
         } catch (Throwable t) {
@@ -204,6 +283,11 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
 
     @Override
     public void close() {
+        // MODIFIED for porting: was iris's texture pbr MixinSpriteContents#iris$onTailClose (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this.iris$pbrHolder != null) {
+            this.iris$pbrHolder.close();
+        }
+
         for (NativeImage image : this.byMipLevel) {
             image.close();
         }
@@ -260,11 +344,21 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private class AnimatedTexture {
-        private final List<SpriteContents.FrameInfo> frames;
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    // MODIFIED for porting: implements iris's texture SpriteContentsAnimatedTextureAccessor
+    public class AnimatedTexture implements net.irisshaders.iris.mixin.texture.SpriteContentsAnimatedTextureAccessor {
+        // MODIFIED for porting: was iris's texture SpriteContentsAnimatedTextureAccessor @Accessor("frames")
+        @Override
+        public List<SpriteContents.FrameInfo> getFrames() {
+            return this.frames;
+        }
+
+        // MODIFIED for porting: sodium-common.accesswidener widened access
+        public final List<SpriteContents.FrameInfo> frames;
         private final IntList uniqueFrames;
         private final int frameRowSize;
-        private final boolean interpolateFrames;
+        // MODIFIED for porting: sodium-common.accesswidener widened access
+        public final boolean interpolateFrames;
 
         private AnimatedTexture(final List<SpriteContents.FrameInfo> frames, final int frameRowSize, final boolean interpolateFrames) {
             this.frames = frames;
@@ -336,13 +430,63 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
     }
 
     @OnlyIn(Dist.CLIENT)
-    public class AnimationState implements AutoCloseable {
+    // MODIFIED for porting: implements sodium-extra's animation MixinSpriteContentsAnimationState (AnimationStateExtended)
+    public class AnimationState implements AutoCloseable, me.flashyreese.mods.sodiumextra.common.util.AnimationStateExtended,
+        net.irisshaders.iris.mixin.texture.SpriteContentsTickerAccessor { // MODIFIED for porting: iris texture SpriteContentsTickerAccessor
+        // MODIFIED for porting: was iris's texture SpriteContentsTickerAccessor (@Accessor for frame / subFrame /
+        // animationInfo)
+        @Override
+        public int getFrame() {
+            return this.frame;
+        }
+
+        @Override
+        public void setFrame(final int frame) {
+            this.frame = frame;
+        }
+
+        @Override
+        public int getSubFrame() {
+            return this.subFrame;
+        }
+
+        @Override
+        public void setSubFrame(final int subFrame) {
+            this.subFrame = subFrame;
+        }
+
+        @Override
+        public SpriteContents.AnimatedTexture getAnimationInfo() {
+            return this.animationInfo;
+        }
+
+        // MODIFIED for porting: sodium-extra animation MixinSpriteContentsAnimationState @Unique field
+        private TextureAtlasSprite sodiumExtra$sprite;
+
+        @Override
+        public TextureAtlasSprite sodium_extra$getSprite() {
+            return this.sodiumExtra$sprite;
+        }
+
+        @Override
+        public void sodium_extra$setSprite(final TextureAtlasSprite sprite) {
+            this.sodiumExtra$sprite = sprite;
+        }
+
         private int frame;
         private int subFrame;
         private final SpriteContents.AnimatedTexture animationInfo;
         private final Int2ObjectMap<GpuTextureView> frameTexturesByIndex;
         private final GpuBufferSlice[] spriteUbosByMip;
         private boolean isDirty = true;
+        /**
+         * MODIFIED for porting: sodium features.textures.animations.tracking SpriteContentsTickerMixin @Unique fields.
+         * Upstream additionally captures the enclosing SpriteContents into a {@code parent} field ("replace fragile Shadow");
+         * this class is an inner class here, so {@code SpriteContents.this} is used directly instead.
+         */
+        private boolean sodium$hasUploadedAllOnce = false;
+
+        private boolean sodium$wasActiveThisTick = false;
 
         private AnimationState(
             final SpriteContents.AnimatedTexture animationInfo,
@@ -355,6 +499,12 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
         }
 
         public void tick() {
+            // MODIFIED for porting: sodium features.textures.animations.tracking SpriteContentsTickerMixin#captureActiveState
+            // (HEAD). The value has to be copied from the parent to retain it for the whole tick: resetting it at the end of
+            // needsToDraw would clear it after the first animation frame, before the remaining frames are processed.
+            net.caffeinemc.mods.sodium.client.render.texture.SpriteContentsExtension sodium$parent = SpriteContents.this;
+            this.sodium$wasActiveThisTick = sodium$parent.sodium$isActive();
+            sodium$parent.sodium$setActive(false);
             this.subFrame++;
             this.isDirty = false;
             SpriteContents.FrameInfo currentFrame = this.animationInfo.frames.get(this.frame);
@@ -374,6 +524,21 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
         }
 
         public boolean needsToDraw() {
+            // MODIFIED for porting: sodium features.textures.animations.tracking SpriteContentsTickerMixin#preTick
+            // (HEAD, cancellable) - once every frame of the animation has been uploaded at least once, animations of sprites
+            // that were not used in the last tick do not have to be drawn.
+            if (!this.sodium$hasUploadedAllOnce) {
+                if (this.frame == this.animationInfo.frames.size() - 1) {
+                    this.sodium$hasUploadedAllOnce = true;
+                } else {
+                    return this.animationInfo.interpolateFrames || this.isDirty;
+                }
+            }
+
+            if (net.caffeinemc.mods.sodium.client.SodiumClientMod.options().performance.animateOnlyVisibleTextures && !this.sodium$wasActiveThisTick) {
+                return false;
+            }
+
             return this.animationInfo.interpolateFrames || this.isDirty;
         }
 
@@ -407,6 +572,19 @@ public class SpriteContents implements AutoCloseable, Stitcher.Entry {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record FrameInfo(int index, int time) {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    // MODIFIED for porting: implements iris's texture SpriteContentsFrameInfoAccessor
+    public record FrameInfo(int index, int time) implements net.irisshaders.iris.mixin.texture.SpriteContentsFrameInfoAccessor {
+        // MODIFIED for porting: was iris's texture SpriteContentsFrameInfoAccessor @Accessor("index") / @Accessor("time")
+        @Override
+        public int getIndex() {
+            return this.index;
+        }
+
+        @Override
+        public int getTime() {
+            return this.time;
+        }
+
     }
 }

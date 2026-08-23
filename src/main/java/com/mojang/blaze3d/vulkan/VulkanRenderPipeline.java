@@ -55,7 +55,19 @@ public record VulkanRenderPipeline(
     ) {
         long pipelineLayout;
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkPipelineLayoutCreateInfo createInfo = VkPipelineLayoutCreateInfo.calloc(stack).sType$Default().pSetLayouts(stack.longs(layout.handle()));
+            VkPipelineLayoutCreateInfo createInfo = VkPipelineLayoutCreateInfo.calloc(stack).sType$Default();
+            // MODIFIED for porting: sodium core VulkanPipelineMixin#sodium$fixPipelineLayout (@WrapOperation around
+            // pSetLayouts) - sodium's own pipelines need a push constant range.
+            if (pipeline.getLocation().getNamespace().contains("sodium")) {
+                createInfo.pPushConstantRanges(
+                    org.lwjgl.vulkan.VkPushConstantRange.calloc(1, stack)
+                        .offset(0)
+                        .size(net.caffeinemc.mods.sodium.client.gpu.device.context.DrawContext.PUSH_CONSTANT_RANGE)
+                        .stageFlags(org.lwjgl.vulkan.VK13.VK_SHADER_STAGE_ALL)
+                );
+            }
+
+            createInfo.pSetLayouts(stack.longs(layout.handle()));
             LongBuffer pointer = stack.callocLong(1);
             VulkanUtils.crashIfFailure(
                 device, VK12.vkCreatePipelineLayout(device.vkDevice(), createInfo, null, pointer), "Can't create pipeline for " + pipeline.getLocation()

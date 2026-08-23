@@ -16,6 +16,15 @@ import net.minecraft.world.entity.monster.hoglin.Hoglin;
 import net.minecraft.world.entity.monster.piglin.Piglin;
 
 public class HoglinSpecificSensor extends Sensor<Hoglin> {
+    // MODIFIED for porting: lithium ai.non_poi_block_search HoglinSpecificSensorMixin
+    private static final java.util.function.Predicate<net.minecraft.world.level.block.state.BlockState> LITHIUM_IS_VALID_REPELLENT_PREDICATE =
+        HoglinSpecificSensor::lithium$isValidRepellent;
+
+    // MODIFIED for porting: lithium ai.non_poi_block_search HoglinSpecificSensorMixin#lithium$isValidRepellent
+    private static boolean lithium$isValidRepellent(final net.minecraft.world.level.block.state.BlockState blockState) {
+        return blockState.is(BlockTags.HOGLIN_REPELLENTS);
+    }
+
     @Override
     public Set<MemoryModuleType<?>> requires() {
         return ImmutableSet.of(
@@ -30,7 +39,11 @@ public class HoglinSpecificSensor extends Sensor<Hoglin> {
 
     protected void doTick(final ServerLevel level, final Hoglin body) {
         Brain<?> brain = body.getBrain();
-        brain.setMemory(MemoryModuleType.NEAREST_REPELLENT, this.findNearestRepellent(level, body));
+        // MODIFIED for porting: lithium ai.non_poi_block_search HoglinSpecificSensorMixin#redirectFindNearestRepellent
+        // - the block search caches the chunk lookups and skips chunk sections that cannot contain a repellent.
+        brain.setMemory(
+            MemoryModuleType.NEAREST_REPELLENT, net.caffeinemc.mods.lithium.common.ai.non_poi_block_search.CommonBlockSearchesCheckAndCache.blockPosFindClosestMatch(level, body, 8, 4, LITHIUM_IS_VALID_REPELLENT_PREDICATE, true)
+        );
         Optional<Piglin> adultPiglin = Optional.empty();
         int adultPiglinCount = 0;
         List<Hoglin> adultHoglins = Lists.newArrayList();

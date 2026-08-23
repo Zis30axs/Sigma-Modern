@@ -14,7 +14,26 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class BlockColors {
+// MODIFIED for porting: implements sodium's BlockColorsExtension (core.model.colors BlockColorsMixin)
+public class BlockColors implements net.caffeinemc.mods.sodium.client.model.color.interop.BlockColorsExtension {
+    // MODIFIED for porting: sodium core.model.colors BlockColorsMixin @Unique fields. Sodium keeps a copy because it needs
+    // to iterate over the entry pairs, rather than just the values.
+    private final it.unimi.dsi.fastutil.objects.Reference2ReferenceMap<Block, BlockTintSource[]> sodium$blocksToColor =
+        new it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap<>();
+
+    private final it.unimi.dsi.fastutil.objects.ReferenceSet<Block> sodium$overridenBlocks =
+        new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+
+    @Override
+    public it.unimi.dsi.fastutil.objects.Reference2ReferenceMap<Block, BlockTintSource[]> sodium$getProviders() {
+        return it.unimi.dsi.fastutil.objects.Reference2ReferenceMaps.unmodifiable(this.sodium$blocksToColor);
+    }
+
+    @Override
+    public it.unimi.dsi.fastutil.objects.ReferenceSet<Block> sodium$getOverridenVanillaBlocks() {
+        return it.unimi.dsi.fastutil.objects.ReferenceSets.unmodifiable(this.sodium$overridenBlocks);
+    }
+
     public static final int LILY_PAD_IN_WORLD = -14647248;
     public static final int LILY_PAD_DEFAULT = -9321636;
     private static final BlockTintSource BLANK_LAYER = BlockTintSources.constant(-1);
@@ -58,6 +77,21 @@ public class BlockColors {
     }
 
     public void register(final List<BlockTintSource> layers, final Block... blocks) {
+        // MODIFIED for porting: sodium core.model.colors BlockColorsMixin#preRegisterColorProvider (HEAD)
+        for (Block block : blocks) {
+            // There will be one provider already registered for vanilla blocks, if we are replacing it, it means a mod is
+            // using custom logic, and we need to disable per-vertex coloring
+            if (this.sodium$blocksToColor.put(block, layers.toArray(BlockTintSource[]::new)) != null) {
+                this.sodium$overridenBlocks.add(block);
+                net.caffeinemc.mods.sodium.client.SodiumClientMod.logger()
+                    .info(
+                        "Block {} had its color provider replaced with {} and will not use per-vertex coloring",
+                        net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block),
+                        layers
+                    );
+            }
+        }
+
         for (Block block : blocks) {
             this.sources.put(block, layers);
         }

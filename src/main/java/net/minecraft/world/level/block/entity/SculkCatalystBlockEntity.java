@@ -26,22 +26,60 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 
-public class SculkCatalystBlockEntity extends BlockEntity implements GameEventListener.Provider<SculkCatalystBlockEntity.CatalystListener> {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.sculk_catalyst SculkCatalystBlockEntityMixin
+public class SculkCatalystBlockEntity extends BlockEntity
+    implements GameEventListener.Provider<SculkCatalystBlockEntity.CatalystListener>, net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity {
+    // MODIFIED for porting: lithium sculk_catalyst SculkCatalystBlockEntityMixin
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
     private final SculkCatalystBlockEntity.CatalystListener catalystListener;
 
     public SculkCatalystBlockEntity(final BlockPos worldPosition, final BlockState blockState) {
         super(BlockEntityTypes.SCULK_CATALYST, worldPosition, blockState);
         this.catalystListener = new SculkCatalystBlockEntity.CatalystListener(blockState, new BlockPositionSource(worldPosition));
+        // MODIFIED for porting: lithium sculk_catalyst SculkCatalystBlockEntityMixin#addCatalystListenerCallback
+        ((net.caffeinemc.mods.lithium.common.block.entity.sleeping_sculk.GameEventListenerWithCallback)this.catalystListener.getSculkSpreader()).lithium$setGameEventCallback(this::wakeUpNow);
     }
 
     public static void serverTick(final Level level, final BlockPos pos, final BlockState state, final SculkCatalystBlockEntity entity) {
         entity.catalystListener.getSculkSpreader().updateCursors(level, pos, level.getRandom(), true);
+        // MODIFIED for porting: lithium sculk_catalyst SculkCatalystBlockEntityMixin#sleepIfNoCursors (RETURN)
+        if (entity.getListener().getSculkSpreader().getCursors().isEmpty()) {
+            entity.lithium$startSleeping();
+        }
     }
 
     @Override
     protected void loadAdditional(final ValueInput input) {
         super.loadAdditional(input);
         this.catalystListener.sculkSpreader.load(input);
+            // MODIFIED for porting: lithium sculk_catalyst SculkCatalystBlockEntityMixin#wakeupIfLoadedWithData
+        // (RETURN) - detects modification by commands
+        if (!this.getListener().getSculkSpreader().getCursors().isEmpty()) {
+            this.wakeUpNow();
+        }
     }
 
     @Override

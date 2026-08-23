@@ -125,7 +125,9 @@ public class PistonBaseBlock extends DirectionalBlock {
     }
 
     private boolean getNeighborSignal(final SignalGetter level, final BlockPos pos, final Direction pushDirection) {
-        for (Direction direction : Direction.values()) {
+        // MODIFIED for porting: lithium alloc.enum_values.piston_block PistonBaseBlockMixin#removeAllocation replaces
+        // Direction.values() (which clones the array on every call) with a shared constant array.
+        for (Direction direction : net.caffeinemc.mods.lithium.common.util.DirectionConstants.ALL) {
             if (direction != pushDirection && level.hasSignal(pos.relative(direction), direction)) {
                 return true;
             }
@@ -137,7 +139,8 @@ public class PistonBaseBlock extends DirectionalBlock {
 
         BlockPos above = pos.above();
 
-        for (Direction direction : Direction.values()) {
+        // MODIFIED for porting: lithium alloc.enum_values.piston_block PistonBaseBlockMixin#removeAllocation
+        for (Direction direction : net.caffeinemc.mods.lithium.common.util.DirectionConstants.ALL) {
             if (direction != Direction.DOWN && level.hasSignal(above.relative(direction), direction)) {
                 return true;
             }

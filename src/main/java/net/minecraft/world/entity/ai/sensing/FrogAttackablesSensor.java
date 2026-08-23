@@ -15,7 +15,9 @@ public class FrogAttackablesSensor extends NearestVisibleLivingEntitySensor {
 
     @Override
     protected boolean isMatchingEntity(final ServerLevel level, final LivingEntity body, final LivingEntity mob) {
-        return Sensor.isEntityAttackable(level, body, mob) && Frog.canEat(mob) && !this.isUnreachableAttackTarget(body, mob)
+        // MODIFIED for porting: lithium minimal_nonvanilla.ai.sensor.frog_attackables FrogAttackablesSensorMixin checks the
+        // cheap entity-type test before the much more expensive attackability test.
+        return Frog.canEat(mob) && Sensor.isEntityAttackable(level, body, mob) && !this.isUnreachableAttackTarget(body, mob)
             ? mob.closerThan(body, 10.0)
             : false;
     }

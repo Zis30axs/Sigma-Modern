@@ -64,8 +64,37 @@ public class QuadParticleFeatureRenderer implements FeatureRenderer<QuadParticle
         this.dynamicTransforms = RenderSystem.getDynamicUniforms().writeTransform(RenderSystem.getModelViewMatrixCopy());
     }
 
+    // MODIFIED for porting: iris MixinParticleEngine @Unique field - the phase to restore after the particle group
+    private net.irisshaders.iris.pipeline.WorldRenderingPhase iris$lastPhase = net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE;
+
+    /**
+     * MODIFIED for porting: was iris's MixinParticleEngine#iris$beginDrawingParticles / #iris$finishDrawingParticles
+     * (@Inject HEAD and RETURN) - makes sure all particles are rendered with the textured_lit shader program.
+     */
     @Override
     public void executeGroup(
+        final FeatureFrameContext context, final int groupIndex, final List<QuadParticleFeatureRenderer.Submit> submits, final boolean strictlyOrdered
+    ) {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.getPipelineManager().getPipeline().ifPresent(pipeline -> {
+                this.iris$lastPhase = pipeline.getPhase();
+                pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.PARTICLES);
+            });
+
+            try {
+                this.iris$executeGroup(context, groupIndex, submits, strictlyOrdered);
+            } finally {
+                net.irisshaders.iris.Iris.getPipelineManager().getPipeline().ifPresent(pipeline -> pipeline.setPhase(this.iris$lastPhase));
+            }
+
+            return;
+        }
+
+        this.iris$executeGroup(context, groupIndex, submits, strictlyOrdered);
+    }
+
+    // MODIFIED for porting: original vanilla body of executeGroup
+    private void iris$executeGroup(
         final FeatureFrameContext context, final int groupIndex, final List<QuadParticleFeatureRenderer.Submit> submits, final boolean strictlyOrdered
     ) {
         QuadParticleFeatureRenderer.PreparedGroup group = this.groups.get(groupIndex);
@@ -86,6 +115,18 @@ public class QuadParticleFeatureRenderer implements FeatureRenderer<QuadParticle
                     OptionalDouble.empty()
                 )) {
             RenderSystem.bindDefaultUniforms(renderPass);
+            // MODIFIED for porting: sodium core.render.world ParticleFeatureRendererMixin#sodium$bindDefaultUniforms
+            // (INVOKE bindDefaultUniforms). Vanilla's prepareRenderPass relies on the Globals/Lighting bindings being
+            // inherited from the vanilla chunk render, which sodium replaces - so they are bound explicitly here.
+            com.mojang.blaze3d.buffers.GpuBuffer sodium$globalUniform = RenderSystem.getGlobalSettingsUniform();
+            if (sodium$globalUniform != null) {
+                renderPass.setUniform("Globals", sodium$globalUniform);
+            }
+
+            com.mojang.blaze3d.buffers.GpuBufferSlice sodium$shaderLights = RenderSystem.getShaderLights();
+            if (sodium$shaderLights != null) {
+                renderPass.setUniform("Lighting", sodium$shaderLights);
+            }
             renderPass.setUniform("DynamicTransforms", Objects.requireNonNull(this.dynamicTransforms));
             renderPass.bindTexture("Sampler2", context.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
             drawLayers(context.stagedVertexBuffer(), group.layers, renderPass, context.textureManager());

@@ -435,7 +435,8 @@ public abstract class AbstractSelectionList<E extends AbstractSelectionList.Entr
     }
 
     @OnlyIn(Dist.CLIENT)
-    protected abstract static class Entry<E extends AbstractSelectionList.Entry<E>> implements LayoutElement, GuiEventListener {
+// MODIFIED for porting: iris.accesswidener makes AbstractSelectionList$Entry accessible
+    public abstract static class Entry<E extends AbstractSelectionList.Entry<E>> implements LayoutElement, GuiEventListener {
         public static final int CONTENT_PADDING = 2;
         private int x = 0;
         private int y = 0;

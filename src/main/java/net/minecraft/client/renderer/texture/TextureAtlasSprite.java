@@ -15,7 +15,10 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
 
 @OnlyIn(Dist.CLIENT)
-public class TextureAtlasSprite implements AutoCloseable {
+// MODIFIED for porting: implements sodium's TextureAtlasSpriteExtension (features.textures.scan TextureAtlasSpriteMixin)
+public class TextureAtlasSprite implements AutoCloseable,
+    net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.TextureAtlasSpriteExtension,
+    net.irisshaders.iris.mixin.texture.TextureAtlasSpriteAccessor { // MODIFIED for porting: iris texture TextureAtlasSpriteAccessor
     private final Identifier atlasLocation;
     private final SpriteContents contents;
     private final int x;
@@ -25,6 +28,12 @@ public class TextureAtlasSprite implements AutoCloseable {
     private final float v0;
     private final float v1;
     private final int padding;
+
+    // MODIFIED for porting: was iris's texture TextureAtlasSpriteAccessor @Accessor("padding")
+    @Override
+    public int getPadding() {
+        return this.padding;
+    }
 
     protected TextureAtlasSprite(
         final Identifier atlasLocation, final SpriteContents contents, final int atlasWidth, final int atlasHeight, final int x, final int y, final int padding
@@ -61,7 +70,23 @@ public class TextureAtlasSprite implements AutoCloseable {
     }
 
     public SpriteContents.@Nullable AnimationState createAnimationState(final GpuBufferSlice uboSlice, final int spriteUboSize) {
-        return this.contents.createAnimationState(uboSlice, spriteUboSize);
+        // MODIFIED for porting: sodium features.textures.scan TextureAtlasSpriteMixin#hookTickerInstantiation
+        // (@WrapOperation) - a non-vanilla animation state means the sprite's image contents are produced by something
+        // sodium cannot predict, so its animation must always be uploaded.
+        SpriteContents.AnimationState animationState = this.contents.createAnimationState(uboSlice, spriteUboSize);
+        if (animationState != null && !SpriteContents.AnimationState.class.equals(animationState.getClass())) {
+            this.sodium$hasUnknownImageContents = true;
+        }
+
+        return animationState;
+    }
+
+    // MODIFIED for porting: sodium features.textures.scan TextureAtlasSpriteMixin @Unique field
+    private boolean sodium$hasUnknownImageContents;
+
+    @Override
+    public boolean sodium$hasUnknownImageContents() {
+        return this.sodium$hasUnknownImageContents;
     }
 
     public Transparency transparency() {
@@ -100,6 +125,9 @@ public class TextureAtlasSprite implements AutoCloseable {
     }
 
     public VertexConsumer wrap(final VertexConsumer buffer) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking TextureAtlasSpriteMixin#markSpriteAsActive
+        // (HEAD)
+        net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(this);
         return new SpriteCoordinateExpander(buffer, this);
     }
 

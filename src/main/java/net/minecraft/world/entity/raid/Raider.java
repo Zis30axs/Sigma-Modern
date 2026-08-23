@@ -44,9 +44,27 @@ import org.jspecify.annotations.Nullable;
 
 public abstract class Raider extends PatrollingMonster {
     protected static final EntityDataAccessor<Boolean> IS_CELEBRATING = SynchedEntityData.defineId(Raider.class, EntityDataSerializers.BOOLEAN);
+    // MODIFIED for porting: lithium ai.raid RaiderMixin replaces this predicate in a static initializer so it uses the
+    // banner cached per level - Raid#getOminousBannerInstance is very expensive during AI ticking.
     private static final Predicate<ItemEntity> ALLOWED_ITEMS = e -> !e.hasPickUpDelay()
         && e.isAlive()
-        && ItemStack.matches(e.getItem(), Raid.getOminousBannerInstance(e.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)));
+        && ItemStack.matches(
+            e.getItem(), lithium$getOminousBanner(e.level(), e.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN))
+        );
+
+    /**
+     * MODIFIED for porting: was lithium's ai.raid RaiderMixin#getOminousBanner and
+     * Raider$ObtainRaidLeaderBannerGoalMixin#getOminousBanner. {@link Raid#getOminousBannerInstance} is very expensive, so the
+     * banner cached on the level is used during AI ticking. The cache is null for levels whose registries do not work (some
+     * mods create fake levels), in which case the vanilla lookup is used.
+     */
+    private static ItemStack lithium$getOminousBanner(
+        final net.minecraft.world.level.Level level,
+        final net.minecraft.core.HolderGetter<net.minecraft.world.level.block.entity.BannerPattern> bannerPatternLookup
+    ) {
+        ItemStack ominousBanner = ((net.caffeinemc.mods.lithium.common.world.LithiumData)level).lithium$getData().ominousBanner();
+        return ominousBanner != null ? ominousBanner : Raid.getOminousBannerInstance(bannerPatternLookup);
+    }
     private static final int DEFAULT_WAVE = 0;
     private static final boolean DEFAULT_CAN_JOIN_RAID = false;
     protected @Nullable Raid raid;
@@ -148,8 +166,11 @@ public abstract class Raider extends PatrollingMonster {
 
     public boolean isCaptain() {
         ItemStack banner = this.getItemBySlot(EquipmentSlot.HEAD);
+        // MODIFIED for porting: lithium ai.raid RaiderMixin#getOminousBanner (@Redirect)
         boolean hasCaptainBanner = !banner.isEmpty()
-            && ItemStack.matches(banner, Raid.getOminousBannerInstance(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)));
+            && ItemStack.matches(
+                banner, lithium$getOminousBanner(this.level(), this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN))
+            );
         boolean patrolLeader = this.isPatrolLeader();
         return hasCaptainBanner && patrolLeader;
     }
@@ -214,7 +235,8 @@ public abstract class Raider extends PatrollingMonster {
         boolean hasRaidLeader = this.hasActiveRaid() && this.getCurrentRaid().getLeader(this.getWave()) != null;
         if (this.hasActiveRaid()
             && !hasRaidLeader
-            && ItemStack.matches(itemStack, Raid.getOminousBannerInstance(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) {
+            // MODIFIED for porting: lithium ai.raid RaiderMixin#getOminousBanner (@Redirect)
+            && ItemStack.matches(itemStack, lithium$getOminousBanner(this.level(), this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) {
             EquipmentSlot slot = EquipmentSlot.HEAD;
             ItemStack current = this.getItemBySlot(slot);
             double dropChance = this.getDropChances().byEquipment(slot);
@@ -406,8 +428,10 @@ public abstract class Raider extends PatrollingMonster {
                 return true;
             }
 
+            // MODIFIED for porting: lithium ai.raid Raider$ObtainRaidLeaderBannerGoalMixin#getOminousBanner (@Redirect)
             if (ItemStack.matches(
-                this.mob.getItemBySlot(EquipmentSlot.HEAD), Raid.getOminousBannerInstance(this.mob.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN))
+                this.mob.getItemBySlot(EquipmentSlot.HEAD),
+                lithium$getOminousBanner(this.mob.level(), this.mob.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN))
             )) {
                 return true;
             }
@@ -503,8 +527,17 @@ public abstract class Raider extends PatrollingMonster {
         private boolean hasSuitablePoi() {
             ServerLevel level = (ServerLevel)this.raider.level();
             BlockPos pos = this.raider.blockPosition();
+            // MODIFIED for porting: lithium ai.poi.tasks RaiderEntityAttackHomeGoalMixin#redirect (@Redirect) - lithium's
+            // single-type filter lets PoiSection look the type up in its map directly.
             Optional<BlockPos> homePos = level.getPoiManager()
-                .getRandom(p -> p.is(PoiTypes.HOME), this::hasNotVisited, PoiManager.Occupancy.ANY, pos, 48, this.raider.random);
+                .getRandom(
+                    new net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter(net.caffeinemc.mods.lithium.common.util.POIRegistryEntries.HOME_ENTRY),
+                    this::hasNotVisited,
+                    PoiManager.Occupancy.ANY,
+                    pos,
+                    48,
+                    this.raider.random
+                );
             if (homePos.isEmpty()) {
                 return false;
             }

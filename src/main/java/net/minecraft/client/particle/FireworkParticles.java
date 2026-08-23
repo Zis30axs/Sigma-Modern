@@ -182,6 +182,10 @@ public class FireworkParticles {
             {0.6122448979591837, -0.8040816326530612},
             {0.0, -0.35918367346938773}
         };
+        // MODIFIED for porting: was sodium-extra's particle MixinFireworkParticle @Unique field
+        private final net.minecraft.resources.Identifier fireworkIdentifier = net.minecraft.resources.Identifier
+            .fromNamespaceAndPath("minecraft", "firework");
+
         private int life;
         private final ParticleEngine engine;
         private final List<FireworkExplosion> explosions;
@@ -306,6 +310,13 @@ public class FireworkParticles {
             final boolean trail,
             final boolean twinkle
         ) {
+            // MODIFIED for porting: was sodium-extra's particle MixinFireworkParticle#addExplosionParticle
+            // (@Inject HEAD, cancellable)
+            if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE
+                && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.isParticleEnabled(this.fireworkIdentifier)) {
+                return;
+            }
+
             FireworkParticles.SparkParticle sparkParticle = (FireworkParticles.SparkParticle)this.engine
                 .createParticle(ParticleTypes.FIREWORK, x, y, z, xa, ya, za);
             sparkParticle.setTrail(trail);

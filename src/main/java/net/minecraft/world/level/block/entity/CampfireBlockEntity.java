@@ -38,7 +38,37 @@ import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public class CampfireBlockEntity extends BlockEntity implements Clearable {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.campfire CampfireBlockEntityMixin plus the
+// campfire.lit / campfire.unlit sub-modules
+public class CampfireBlockEntity extends BlockEntity
+    implements Clearable, net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity {
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.campfire CampfireBlockEntityMixin
+    // A block entity that has nothing to do parks itself by swapping the ticker inside its tick wrapper for a
+    // no-op one, and is woken up again by the events below.
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int BURN_COOL_SPEED = 2;
     private static final int NUM_SLOTS = 4;
@@ -80,6 +110,12 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
         if (changed) {
             setChanged(level, pos, state);
         }
+
+        // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.campfire.lit
+        // CampfireBlockEntityMixin#trySleepLit (RETURN) - nothing was cooking this tick, so park the campfire.
+        if (!changed) {
+            entity.lithium$startSleeping();
+        }
     }
 
     public static void cooldownTick(final Level level, final BlockPos pos, final BlockState state, final CampfireBlockEntity entity) {
@@ -94,6 +130,12 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
 
         if (changed) {
             setChanged(level, pos, state);
+        }
+
+        // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.campfire.unlit
+        // CampfireBlockEntityMixin#trySleepUnlit (RETURN) - no cooking progress left to wind down.
+        if (!changed) {
+            entity.lithium$startSleeping();
         }
     }
 
@@ -141,6 +183,8 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
                 cookingTimes -> System.arraycopy(cookingTimes, 0, this.cookingTime, 0, Math.min(this.cookingTime.length, cookingTimes.length)),
                 () -> Arrays.fill(this.cookingTime, 0)
             );
+            // MODIFIED for porting: lithium campfire CampfireBlockEntityMixin#wakeUpOnReadNbt (RETURN)
+        this.wakeUpNow();
     }
 
     @Override
@@ -176,6 +220,8 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
 
                 this.cookingTime[slot] = recipe.get().value().cookingTime();
                 this.cookingProgress[slot] = 0;
+                // MODIFIED for porting: lithium campfire CampfireBlockEntityMixin#wakeUpOnAddItem
+                this.wakeUpNow();
                 this.items.set(slot, placeItem.consumeAndReturn(1, sourceEntity));
                 serverLevel.gameEvent(GameEvent.BLOCK_CHANGE, this.getBlockPos(), GameEvent.Context.of(sourceEntity, this.getBlockState()));
                 this.markUpdated();

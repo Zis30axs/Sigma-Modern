@@ -36,6 +36,11 @@ public class PaintingRenderer extends EntityRenderer<Painting, PaintingRenderSta
     public void submit(
         final PaintingRenderState state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera
     ) {
+        // MODIFIED for porting: was sodium-extra's render.entity MixinPaintingEntityRenderer#render (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.painting) {
+            return;
+        }
+
         PaintingVariant variant = state.variant;
         if (variant != null) {
             poseStack.pushPose();

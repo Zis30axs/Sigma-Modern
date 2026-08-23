@@ -77,7 +77,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class Options {
+// MODIFIED for porting: implements sodium's OptionsAccessor (mixin.features.gui.OptionsAccessor)
+public class Options implements net.caffeinemc.mods.sodium.mixin.features.gui.OptionsAccessor {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson GSON = new Gson();
     private static final TypeToken<List<String>> LIST_OF_STRINGS_TYPE = new TypeToken<List<String>>() {};
@@ -588,6 +589,13 @@ public class Options {
         }
     });
     private boolean exclusiveFullscreenFromStartup;
+
+    // MODIFIED for porting: was sodium's OptionsAccessor @Accessor("exclusiveFullscreenFromStartup")
+    @Override
+    public boolean sodium$initialExclusiveFullscreen() {
+        return this.exclusiveFullscreenFromStartup;
+    }
+
     private static final Component TOOLTIP_EXCLUSIVE_FULLSCREEN_ON = Component.translatable("options.exclusiveFullscreen.on.tooltip");
     private static final Component TOOLTIP_EXCLUSIVE_FULLSCREEN_OFF = Component.translatable("options.exclusiveFullscreen.off.tooltip");
     private final OptionInstance<Boolean> exclusiveFullscreen = OptionInstance.createBoolean("options.exclusiveFullscreen", value -> {
@@ -791,7 +799,11 @@ public class Options {
                 this.keyDebugModifier
             },
             this.keyHotbarSlots,
-            this.debugKeys
+            this.debugKeys,
+            // MODIFIED for porting: iris registers its key bindings through IrisPlatformHelpers#registerKeyBinding, which on
+            // Fabric was Fabric API's KeyMappingHelper appending them to this very array. Iris registers them from
+            // Iris#onEarlyInitialize, which runs immediately before `new Options(...)`, so they are all present by now.
+            net.irisshaders.iris.platform.VanillaIrisPlatformHelpers.extraKeyMappings()
         )
         .flatMap(Stream::of)
         .toArray(KeyMapping[]::new);
@@ -1890,7 +1902,28 @@ public class Options {
         return this.modelParts.contains(part);
     }
 
+    /**
+     * MODIFIED for porting: was iris's sky MixinOptions_CloudsOverride#iris$overrideCloudsType (@Inject HEAD, cancellable) -
+     * lets the current pipeline override the cloud setting. Vanilla does not render clouds below render distance 4, which the
+     * HEAD injection had to mirror.
+     */
     public CloudStatus getCloudStatus() {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this.renderDistance.get() >= 4) {
+            java.util.Optional<net.irisshaders.iris.pipeline.WorldRenderingPipeline> pipeline = net.irisshaders.iris.Iris.getPipelineManager().getPipeline();
+            if (pipeline.isPresent()) {
+                switch (pipeline.get().getCloudSetting()) {
+                    case OFF:
+                        return CloudStatus.OFF;
+                    case FAST:
+                        return CloudStatus.FAST;
+                    case FANCY:
+                        return CloudStatus.FANCY;
+                    default:
+                        break;
+                }
+            }
+        }
+
         return this.cloudStatus.get();
     }
 
@@ -1997,7 +2030,8 @@ public class Options {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private interface FieldAccess extends Options.OptionAccess {
+// MODIFIED for porting: iris.accesswidener makes Options$FieldAccess accessible
+    public interface FieldAccess extends Options.OptionAccess {
         int process(String name, int value);
 
         boolean process(String name, boolean value);

@@ -38,12 +38,20 @@ public class GameEventDispatcher {
         };
         boolean applicable = false;
 
+        // MODIFIED for porting: lithium world.game_events.dispatch GameEventDispatcherMixin. Upstream replaces the chunk
+        // lookup by a dummy chunk, makes getListenerRegistry return null and then resolves the registry from a level-wide
+        // "chunk pos -> y section -> registry" map instead. That map only contains the chunks that actually have listeners,
+        // which is far fewer than the loaded chunks, and it avoids creating a registry for every visited section.
         for (int chunkX = sectionMinX; chunkX <= sectionMaxX; chunkX++) {
             for (int chunkZ = sectionMinZ; chunkZ <= sectionMaxZ; chunkZ++) {
-                ChunkAccess chunk = this.level.getChunkSource().getChunkNow(chunkX, chunkZ);
-                if (chunk != null) {
+                it.unimi.dsi.fastutil.ints.Int2ObjectMap<GameEventListenerRegistry> yToDispatcherMap =
+                    ((net.caffeinemc.mods.lithium.common.world.LithiumData)this.level).lithium$getData().gameEventDispatchers().get(net.minecraft.world.level.ChunkPos.pack(chunkX, chunkZ));
+                if (yToDispatcherMap != null) {
                     for (int section = sectionMinY; section <= sectionMaxY; section++) {
-                        applicable |= chunk.getListenerRegistry(section).visitInRangeListeners(gameEvent, position, context, visitListeners);
+                        GameEventListenerRegistry dispatcher = yToDispatcherMap.get(section);
+                        if (dispatcher != null) {
+                            applicable |= dispatcher.visitInRangeListeners(gameEvent, position, context, visitListeners);
+                        }
                     }
                 }
             }

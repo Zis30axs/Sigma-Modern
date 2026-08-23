@@ -29,6 +29,9 @@ import org.joml.Vector3f;
 
 @OnlyIn(Dist.CLIENT)
 public class EnderDragonRenderer extends EntityRenderer<EnderDragon, EnderDragonRenderState> {
+    // MODIFIED for porting: iris entity_render_context MixinEnderDragonRenderer @Unique constant
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_END_BEAM = new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "end_crystal_beam");
+
     public static final Identifier CRYSTAL_BEAM_LOCATION = Identifier.withDefaultNamespace("textures/entity/end_crystal/end_crystal_beam.png");
     private static final Identifier DRAGON_EXPLODING_LOCATION = Identifier.withDefaultNamespace("textures/entity/enderdragon/dragon_exploding.png");
     private static final Identifier DRAGON_TEXTURE_LOCATION = Identifier.withDefaultNamespace("textures/entity/enderdragon/dragon.png");
@@ -147,6 +150,16 @@ public class EnderDragonRenderer extends EntityRenderer<EnderDragon, EnderDragon
     ) {
         float horizontalLength = Mth.sqrt(deltaX * deltaX + deltaZ * deltaZ);
         float length = Mth.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+        // MODIFIED for porting: was iris's entity_render_context MixinEnderDragonRenderer#changeId (@Inject at the INVOKE of
+        // PoseStack#pushPose) and #changeId2 (@Inject RETURN) plus its @Unique previousE field, which is only used across this
+        // one call and is therefore a local here. The crystal beam gets its own entity id for the pack.
+        int iris$previousE = 0;
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getEntityIds() != null) {
+            iris$previousE = net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedEntity();
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getEntityIds().applyAsInt(IRIS_END_BEAM));
+        }
+
+        try {
         poseStack.pushPose();
         poseStack.translate(0.0F, 2.0F, 0.0F);
         poseStack.mulPose(Axis.YP.rotation((float)(-Math.atan2(deltaZ, deltaX)) - (float) (Math.PI / 2)));
@@ -197,6 +210,12 @@ public class EnderDragonRenderer extends EntityRenderer<EnderDragon, EnderDragon
             }
         );
         poseStack.popPose();
+        } finally {
+            // MODIFIED for porting: iris entity_render_context MixinEnderDragonRenderer#changeId2 (@Inject RETURN)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && iris$previousE != 0) {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(iris$previousE);
+            }
+        }
     }
 
     public EnderDragonRenderState createRenderState() {

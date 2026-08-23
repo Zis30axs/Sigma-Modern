@@ -178,7 +178,19 @@ public class VulkanGpuSurface implements GpuSurfaceBackend {
     }
 
     @Override
-    public void configure(final GpuSurface.Configuration config) throws SurfaceException {
+    public void configure(GpuSurface.Configuration config) throws SurfaceException {
+        /*
+         * MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinVulkanGpuSurface
+         * #reduceSwapchainConfiguration (@ModifyVariable HEAD, argsOnly).
+         *
+         * Keep the Vulkan swapchain at the same reduced size as Minecraft's render target. Without this, MoltenVK has to
+         * scale the final vkCmdBlitImage into the native Retina-sized swapchain every frame, which tested visually correct
+         * but caused severe low-percentile frame drops on macOS.
+         */
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.REDUCE_RESOLUTION_ON_MAC) {
+            config = me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.reduceSurfaceConfiguration(config);
+        }
+
         this.destroySwapchain();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -354,6 +366,19 @@ public class VulkanGpuSurface implements GpuSurfaceBackend {
             dstOffsets.position(1);
             dstOffsets.x(copyWidth).y(0).z(1);
             dstOffsets.position(0);
+            // MODIFIED for porting: was sodium-extra's reduce_resolution_on_mac MixinVulkanGpuSurface#scalePresentedTexture
+            // (@Inject at INVOKE VK12#vkCmdBlitImage, @Local VkImageBlit.Buffer) - stretch the reduced texture over the
+            // whole swapchain.
+            if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.REDUCE_RESOLUTION_ON_MAC
+                && me.flashyreese.mods.sodiumextra.client.util.MacReducedResolution.shouldScalePresentation(
+                    textureView.getWidth(0), textureView.getHeight(0), this.swapchainWidth, this.swapchainHeight
+                )) {
+                dstOffsets.position(0);
+                dstOffsets.x(0).y(this.swapchainHeight).z(0);
+                dstOffsets.position(1);
+                dstOffsets.x(this.swapchainWidth).y(0).z(1);
+                dstOffsets.position(0);
+            }
             VkImageSubresourceLayers srcSubresource = VkImageSubresourceLayers.calloc(stack);
             srcSubresource.aspectMask(1);
             srcSubresource.mipLevel(textureView.baseMipLevel());

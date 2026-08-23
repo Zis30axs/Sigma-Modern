@@ -176,7 +176,10 @@ public class ArmorStand extends LivingEntity {
 
     @Override
     protected void pushEntities() {
-        for (Entity entity : this.level().getEntities(this, this.getBoundingBox(), RIDABLE_MINECARTS)) {
+        // MODIFIED for porting: lithium entity.replace_entitytype_predicates ArmorStandMixin#getMinecartsDirectly - ask
+        // for the minecart class directly instead of scanning every nearby entity through a predicate. The class (rather
+        // than an entity type) is used because mods may add rideable minecarts that are not vanilla Minecart.
+        for (AbstractMinecart entity : this.level().getEntitiesOfClass(AbstractMinecart.class, this.getBoundingBox(), e -> (Entity)e != this && e.isRideable())) {
             if (this.distanceToSqr(entity) <= 0.2) {
                 entity.push(this);
             }

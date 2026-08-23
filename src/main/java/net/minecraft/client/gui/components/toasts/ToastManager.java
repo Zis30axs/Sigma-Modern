@@ -57,6 +57,12 @@ public class ToastManager {
         });
         if (!this.queued.isEmpty() && this.freeSlotCount() > 0) {
             this.queued.removeIf(toast -> {
+                // MODIFIED for porting: was sodium-extra's toasts MixinToastManager#removeDisabledQueuedToasts
+                // (@Inject HEAD of lambda$update$1, cancellable)
+                if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.TOASTS && !me.flashyreese.mods.sodiumextra.client.util.ToastFilter.isEnabled(toast)) {
+                    return true;
+                }
+
                 int occcupiedSlotCount = toast.occcupiedSlotCount();
                 int firstSlotIndex = this.findFreeSlotsIndex(occcupiedSlotCount);
                 if (firstSlotIndex == -1) {
@@ -142,6 +148,11 @@ public class ToastManager {
     }
 
     public void addToast(final Toast toast) {
+        // MODIFIED for porting: was sodium-extra's toasts MixinToastManager#goodByeToasts (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.TOASTS && !me.flashyreese.mods.sodiumextra.client.util.ToastFilter.isEnabled(toast)) {
+            return;
+        }
+
         this.queued.add(toast);
     }
 
@@ -238,6 +249,12 @@ public class ToastManager {
         }
 
         public void update() {
+            // MODIFIED for porting: was sodium-extra's toasts MixinToastInstance#skipDisabledToast (@Inject HEAD, cancellable)
+            if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.TOASTS && !me.flashyreese.mods.sodiumextra.client.util.ToastFilter.isEnabled(this.toast)) {
+                this.hasFinishedRendering = true;
+                return;
+            }
+
             long now = Util.getMillis();
             if (this.animationStartTime == -1L) {
                 this.animationStartTime = now;

@@ -32,7 +32,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import org.jspecify.annotations.Nullable;
 
-public final class Biome {
+public final class Biome implements net.irisshaders.iris.mixinterface.ExtendedBiome { // MODIFIED for porting: iris MixinBiome
     public static final Codec<Biome> DIRECT_CODEC = RecordCodecBuilder.create(
         i -> i.group(
                 Biome.ClimateSettings.CODEC.forGetter(b -> b.climateSettings),
@@ -70,6 +70,68 @@ public final class Biome {
     private final MobSpawnSettings mobSettings;
     private final EnvironmentAttributeMap attributes;
     private final BiomeSpecialEffects specialEffects;
+    // MODIFIED for porting: iris MixinBiome @Unique field (its ExtendedBiome implementation)
+    private int iris$biomeCategory = -1;
+
+    @Override
+    public int getBiomeCategory() {
+        return this.iris$biomeCategory;
+    }
+
+    @Override
+    public void setBiomeCategory(final int biomeCategory) {
+        this.iris$biomeCategory = biomeCategory;
+    }
+
+    @Override
+    public float getDownfall() {
+        return this.climateSettings.downfall();
+    }
+    /**
+     * MODIFIED for porting: sodium features.world.biome BiomeMixin @Unique fields. The grass/foliage colors are derived from
+     * the climate settings and the special effects, both of which are effectively immutable, so they are computed once. The
+     * cached special effects reference doubles as the invalidation check, exactly as upstream.
+     */
+    private boolean sodium$hasCustomGrassColor;
+
+    private int sodium$customGrassColor;
+
+    private boolean sodium$hasCustomFoliageColor;
+
+    private int sodium$customFoliageColor;
+
+    private int sodium$defaultColorIndex;
+
+    private BiomeSpecialEffects sodium$cachedSpecialEffects;
+
+    // MODIFIED for porting: was sodium's features.world.biome BiomeMixin#setupColors
+    private void sodium$setupColors() {
+        this.sodium$cachedSpecialEffects = this.specialEffects;
+        java.util.Optional<Integer> grassColor = this.sodium$cachedSpecialEffects.grassColorOverride();
+        if (grassColor.isPresent()) {
+            this.sodium$hasCustomGrassColor = true;
+            this.sodium$customGrassColor = grassColor.get();
+        } else {
+            this.sodium$hasCustomGrassColor = false;
+        }
+
+        java.util.Optional<Integer> foliageColor = this.sodium$cachedSpecialEffects.foliageColorOverride();
+        if (foliageColor.isPresent()) {
+            this.sodium$hasCustomFoliageColor = true;
+            this.sodium$customFoliageColor = foliageColor.get();
+        } else {
+            this.sodium$hasCustomFoliageColor = false;
+        }
+
+        this.sodium$defaultColorIndex = this.sodium$getDefaultColorIndex();
+    }
+
+    // MODIFIED for porting: was sodium's features.world.biome BiomeMixin#getDefaultColorIndex
+    private int sodium$getDefaultColorIndex() {
+        double temperature = Mth.clamp(this.climateSettings.temperature(), 0.0F, 1.0F);
+        double humidity = Mth.clamp(this.climateSettings.downfall(), 0.0F, 1.0F);
+        return net.caffeinemc.mods.sodium.client.world.biome.BiomeColorMaps.getIndex(temperature, humidity);
+    }
     private final ThreadLocal<Long2FloatLinkedOpenHashMap> temperatureCache = ThreadLocal.withInitial(() -> {
         Long2FloatLinkedOpenHashMap map = new Long2FloatLinkedOpenHashMap(1024, 0.25F) {
             @Override
@@ -92,6 +154,8 @@ public final class Biome {
         this.mobSettings = mobSettings;
         this.attributes = attributes;
         this.specialEffects = specialEffects;
+        // MODIFIED for porting: sodium features.world.biome BiomeMixin#onInit (<init> RETURN)
+        this.sodium$setupColors();
     }
 
     public MobSpawnSettings getMobSettings() {
@@ -121,22 +185,15 @@ public final class Biome {
         }
     }
 
+    /**
+     * MODIFIED for porting: lithium world.temperature_cache BiomeMixin removes the per-thread temperature cache. Looking
+     * the value up in the cache is not cheaper than recomputing it, and the cache costs a 1024-entry map per thread per
+     * biome. The `temperatureCache` field above is therefore never read any more (upstream cannot remove the field either;
+     * because it is a ThreadLocal created with withInitial, the map is only allocated on the first get() that never comes).
+     */
     @Deprecated
     private float getTemperature(final BlockPos pos, final int seaLevel) {
-        long key = pos.asLong();
-        Long2FloatLinkedOpenHashMap cache = this.temperatureCache.get();
-        float cached = cache.get(key);
-        if (!Float.isNaN(cached)) {
-            return cached;
-        }
-
-        float temp = this.getHeightAdjustedTemperature(pos, seaLevel);
-        if (cache.size() == 1024) {
-            cache.removeFirstFloat();
-        }
-
-        cache.put(key, temp);
-        return temp;
+        return this.getHeightAdjustedTemperature(pos, seaLevel);
     }
 
     public boolean shouldFreeze(final LevelReader level, final BlockPos pos) {
@@ -150,8 +207,9 @@ public final class Biome {
 
         if (level.isInsideBuildHeight(pos.getY()) && level.getBrightness(LightLayer.BLOCK, pos) < 10) {
             BlockState blockState = level.getBlockState(pos);
-            FluidState fluidState = level.getFluidState(pos);
-            if (fluidState.is(Fluids.WATER) && blockState.getBlock() instanceof LiquidBlock) {
+            // MODIFIED for porting: lithium world.chunk_ticking.spread_ice BiomeMixin derives the fluid state from the
+            // block state that was just loaded instead of doing a second world lookup for it.
+            if (blockState.getFluidState().is(Fluids.WATER) && blockState.getBlock() instanceof LiquidBlock) {
                 if (!checkNeighbors) {
                     return true;
                 }
@@ -200,9 +258,24 @@ public final class Biome {
         return this.generationSettings;
     }
 
+    /**
+     * MODIFIED for porting: sodium features.world.biome BiomeMixin#getGrassColor (@Overwrite) - avoid unnecessary pointer
+     * de-references and allocations.
+     */
     public int getGrassColor(final double x, final double z) {
-        int baseGrassColor = this.getBaseGrassColor();
-        return this.specialEffects.grassColorModifier().modifyColor(x, z, baseGrassColor);
+        if (this.specialEffects != this.sodium$cachedSpecialEffects) {
+            this.sodium$setupColors();
+        }
+
+        int color = this.sodium$hasCustomGrassColor
+            ? this.sodium$customGrassColor
+            : net.caffeinemc.mods.sodium.client.world.biome.BiomeColorMaps.getGrassColor(this.sodium$defaultColorIndex);
+        BiomeSpecialEffects.GrassColorModifier modifier = this.sodium$cachedSpecialEffects.grassColorModifier();
+        if (modifier != BiomeSpecialEffects.GrassColorModifier.NONE) {
+            color = modifier.modifyColor(x, z, color);
+        }
+
+        return color;
     }
 
     private int getBaseGrassColor() {
@@ -216,8 +289,18 @@ public final class Biome {
         return GrassColor.get(temp, rain);
     }
 
+    /**
+     * MODIFIED for porting: sodium features.world.biome BiomeMixin#getFoliageColor (@Overwrite) - avoid unnecessary pointer
+     * de-references and allocations.
+     */
     public int getFoliageColor() {
-        return this.specialEffects.foliageColorOverride().orElseGet(this::getFoliageColorFromTexture);
+        if (this.specialEffects != this.sodium$cachedSpecialEffects) {
+            this.sodium$setupColors();
+        }
+
+        return this.sodium$hasCustomFoliageColor
+            ? this.sodium$customFoliageColor
+            : net.caffeinemc.mods.sodium.client.world.biome.BiomeColorMaps.getFoliageColor(this.sodium$defaultColorIndex);
     }
 
     private int getFoliageColorFromTexture() {
@@ -356,7 +439,8 @@ public final class Biome {
         }
     }
 
-    private record ClimateSettings(boolean hasPrecipitation, float temperature, Biome.TemperatureModifier temperatureModifier, float downfall) {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public record ClimateSettings(boolean hasPrecipitation, float temperature, Biome.TemperatureModifier temperatureModifier, float downfall) {
         public static final MapCodec<Biome.ClimateSettings> CODEC = RecordCodecBuilder.mapCodec(
             i -> i.group(
                     Codec.BOOL.fieldOf("has_precipitation").forGetter(b -> b.hasPrecipitation),

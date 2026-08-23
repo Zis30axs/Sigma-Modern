@@ -138,52 +138,54 @@ public class BlockPos extends Vec3i {
         }
     }
 
+    // MODIFIED for porting: lithium math.fast_blockpos BlockPosMixin inlines the direction vectors of the 12
+    // cardinal offset helpers below instead of going through relative(Direction[, int]).
     public BlockPos above() {
-        return this.relative(Direction.UP);
+        return new BlockPos(this.getX(), this.getY() + 1, this.getZ());
     }
 
     public BlockPos above(final int steps) {
-        return this.relative(Direction.UP, steps);
+        return new BlockPos(this.getX(), this.getY() + steps, this.getZ());
     }
 
     public BlockPos below() {
-        return this.relative(Direction.DOWN);
+        return new BlockPos(this.getX(), this.getY() - 1, this.getZ());
     }
 
     public BlockPos below(final int steps) {
-        return this.relative(Direction.DOWN, steps);
+        return new BlockPos(this.getX(), this.getY() - steps, this.getZ());
     }
 
     public BlockPos north() {
-        return this.relative(Direction.NORTH);
+        return new BlockPos(this.getX(), this.getY(), this.getZ() - 1);
     }
 
     public BlockPos north(final int steps) {
-        return this.relative(Direction.NORTH, steps);
+        return new BlockPos(this.getX(), this.getY(), this.getZ() - steps);
     }
 
     public BlockPos south() {
-        return this.relative(Direction.SOUTH);
+        return new BlockPos(this.getX(), this.getY(), this.getZ() + 1);
     }
 
     public BlockPos south(final int steps) {
-        return this.relative(Direction.SOUTH, steps);
+        return new BlockPos(this.getX(), this.getY(), this.getZ() + steps);
     }
 
     public BlockPos west() {
-        return this.relative(Direction.WEST);
+        return new BlockPos(this.getX() - 1, this.getY(), this.getZ());
     }
 
     public BlockPos west(final int steps) {
-        return this.relative(Direction.WEST, steps);
+        return new BlockPos(this.getX() - steps, this.getY(), this.getZ());
     }
 
     public BlockPos east() {
-        return this.relative(Direction.EAST);
+        return new BlockPos(this.getX() + 1, this.getY(), this.getZ());
     }
 
     public BlockPos east(final int steps) {
-        return this.relative(Direction.EAST, steps);
+        return new BlockPos(this.getX() + steps, this.getY(), this.getZ());
     }
 
     public BlockPos relative(final Direction direction) {

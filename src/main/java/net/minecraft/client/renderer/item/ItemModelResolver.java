@@ -61,6 +61,16 @@ public class ItemModelResolver {
         final @Nullable ItemOwner owner,
         final int seed
     ) {
+        // MODIFIED for porting: was iris's entity_render_context MixinItemRenderer#changeId (@Inject HEAD) - the render state
+        // remembers which item it is displaying so the pack can give it its own id.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (item != null) {
+                ((net.irisshaders.iris.mixinterface.ItemContextState)output).setDisplayItem(item.getItem(), item.get(DataComponents.ITEM_MODEL));
+            } else {
+                ((net.irisshaders.iris.mixinterface.ItemContextState)output).setDisplayItem(null, null);
+            }
+        }
+
         Identifier modelId = item.get(DataComponents.ITEM_MODEL);
         if (modelId != null) {
             output.setOversizedInGui(this.getItemProperties(modelId).oversizedInGui());

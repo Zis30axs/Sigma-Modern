@@ -13,7 +13,21 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
-public class DispenserBlockEntity extends RandomizableContainerBlockEntity {
+public class DispenserBlockEntity extends RandomizableContainerBlockEntity
+    implements net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker, // MODIFIED for porting: lithium util.inventory_change_listening
+    net.caffeinemc.mods.lithium.api.inventory.LithiumInventory { // MODIFIED for porting: lithium block.hopper InventoryAccessors
+    // MODIFIED for porting: the next two methods were lithium's block.hopper InventoryAccessors Mixin, which
+    // exposes the raw stack list so lithium can swap in its own LithiumStackList.
+    @Override
+    public NonNullList<ItemStack> getInventoryLithium() {
+        return this.items;
+    }
+
+    @Override
+    public void setInventoryLithium(final NonNullList<ItemStack> inventory) {
+        this.items = inventory;
+    }
+
     public static final int CONTAINER_SIZE = 9;
     private static final Component DEFAULT_NAME = Component.translatable("container.dispenser");
     private NonNullList<ItemStack> items = NonNullList.withSize(9, ItemStack.EMPTY);
@@ -100,6 +114,8 @@ public class DispenserBlockEntity extends RandomizableContainerBlockEntity {
     @Override
     protected void setItems(final NonNullList<ItemStack> items) {
         this.items = items;
+        // MODIFIED for porting: lithium util.inventory_change_listening StackListReplacementTracking (RETURN of setItems)
+        this.lithium$emitStackListReplaced();
     }
 
     @Override

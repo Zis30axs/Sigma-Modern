@@ -95,7 +95,11 @@ public class CopperGolem extends AbstractGolem implements ContainerUser, Shearab
         this.setPathfindingMalus(PathType.FIRE_IN_NEIGHBOR, 16.0F);
         this.setPathfindingMalus(PathType.DAMAGING_IN_NEIGHBOR, 16.0F);
         this.setPathfindingMalus(PathType.FIRE, -1.0F);
-        this.getBrain().setMemory(MemoryModuleType.TRANSPORT_ITEMS_COOLDOWN_TICKS, this.getRandom().nextInt(60, 100));
+        // MODIFIED for porting: lithium client_tick.entity.unused_brain CopperGolemMixin#isServerSide
+        // (@WrapWithCondition) - client side brains are dummies
+        if (!this.level().isClientSide()) {
+            this.getBrain().setMemory(MemoryModuleType.TRANSPORT_ITEMS_COOLDOWN_TICKS, this.getRandom().nextInt(60, 100));
+        }
     }
 
     public static AttributeSupplier.Builder createAttributes() {

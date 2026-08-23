@@ -1,7 +1,8 @@
 package net.minecraft.world.level;
 
 public class GrassColor {
-    private static int[] pixels = new int[65536];
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public static int[] pixels = new int[65536];
 
     public static void init(final int[] pixels) {
         GrassColor.pixels = pixels;

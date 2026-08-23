@@ -26,7 +26,27 @@ import org.joml.Vector3fc;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class ItemStackRenderState {
+public class ItemStackRenderState implements net.irisshaders.iris.mixinterface.ItemContextState { // MODIFIED for porting: iris entity_render_context ItemStackStateMixin
+    // MODIFIED for porting: iris entity_render_context ItemStackStateMixin @Unique fields (its ItemContextState implementation)
+    private net.minecraft.world.item.Item iris$displayStack;
+
+    private net.minecraft.resources.Identifier iris$displayModelId;
+
+    @Override
+    public void setDisplayItem(final net.minecraft.world.item.Item itemStack, final net.minecraft.resources.Identifier modelId) {
+        this.iris$displayStack = itemStack;
+        this.iris$displayModelId = modelId;
+    }
+
+    @Override
+    public net.minecraft.world.item.Item getDisplayItem() {
+        return this.iris$displayStack;
+    }
+
+    public net.minecraft.resources.Identifier getDisplayItemModel() {
+        return this.iris$displayModelId;
+    }
+
     ItemDisplayContext displayContext = ItemDisplayContext.NONE;
     private int activeLayerCount;
     private boolean animated;
@@ -52,6 +72,9 @@ public class ItemStackRenderState {
     }
 
     public void clear() {
+        // MODIFIED for porting: was iris's entity_render_context ItemStackStateMixin#clearDisplayStack (@Inject HEAD)
+        this.iris$displayStack = null;
+        this.iris$displayModelId = null;
         this.displayContext = ItemDisplayContext.NONE;
 
         for (int i = 0; i < this.activeLayerCount; i++) {
@@ -221,9 +244,17 @@ public class ItemStackRenderState {
             return this.tintLayers;
         }
 
+        /**
+         * MODIFIED for porting: was iris's entity_render_context ItemStackStateLayerMixin#onRender (@Inject HEAD) and
+         * #onRenderEnd (@Inject TAIL); the @Share("lastBState") LocalIntRef is a local here. Upstream additionally captures the
+         * enclosing ItemStackRenderState into a {@code parentState} field via an {@code <init>} injection; this is an inner
+         * class here, so {@code ItemStackRenderState.this} is used directly instead.
+         */
         private void submit(
             final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final int lightCoords, final int overlayCoords, final int outlineColor
         ) {
+            int iris$lastBState = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() ? net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity() : 0;
+            this.iris$setupId(ItemStackRenderState.this.getDisplayItem(), ItemStackRenderState.this.getDisplayItemModel());
             poseStack.pushPose();
             this.applyTransform(poseStack.last());
             if (this.specialRenderer != null) {
@@ -245,6 +276,34 @@ public class ItemStackRenderState {
             }
 
             poseStack.popPose();
+            // MODIFIED for porting: iris entity_render_context ItemStackStateLayerMixin#onRenderEnd (@Inject TAIL)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(iris$lastBState);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
+            }
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context ItemStackStateLayerMixin#iris$setupId (@Unique)
+        private void iris$setupId(final net.minecraft.world.item.Item item, final net.minecraft.resources.Identifier modelId) {
+            if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() == null) {
+                return;
+            }
+
+            if (item instanceof net.minecraft.world.item.BlockItem blockItem && !(item instanceof net.minecraft.world.item.SolidBucketItem)) {
+                if (net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getBlockStateIds() == null) {
+                    return;
+                }
+
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(1);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                    .setCurrentRenderedItem(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getBlockStateIds().getOrDefault(blockItem.getBlock().defaultBlockState(), 0));
+            } else {
+                net.minecraft.resources.Identifier location = modelId != null
+                    ? modelId
+                    : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                    .setCurrentRenderedItem(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new net.irisshaders.iris.shaderpack.materialmap.NamespacedId(location.getNamespace(), location.getPath())));
+            }
         }
 
         private void applyTransform(final PoseStack.Pose localPose) {

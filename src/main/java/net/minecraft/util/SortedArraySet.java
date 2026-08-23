@@ -14,7 +14,38 @@ public class SortedArraySet<T> extends AbstractSet<T> {
     private T[] contents;
     private int size;
 
-    private SortedArraySet(final int initialCapacity, final Comparator<T> comparator) {
+    /**
+     * MODIFIED for porting: lithium collections.chunk_tickets SortedArraySetMixin adds an optimized
+     * {@link java.util.Collection#removeIf(java.util.function.Predicate)} which compacts the backing array in a single
+     * pass instead of shifting it once per removal (and without allocating an iterator).
+     */
+    @Override
+    public boolean removeIf(final java.util.function.Predicate<? super T> filter) {
+        T[] arr = this.contents;
+        int writeLim = this.size;
+        int writeIdx = 0;
+
+        for (int readIdx = 0; readIdx < writeLim; readIdx++) {
+            T obj = arr[readIdx];
+            // If the filter matches the object, skip over it: the write pointer is not advanced and the next element
+            // that does not match takes this one's place.
+            if (filter.test(obj)) {
+                continue;
+            }
+
+            // While read and write pointer agree nothing has been removed yet, so no copying is needed.
+            if (writeIdx != readIdx) {
+                arr[writeIdx] = obj;
+            }
+
+            writeIdx++;
+        }
+
+        this.size = writeIdx;
+        return writeLim != writeIdx;
+    }
+
+    public SortedArraySet(final int initialCapacity, final Comparator<T> comparator) { // MODIFIED for porting: lithium.accesswidener widened access
         this.comparator = comparator;
         if (initialCapacity < 0) {
             throw new IllegalArgumentException("Initial capacity (" + initialCapacity + ") is negative");

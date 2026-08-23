@@ -239,12 +239,62 @@ public class DebugOptionsScreen extends Screen {
 
         @Override
         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            // MODIFIED for porting: was sodium-extra's gui MixinDebugOptionsScreen#redirectExtractContent
+            // (@Inject HEAD, cancellable) - sodium-extra's own debug entries are named after a translation key, so they are
+            // laid out with the translated name and get a translated tooltip.
+            if (this.name.startsWith("sodium-extra:")) {
+                this.sodiumExtra$extractContent(graphics, mouseX, mouseY, hovered, a);
+                return;
+            }
+
             int x = this.getContentX();
             int y = this.getContentY();
             graphics.text(DebugOptionsScreen.this.minecraft.font, this.name, x, y + 5, this.isAllowed ? -1 : -8355712);
             int buttonsStartX = x + this.getContentWidth() - this.never.getWidth() - this.overlay.getWidth() - this.always.getWidth();
             if (!this.isAllowed && hovered && mouseX < buttonsStartX) {
                 graphics.setTooltipForNextFrame(DebugOptionsScreen.NOT_ALLOWED_TOOLTIP, mouseX, mouseY);
+            }
+
+            this.never.setX(buttonsStartX);
+            this.overlay.setX(this.never.getX() + this.never.getWidth());
+            this.always.setX(this.overlay.getX() + this.overlay.getWidth());
+            this.always.setY(y);
+            this.overlay.setY(y);
+            this.never.setY(y);
+            this.always.extractRenderState(graphics, mouseX, mouseY, a);
+            this.overlay.extractRenderState(graphics, mouseX, mouseY, a);
+            this.never.extractRenderState(graphics, mouseX, mouseY, a);
+        }
+
+        // MODIFIED for porting: was the body of sodium-extra's gui MixinDebugOptionsScreen#redirectExtractContent
+        private void sodiumExtra$extractContent(
+            final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a
+        ) {
+            Identifier id = Identifier.parse(this.name);
+            int x = this.getContentX();
+            int y = this.getContentY();
+            graphics.text(
+                net.minecraft.client.Minecraft.getInstance().font,
+                net.minecraft.network.chat.Component.translatable(id.getPath()),
+                x,
+                y + 5,
+                this.isAllowed ? -1 : -8355712
+            );
+            int buttonsStartX = x + this.getContentWidth() - this.never.getWidth() - this.overlay.getWidth() - this.always.getWidth();
+            if (hovered && mouseX < buttonsStartX) {
+                if (!this.isAllowed) {
+                    graphics.setTooltipForNextFrame(
+                        net.minecraft.network.chat.Component.translatable("debug.options.notAllowed.tooltip"), mouseX, mouseY
+                    );
+                } else {
+                    graphics.setTooltipForNextFrame(
+                        net.minecraft.client.Minecraft.getInstance()
+                            .font
+                            .split(net.minecraft.network.chat.Component.translatable(id.getPath() + ".tooltip"), 200),
+                        mouseX,
+                        mouseY
+                    );
+                }
             }
 
             this.never.setX(buttonsStartX);

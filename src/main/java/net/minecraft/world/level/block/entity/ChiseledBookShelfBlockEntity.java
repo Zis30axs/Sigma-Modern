@@ -21,7 +21,15 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.slf4j.Logger;
 
-public class ChiseledBookShelfBlockEntity extends BlockEntity implements ListBackedContainer {
+// MODIFIED for porting: lithium block.hopper ChiseledBookShelfBlockEntityMixin
+public class ChiseledBookShelfBlockEntity extends BlockEntity
+    implements ListBackedContainer, net.caffeinemc.mods.lithium.api.inventory.LithiumTransferConditionInventory {
+    // MODIFIED for porting: was lithium's block.hopper ChiseledBookShelfBlockEntityMixin
+    @Override
+    public boolean lithium$itemInsertionTestRequiresStackSize1() {
+        return true;
+    }
+
     public static final int MAX_BOOKS_IN_STORAGE = 6;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int DEFAULT_LAST_INTERACTED_SLOT = -1;

@@ -38,12 +38,33 @@ import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public abstract class BlockEntity implements DebugValueSource, TypedInstance<BlockEntityType<?>> {
+// MODIFIED for porting: lithium util.inventory_comparator_tracking BlockEntityMixin. It is applied to every
+// block entity (rather than only the inventory ones) because upstream needs the same code on all of them.
+public abstract class BlockEntity implements DebugValueSource, TypedInstance<BlockEntityType<?>>,
+    net.caffeinemc.mods.lithium.common.block.entity.inventory_comparator_tracking.ComparatorTracker,
+    net.caffeinemc.mods.lithium.common.block.entity.SetBlockStateHandlingBlockEntity, // MODIFIED for porting: lithium util.inventory_change_listening (loader module)
+    net.caffeinemc.mods.lithium.common.block.entity.SetChangedHandlingBlockEntity, // MODIFIED for porting: lithium world.block_entity_ticking.sleeping
+    net.caffeinemc.mods.lithium.common.world.blockentity.SupportCache { // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
     private static final Codec<BlockEntityType<?>> TYPE_CODEC = BuiltInRegistries.BLOCK_ENTITY_TYPE.byNameCodec();
     private static final Logger LOGGER = LogUtils.getLogger();
     private final BlockEntityType<?> type;
     protected @Nullable Level level;
     protected final BlockPos worldPosition;
+    // MODIFIED for porting: lithium util.inventory_comparator_tracking BlockEntityMixin state. Upstream set the
+    // field to UNKNOWN in an @Inject at the RETURN of <init>; a field initializer is equivalent.
+    private static final byte LITHIUM_COMPARATORS_UNKNOWN = (byte)-1;
+    private static final byte LITHIUM_COMPARATOR_PRESENT = (byte)1;
+    private static final byte LITHIUM_COMPARATOR_ABSENT = (byte)0;
+    private byte lithium$hasComparators = LITHIUM_COMPARATORS_UNKNOWN;
+    // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache BlockEntityMixin -
+    // caches whether the cached block state is still valid for this block entity type, so the ticker does not have to
+    // re-test it every tick.
+    private boolean lithium$supportTestResult;
+
+    @Override
+    public boolean lithium$isSupported() {
+        return this.lithium$supportTestResult;
+    }
     protected boolean remove;
     private BlockState blockState;
     private DataComponentMap components = DataComponentMap.EMPTY;
@@ -53,6 +74,9 @@ public abstract class BlockEntity implements DebugValueSource, TypedInstance<Blo
         this.worldPosition = worldPosition.immutable();
         this.validateBlockState(blockState);
         this.blockState = blockState;
+        // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
+        // BlockEntityMixin#initSupportCache (RETURN of <init>)
+        this.lithium$supportTestResult = this.getType().isValid(blockState);
     }
 
     private void validateBlockState(final BlockState blockState) {
@@ -193,6 +217,9 @@ public abstract class BlockEntity implements DebugValueSource, TypedInstance<Blo
         if (this.level != null) {
             setChanged(this.level, this.worldPosition, this.blockState);
         }
+
+        // MODIFIED for porting: lithium world.block_entity_ticking.sleeping BlockEntityMixin#handleSetChanged (RETURN)
+        this.lithium$handleSetChanged();
     }
 
     protected static void setChanged(final Level level, final BlockPos worldPosition, final BlockState blockState) {
@@ -223,7 +250,37 @@ public abstract class BlockEntity implements DebugValueSource, TypedInstance<Blo
     }
 
     public void setRemoved() {
+        // MODIFIED for porting: lithium util.inventory_comparator_tracking BlockEntityMixin#forgetNearbyComparators
+        // (HEAD) - compatibility with mods that move block entities.
+        this.lithium$hasComparators = LITHIUM_COMPARATORS_UNKNOWN;
         this.remove = true;
+        // MODIFIED for porting: lithium util.inventory_change_listening BlockEntityMixin#updateStackListTracking (RETURN)
+        if (this.level != null && !this.level.isClientSide() && this instanceof net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker lithium$inventoryChangeTracker) {
+            lithium$inventoryChangeTracker.lithium$emitRemoved();
+        }
+    }
+
+    // MODIFIED for porting: the next two methods were lithium's util.inventory_comparator_tracking BlockEntityMixin
+    @Override
+    public void lithium$onComparatorAdded(final net.minecraft.core.Direction direction, final int offset) {
+        byte hasComparators = this.lithium$hasComparators;
+        if (direction.getAxis() != net.minecraft.core.Direction.Axis.Y && hasComparators != LITHIUM_COMPARATOR_PRESENT && offset >= 1 && offset <= 2) {
+            this.lithium$hasComparators = LITHIUM_COMPARATOR_PRESENT;
+            if (this instanceof net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker lithium$inventoryChangeTracker) {
+                lithium$inventoryChangeTracker.lithium$emitFirstComparatorAdded();
+            }
+        }
+    }
+
+    @Override
+    public boolean lithium$hasAnyComparatorNearby() {
+        if (this.lithium$hasComparators == LITHIUM_COMPARATORS_UNKNOWN) {
+            this.lithium$hasComparators = net.caffeinemc.mods.lithium.common.block.entity.inventory_comparator_tracking.ComparatorTracking.findNearbyComparators(this.level, this.worldPosition)
+                ? LITHIUM_COMPARATOR_PRESENT
+                : LITHIUM_COMPARATOR_ABSENT;
+        }
+
+        return this.lithium$hasComparators == LITHIUM_COMPARATOR_PRESENT;
     }
 
     public void clearRemoved() {
@@ -268,6 +325,12 @@ public abstract class BlockEntity implements DebugValueSource, TypedInstance<Blo
     public void setBlockState(final BlockState blockState) {
         this.validateBlockState(blockState);
         this.blockState = blockState;
+        // MODIFIED for porting: lithium support_cache BlockEntityMixin#updateSupportCache (RETURN)
+        this.lithium$supportTestResult = this.getType().isValid(blockState);
+        // MODIFIED for porting: was lithium-fabric's util.inventory_change_listening BlockEntityMixin
+        // (#emitRemovedOnSetCachedState, RETURN). The NeoForge variant inlined the ChestBlockEntity behaviour here
+        // instead; the Fabric split via SetBlockStateHandlingBlockEntity is the one that only uses vanilla API.
+        this.lithium$handleSetBlockState();
     }
 
     protected void applyImplicitComponents(final DataComponentGetter components) {

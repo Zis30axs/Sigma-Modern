@@ -33,7 +33,12 @@ public class ViewArea {
         }
 
         this.sections = new RotatingSectionStorage<>(
-            renderDistance, minSectionY, maxSectionY, (index, sectionNode) -> sectionRenderDispatcher.new RenderSection(index, sectionNode)
+            renderDistance,
+            minSectionY,
+            maxSectionY,
+            // MODIFIED for porting: sodium core.render.world ViewAreaMixin#sodium$safelyReturn (HEAD of the factory lambda) -
+            // sodium installs a view area without a section render dispatcher, so the factory has to tolerate a null one.
+            (index, sectionNode) -> sectionRenderDispatcher == null ? null : sectionRenderDispatcher.new RenderSection(index, sectionNode)
         );
     }
 

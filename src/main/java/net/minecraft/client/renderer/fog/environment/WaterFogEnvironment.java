@@ -25,6 +25,12 @@ public class WaterFogEnvironment extends FogEnvironment {
 
         fog.skyEnd = fog.environmentalEnd;
         fog.cloudEnd = fog.environmentalEnd;
+        // MODIFIED for porting: was sodium-extra's fog MixinWaterFogEnvironment#postSetupFog (@Inject TAIL)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG && me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.shouldModifyProtectedGameplayFog()) {
+            me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyProtectedGameplayFog(
+                fog, me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getProtectedGameplayFogDistance(me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.ProtectedFogType.WATER), 0.0F, 1.0F
+            );
+        }
     }
 
     @Override

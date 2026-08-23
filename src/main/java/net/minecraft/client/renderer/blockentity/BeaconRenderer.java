@@ -55,17 +55,32 @@ public class BeaconRenderer<T extends BlockEntity & BeaconBeamOwner> implements 
     }
 
     public void submit(final BeaconRenderState state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera) {
+        // MODIFIED for porting: was sodium-extra's render.block.entity MixinBeaconRenderer#render (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_BLOCK_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.beaconBeam) {
+            return;
+        }
+
         int beamStart = 0;
 
         for (int i = 0; i < state.sections.size(); i++) {
             BeaconRenderState.Section beamSection = state.sections.get(i);
+            int maxY = i == state.sections.size() - 1 ? 2048 : beamSection.height();
+            // MODIFIED for porting: was sodium-extra's render.block.entity MixinBeaconRenderer#modifyMaxY
+            // (@Redirect on submitBeaconBeam) - clamp the endless top segment to the level's build height.
+            if (maxY == 2048
+                && me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_BLOCK_ENTITY
+                && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.limitBeaconBeamHeight) {
+                int lastSegment = state.blockPos.getY() + beamStart;
+                maxY = java.util.Objects.requireNonNull(net.minecraft.client.Minecraft.getInstance().level).getMaxY() - lastSegment;
+            }
+
             submitBeaconBeam(
                 poseStack,
                 submitNodeCollector,
                 state.beamRadiusScale,
                 state.animationTime,
                 beamStart,
-                i == state.sections.size() - 1 ? 2048 : beamSection.height(),
+                maxY,
                 beamSection.color()
             );
             beamStart += beamSection.height();
@@ -98,6 +113,13 @@ public class BeaconRenderer<T extends BlockEntity & BeaconBeamOwner> implements 
         final float solidBeamRadius,
         final float beamGlowRadius
     ) {
+        // MODIFIED for porting: was iris's shadows MixinBeaconRenderer#iris$noLightBeamInShadowPass (@Inject HEAD,
+        // cancellable) - the beacon beam is not drawn into the shadow map. Upstream's two TODOs (skip this under "Unified
+        // Entity Rendering", and it being unnecessary on packs that support blockEntityId) are carried over as-is.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shadows.ShadowRenderingState.areShadowsCurrentlyBeingRendered()) {
+            return;
+        }
+
         int beamEnd = beamStart + height;
         poseStack.pushPose();
         poseStack.translate(0.5, 0.0, 0.5);

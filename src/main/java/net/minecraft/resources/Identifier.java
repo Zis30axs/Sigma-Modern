@@ -228,6 +228,11 @@ public final class Identifier implements Comparable<Identifier> {
     }
 
     public static boolean isValidPath(final String path) {
+        // MODIFIED for porting: was iris's texture MixinIdentifier#iris$blockDUMMY (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && path.equals("DUMMY")) {
+            return false;
+        }
+
         for (int i = 0; i < path.length(); i++) {
             if (!validPathChar(path.charAt(i))) {
                 return false;
@@ -260,6 +265,12 @@ public final class Identifier implements Comparable<Identifier> {
     }
 
     public static boolean validPathChar(final char c) {
+        // MODIFIED for porting: was iris's texture MixinIdentifier#iris$allowInvalidPaths (@Inject HEAD, cancellable) - shader
+        // pack resources can carry upper-case paths.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && c >= 'A' && c <= 'Z') {
+            return true;
+        }
+
         return c == '_' || c == '-' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '/' || c == '.';
     }
 

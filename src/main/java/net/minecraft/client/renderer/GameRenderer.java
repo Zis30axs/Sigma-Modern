@@ -87,7 +87,51 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
+// MODIFIED for porting: implements sodium's GameRendererAccessor (mixin.core.render.frustum.GameRendererAccessor)
+public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
+    net.caffeinemc.mods.sodium.mixin.core.render.frustum.GameRendererAccessor,
+    net.caffeinemc.mods.sodium.client.util.GameRendererStorage,
+    net.irisshaders.iris.mixin.GameRendererAccessor { // MODIFIED for porting: sodium core.render.world GameRendererMixin, iris GameRendererAccessor
+    // MODIFIED for porting: everything in this block was sodium's core.render.world GameRendererMixin
+    private final org.joml.Matrix4f sodium$projection = new org.joml.Matrix4f();
+
+    @Override
+    public net.caffeinemc.mods.sodium.client.util.FogParameters sodium$getFogParameters() {
+        return ((net.caffeinemc.mods.sodium.client.util.FogStorage)this.fogRenderer).sodium$getFogParameters();
+    }
+
+    @Override
+    public org.joml.Matrix4fc sodium$getProjectionMatrix() {
+        return this.sodium$projection;
+    }
+
+    // MODIFIED for porting: sodium features.gui.hooks.console GameRendererMixin @Unique field
+    private static boolean SODIUM_HAS_RENDERED_OVERLAY_ONCE = false;
+
+    /**
+     * MODIFIED for porting: was sodium's features.gui.hooks.console GameRendererMixin#onRender.
+     */
+    private void sodium$renderConsoleOverlay() {
+        // Do not start updating the console overlay until the font renderer is ready. This prevents the console from using
+        // tofu boxes for everything during early startup.
+        if (Minecraft.getInstance().gui.overlay() != null && !SODIUM_HAS_RENDERED_OVERLAY_ONCE) {
+            return;
+        }
+
+        net.minecraft.util.profiling.Profiler.get().push("sodium_console_overlay");
+        int mouseX = (int)this.minecraft.mouseHandler.getScaledXPos(this.minecraft.getWindow());
+        int mouseY = (int)this.minecraft.mouseHandler.getScaledYPos(this.minecraft.getWindow());
+        net.minecraft.client.gui.GuiGraphicsExtractor drawContext = new net.minecraft.client.gui.GuiGraphicsExtractor(
+            this.minecraft, this.gameRenderState.guiRenderState, mouseX, mouseY
+        );
+        net.caffeinemc.mods.sodium.client.gui.console.ConsoleHooks.render(drawContext, org.lwjgl.glfw.GLFW.glfwGetTime());
+        net.minecraft.util.profiling.Profiler.get().pop();
+        SODIUM_HAS_RENDERED_OVERLAY_ONCE = true;
+    }
+
+    // MODIFIED for porting: sodium workarounds.window_minimized_state GameRendererMixin @Unique field
+    private static final boolean SODIUM_REDIRECT_WINDOW_MINIMIZED_STATE = net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds
+        .isWorkaroundEnabled(net.caffeinemc.mods.sodium.client.compatibility.workarounds.Workarounds.Reference.INTEL_FRAMEBUFFER_BLIT_CRASH_WHEN_UNFOCUSED);
     private static final Identifier BLUR_POST_CHAIN_ID = Identifier.withDefaultNamespace("blur");
     public static final int MAX_BLUR_RADIUS = 10;
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -103,6 +147,19 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
     private final RenderBuffers renderBuffers;
     private final RenderTarget mainRenderTarget;
     private float spinningEffectTime;
+
+    // MODIFIED for porting: was sodium's GameRendererAccessor @Accessor
+    @Override
+    public float getSpinningEffectTime() {
+        return this.spinningEffectTime;
+    }
+
+    // MODIFIED for porting: was sodium's GameRendererAccessor @Accessor
+    @Override
+    public float getSpinningEffectSpeed() {
+        return this.spinningEffectSpeed;
+    }
+
     private float spinningEffectSpeed;
     private float bossOverlayWorldDarkening;
     private float bossOverlayWorldDarkeningO;
@@ -116,6 +173,27 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
     private final OverlayTexture overlayTexture = new OverlayTexture();
     protected final Panorama panorama = new Panorama();
     private final CrossFrameResourcePool resourcePool = new CrossFrameResourcePool(3);
+
+    // MODIFIED for porting: was iris's GameRendererAccessor @Accessor("resourcePool") and its three @Invoker methods
+    @Override
+    public CrossFrameResourcePool getResourcePool() {
+        return this.resourcePool;
+    }
+
+    @Override
+    public boolean shouldRenderBlockOutlineA() {
+        return this.shouldRenderBlockOutline();
+    }
+
+    @Override
+    public void invokeBobView(final CameraRenderState state, final PoseStack target) {
+        this.bobView(state, target);
+    }
+
+    @Override
+    public void invokeBobHurt(final CameraRenderState state, final PoseStack target) {
+        this.bobHurt(state, target);
+    }
     private final FogRenderer fogRenderer = new FogRenderer();
     private final GuiRenderer guiRenderer;
     private final FeatureRenderDispatcher featureRenderDispatcher;
@@ -161,6 +239,20 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
         this.screenEffectRenderer = new ScreenEffectRenderer(minecraft, atlasManager);
         this.debugCrosshairRenderer = new DebugCrosshairRenderer();
         this.mainRenderTarget = new MainTarget(minecraft.getWindow().getWidth(), minecraft.getWindow().getHeight());
+        // MODIFIED for porting: was iris's MixinGameRenderer#iris$logSystem (@Inject into <init> at TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.logger.info("Hardware information:");
+            net.irisshaders.iris.Iris.logger.info("CPU: " + com.mojang.blaze3d.platform.GLX._getCpuInfo());
+            net.irisshaders.iris.Iris.logger
+                .info(
+                    "GPU: "
+                        + RenderSystem.getDevice().getDeviceInfo().name()
+                        + " (Supports OpenGL "
+                        + RenderSystem.getDevice().getDeviceInfo().driverInfo()
+                        + ")"
+                );
+            net.irisshaders.iris.Iris.logger.info("OS: " + System.getProperty("os.name") + " (" + System.getProperty("os.version") + ")");
+        }
     }
 
     @Override
@@ -203,6 +295,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
     }
 
     public void togglePostEffect() {
+        // MODIFIED for porting: was sodium-extra's prevent_shaders MixinGameRenderer#preventShaders (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PREVENT_SHADERS && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.preventShaders) {
+            return;
+        }
+
         this.effectActive = !this.effectActive;
     }
 
@@ -224,6 +321,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
     }
 
     private void setPostEffect(final Identifier id) {
+        // MODIFIED for porting: was sodium-extra's prevent_shaders MixinGameRenderer#dontLoadShader (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PREVENT_SHADERS && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.preventShaders) {
+            return;
+        }
+
         this.postEffectId = id;
         this.effectActive = true;
     }
@@ -349,14 +451,19 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
                     this.bobView(cameraState, poseStack);
                 }
 
-                this.itemInHandRenderer
-                    .submitHandsWithItems(
-                        deltaPartialTick,
-                        poseStack,
-                        this.handAndScreenSubmitNodeStorage,
-                        this.minecraft.player,
-                        this.minecraft.getEntityRenderDispatcher().getPackedLightCoords(this.minecraft.player, deltaPartialTick)
-                    );
+                // MODIFIED for porting: was iris's MixinGameRenderer#iris$disableVanillaHandRendering (@Redirect on
+                // ItemInHandRenderer#submitHandsWithItems) - with a pack loaded iris draws the hands itself, in its own
+                // solid/translucent passes (see net.irisshaders.iris.pathways.HandRenderer).
+                if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || !net.irisshaders.iris.Iris.isPackInUseQuick()) {
+                    this.itemInHandRenderer
+                        .submitHandsWithItems(
+                            deltaPartialTick,
+                            poseStack,
+                            this.handAndScreenSubmitNodeStorage,
+                            this.minecraft.player,
+                            this.minecraft.getEntityRenderDispatcher().getPackedLightCoords(this.minecraft.player, deltaPartialTick)
+                        );
+                }
                 this.featureRenderDispatcher.renderAllFeatures(this.handAndScreenSubmitNodeStorage);
                 modelViewStack.popMatrix();
                 poseStack.popPose();
@@ -364,8 +471,17 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
         }
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinGameRenderer_NightVisionCompat#iris$safecheckNightvisionStrength (@Inject at the
+     * INVOKE of MobEffectInstance#endsWithin, cancellable, require = 0). Origins compatibility: iris calls this even when the
+     * entity has no night vision, which would NPE.
+     */
     public static float nightVisionScale(final LivingEntity camera, final float a) {
         MobEffectInstance nightVision = camera.getEffect(MobEffects.NIGHT_VISION);
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && nightVision == null) {
+            return 0.0F;
+        }
+
         return !nightVision.endsWithin(200) ? 1.0F : 0.7F + Mth.sin((nightVision.getDuration() - a) * (float) Math.PI * 0.2F) * 0.3F;
     }
 
@@ -394,6 +510,19 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
     }
 
     public void render(final DeltaTracker deltaTracker, final boolean advanceGameTime) {
+        // MODIFIED for porting: was iris's MixinGameRenderer#iris$startFrame (@Inject HEAD). Upstream's comment: this
+        // allows certain functions like float smoothing to function outside a world.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setRealTickDelta(deltaTracker.getGameTimeDeltaPartialTick(true));
+            net.irisshaders.iris.uniforms.SystemTimeUniforms.COUNTER.beginFrame();
+            net.irisshaders.iris.uniforms.SystemTimeUniforms.TIMER.beginFrame(net.minecraft.util.Util.getNanos());
+        }
+
+        // MODIFIED for porting: was sodium-extra's fps MixinGameRenderer#onRender (@Inject HEAD)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FPS) {
+            me.flashyreese.mods.sodiumextra.client.FrameCounter.getInstance().onFrame();
+        }
+
         ProfilerFiller profiler = Profiler.get();
         profiler.push("render");
         WindowRenderState windowRenderState = this.gameRenderState.windowRenderState;
@@ -415,7 +544,12 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
                 this.gameRenderState.optionsRenderState.glintStrength,
                 this.minecraft.level == null ? 0L : this.minecraft.level.getGameTime(),
                 deltaTracker,
-                this.gameRenderState.optionsRenderState.menuBackgroundBlurriness,
+                // MODIFIED for porting: was iris's MixinGameRenderer#iris$modifyBlur (@ModifyArgs on
+                // GlobalSettingsUniform#update, index 5) - the shader pack screen fades its own background blur in.
+                net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                        && this.minecraft.gui.screen() instanceof net.irisshaders.iris.gui.screen.ShaderPackScreen irisScreen
+                    ? (int)Math.min(this.minecraft.options.getMenuBackgroundBlurriness(), irisScreen.blurTransition.getAsFloat())
+                    : this.gameRenderState.optionsRenderState.menuBackgroundBlurriness,
                 this.gameRenderState.levelRenderState.cameraRenderState.pos,
                 this.gameRenderState.optionsRenderState.textureFiltering == TextureFilteringMethod.RGSS
             );
@@ -441,6 +575,8 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
         this.useUiLightmap = true;
         profiler.push("gui");
         this.guiRenderer.render();
+        // MODIFIED for porting: sodium features.gui.hooks.console GameRendererMixin#onRender (INVOKE GuiRenderer#render)
+        this.sodium$renderConsoleOverlay();
         this.guiRenderer.endFrame();
         profiler.pop();
         this.useUiLightmap = false;
@@ -532,6 +668,17 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
         CameraRenderState cameraState = this.gameRenderState.levelRenderState.cameraRenderState;
         Matrix4fc modelViewMatrix = cameraState.viewRotationMatrix;
         profiler.push("matrices");
+        /*
+          MODIFIED for porting: was iris's MixinModelViewBobbing (its #iris$saveShadersOn @Inject HEAD plus four
+          @WrapOperations on Matrix4f#mul / #rotate / #scale and on LevelRenderer#render).
+
+          Applying view bobbing and the nausea/portal spin to the *projection* matrix breaks most shader packs; OptiFine
+          applies them to the model-view matrix instead, so iris has to do the same. The wrapped operations therefore divert
+          every one of those matrix operations away from projectionMatrix into a separate matrix, which is then pre-multiplied
+          onto the model-view matrix right before LevelRenderer#render (`bob * modelView`, not `modelView * bob`).
+        */
+        boolean iris$areShadersOn = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.isPackInUseQuick();
+        Matrix4f iris$bobMatrix = null;
         Matrix4f projectionMatrix = new Matrix4f(cameraState.projectionMatrix);
         PoseStack bobStack = new PoseStack();
         this.bobHurt(cameraState, bobStack);
@@ -539,7 +686,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
             this.bobView(cameraState, bobStack);
         }
 
-        projectionMatrix.mul(bobStack.last().pose());
+        if (iris$areShadersOn) {
+            iris$bobMatrix = new Matrix4f(bobStack.last().pose());
+        } else {
+            projectionMatrix.mul(bobStack.last().pose());
+        }
         float screenEffectScale = optionsState.screenEffectScale;
         float portalIntensity = Mth.lerp(worldPartialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
         float nauseaIntensity = player.getEffectBlendFactor(MobEffects.NAUSEA, worldPartialTicks);
@@ -549,26 +700,62 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
             skew *= skew;
             Vector3f axis = new Vector3f(0.0F, Mth.SQRT_OF_TWO / 2.0F, Mth.SQRT_OF_TWO / 2.0F);
             float angle = (this.spinningEffectTime + worldPartialTicks * this.spinningEffectSpeed) * (float) (Math.PI / 180.0);
-            projectionMatrix.rotate(angle, axis);
-            projectionMatrix.scale(1.0F / skew, 1.0F, 1.0F);
-            projectionMatrix.rotate(-angle, axis);
+            // MODIFIED for porting: iris MixinModelViewBobbing#iris$applySpinningRotate / #iris$applySpinningScale - the spin
+            // goes onto the bob matrix as well.
+            Matrix4f iris$spinTarget = iris$areShadersOn ? iris$bobMatrix : projectionMatrix;
+            iris$spinTarget.rotate(angle, axis);
+            iris$spinTarget.scale(1.0F / skew, 1.0F, 1.0F);
+            iris$spinTarget.rotate(-angle, axis);
         }
 
+        // MODIFIED for porting: sodium core.render.world GameRendererMixin#sodium$setProjection (@WrapOperation) -
+        // sodium's chunk renderer needs the level projection matrix.
+        this.sodium$projection.set(projectionMatrix);
         RenderSystem.setProjectionMatrix(this.levelProjectionMatrixBuffer.getBuffer(projectionMatrix), ProjectionType.PERSPECTIVE);
         profiler.popPush("fog");
         this.fogRenderer.updateBuffer(cameraState.fogData);
         GpuBufferSlice terrainFog = this.fogRenderer.getBuffer(FogRenderer.FogMode.WORLD);
         profiler.popPush("level");
         boolean shouldCreateBossFog = this.minecraft.gui.hud.getBossOverlay().shouldCreateWorldFog();
+        // MODIFIED for porting: iris MixinModelViewBobbing#iris$renderLevel (@WrapOperation on LevelRenderer#render)
+        Matrix4fc iris$levelModelView = modelViewMatrix;
+        if (iris$areShadersOn) {
+            iris$levelModelView = new Matrix4f(modelViewMatrix).mulLocal(iris$bobMatrix);
+        }
+
         this.minecraft
             .levelRenderer
-            .render(this.resourcePool, deltaTracker, renderOutline, cameraState, modelViewMatrix, terrainFog, cameraState.fogData.color, !shouldCreateBossFog);
+            .render(
+                this.resourcePool,
+                deltaTracker,
+                renderOutline,
+                cameraState,
+                iris$levelModelView,
+                terrainFog,
+                cameraState.fogData.color,
+                !shouldCreateBossFog
+            );
         profiler.popPush("hand");
         boolean isSleeping = cameraState.entityRenderState.isSleeping;
         this.hudProjection
             .setupPerspective(0.05F, 100.0F, cameraState.hudFov, this.gameRenderState.windowRenderState.width, this.gameRenderState.windowRenderState.height);
         RenderSystem.setProjectionMatrix(this.hud3dProjectionMatrixBuffer.getBuffer(this.hudProjection), ProjectionType.PERSPECTIVE);
         RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(this.mainRenderTarget.getDepthTexture(), 0.0);
+        // MODIFIED for porting: was sodium-extra's panini_projection MixinGameRenderer#sodiumExtra$applyPaniniProjection
+        // (@Inject at INVOKE GameRenderer#renderItemInHand).
+        // Apply the post effect just before the held item/hand is drawn: the level (terrain, entities, particles, clouds,
+        // weather) is fully rendered into the main target by this point, so it gets re-projected, while the hand is drawn
+        // afterwards and stays in the normal projection.
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PANINI_PROJECTION) {
+            me.flashyreese.mods.sodiumextra.client.render.PaniniProjection.process(
+                this.minecraft,
+                this.mainRenderTarget,
+                this.resourcePool,
+                this.gameRenderState.levelRenderState.cameraRenderState,
+                this.gameRenderState.windowRenderState
+            );
+        }
+
         this.renderItemInHand(cameraState, cameraEntityPartialTicks, modelViewMatrix);
         profiler.popPush("screenEffects");
         this.screenEffectRenderer
@@ -587,6 +774,13 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
             && !this.gameRenderState.guiRenderState.isHudHidden) {
             this.debugCrosshairRenderer.render(cameraState, this.gameRenderState.windowRenderState.guiScale);
         }
+
+        // MODIFIED for porting: was iris's MixinGameRenderer#iris$runColorSpace (@Inject into renderLevel at TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.getPipelineManager()
+                .getPipeline()
+                .ifPresent(net.irisshaders.iris.pipeline.WorldRenderingPipeline::finalizeGameRendering);
+        }
     }
 
     private void extractWindow() {
@@ -596,7 +790,25 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector {
         windowState.height = window.getHeight();
         windowState.guiScale = window.getGuiScale();
         windowState.appropriateLineWidth = window.getAppropriateLineWidth();
-        windowState.isMinimized = window.isMinimized();
+        // MODIFIED for porting: sodium workarounds.window_minimized_state GameRendererMixin#redirectWindowMinimized
+        // (@Redirect). As a workaround for the blitting crash on some Intel GPUs, vanilla skips framebuffer blitting when
+        // the window is minimized - but Window#isMinimized() only reflects the state at the last event poll, which happens
+        // once per frame. Query the actual framebuffer size from the OS instead.
+        windowState.isMinimized = sodium$isWindowMinimized(window);
+    }
+
+    // MODIFIED for porting: sodium workarounds.window_minimized_state GameRendererMixin#redirectWindowMinimized
+    private static boolean sodium$isWindowMinimized(final Window window) {
+        if (!SODIUM_REDIRECT_WINDOW_MINIMIZED_STATE) {
+            return window.isMinimized();
+        }
+
+        try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+            java.nio.IntBuffer width = stack.callocInt(1);
+            java.nio.IntBuffer height = stack.callocInt(1);
+            org.lwjgl.glfw.GLFW.glfwGetFramebufferSize(window.handle(), width, height);
+            return width.get(0) == 0 || height.get(0) == 0;
+        }
     }
 
     private void extractOptions() {

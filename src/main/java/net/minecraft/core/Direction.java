@@ -54,6 +54,11 @@ public enum Direction implements StringRepresentable {
     private final Direction.Axis axis;
     private final Direction.AxisDirection axisDirection;
     private final Vec3i normal;
+    // MODIFIED for porting: lithium math.fast_blockpos DirectionMixin hoists the offsets out of the Vec3i so the
+    // JVM does not have to follow the extra indirection in the very hot getStepX/Y/Z accessors.
+    private final int lithium$offsetX;
+    private final int lithium$offsetY;
+    private final int lithium$offsetZ;
     private final Vec3 normalVec3;
     private final Vector3fc normalVec3f;
     private static final Direction[] VALUES = values();
@@ -81,6 +86,10 @@ public enum Direction implements StringRepresentable {
         this.normal = normal;
         this.normalVec3 = Vec3.atLowerCornerOf(normal);
         this.normalVec3f = new Vector3f(normal.getX(), normal.getY(), normal.getZ());
+        // MODIFIED for porting: lithium math.fast_blockpos DirectionMixin#reinit (RETURN of <init>)
+        this.lithium$offsetX = normal.getX();
+        this.lithium$offsetY = normal.getY();
+        this.lithium$offsetZ = normal.getZ();
     }
 
     public static Direction[] orderedByNearest(final Entity entity) {
@@ -173,7 +182,10 @@ public enum Direction implements StringRepresentable {
     }
 
     public Direction getOpposite() {
-        return from3DDataValue(this.oppositeIndex);
+        // MODIFIED for porting: lithium math.fast_util DirectionMixin avoids the modulo/abs in from3DDataValue. In 26.2
+        // the enum constants are declared in 3d-data order, so BY_3D_DATA and VALUES are the same order and
+        // VALUES[oppositeIndex] is exactly from3DDataValue(oppositeIndex) for the valid range.
+        return VALUES[this.oppositeIndex];
     }
 
     public Direction getClockWise(final Direction.Axis axis) {
@@ -252,16 +264,17 @@ public enum Direction implements StringRepresentable {
         };
     }
 
+    // MODIFIED for porting: lithium math.fast_blockpos DirectionMixin reads the hoisted offsets
     public int getStepX() {
-        return this.normal.getX();
+        return this.lithium$offsetX;
     }
 
     public int getStepY() {
-        return this.normal.getY();
+        return this.lithium$offsetY;
     }
 
     public int getStepZ() {
-        return this.normal.getZ();
+        return this.lithium$offsetZ;
     }
 
     public Vector3f step() {
@@ -305,26 +318,41 @@ public enum Direction implements StringRepresentable {
     }
 
     public static Direction getRandom(final RandomSource random) {
-        return Util.getRandom(VALUES, random);
+        // MODIFIED for porting: lithium math.fast_util DirectionMixin avoids allocating a Direction array per call
+        return VALUES[random.nextInt(VALUES.length)];
     }
 
     public static Direction getApproximateNearest(final double dx, final double dy, final double dz) {
         return getApproximateNearest((float)dx, (float)dy, (float)dz);
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.immediate DirectionMixin (@Overwrite), by Mitchell Skaggs. Avoid looping
+     * over all directions and computing the dot product. The tie-breaking order is the same as the vanilla loop's: negative
+     * before positive, and Y before Z before X.
+     */
     public static Direction getApproximateNearest(final float dx, final float dy, final float dz) {
-        Direction result = NORTH;
-        float highestDot = Float.MIN_VALUE;
-
-        for (Direction direction : VALUES) {
-            float dot = dx * direction.normal.getX() + dy * direction.normal.getY() + dz * direction.normal.getZ();
-            if (dot > highestDot) {
-                highestDot = dot;
-                result = direction;
-            }
+        // Vanilla quirk: return NORTH if all coordinates are zero
+        if (dx == 0.0F && dy == 0.0F && dz == 0.0F) {
+            return NORTH;
         }
 
-        return result;
+        float yM = Math.abs(dy);
+        float zM = Math.abs(dz);
+        float xM = Math.abs(dx);
+        if (yM >= zM) {
+            if (yM >= xM) {
+                // Y biggest
+                return dy <= 0.0F ? DOWN : UP;
+            }
+            // X biggest, fall through
+        } else if (zM >= xM) {
+            // Z biggest
+            return dz <= 0.0F ? NORTH : SOUTH;
+        }
+
+        // X biggest
+        return dx <= 0.0F ? WEST : EAST;
     }
 
     public static Direction getApproximateNearest(final Vec3 vec) {

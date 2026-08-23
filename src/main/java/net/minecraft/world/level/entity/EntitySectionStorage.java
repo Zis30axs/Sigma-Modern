@@ -21,12 +21,47 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.AABB;
 import org.jspecify.annotations.Nullable;
 
-public class EntitySectionStorage<T extends EntityAccess> {
+// MODIFIED for porting: lithium minimal_nonvanilla.spawning EntitySectionStorageMixin
+public class EntitySectionStorage<T extends EntityAccess> implements net.caffeinemc.mods.lithium.common.world.ChunkAwareEntityIterable<T> {
     public static final int CHONKY_ENTITY_SEARCH_GRACE = 2;
     public static final int MAX_NON_CHONKY_ENTITY_SIZE = 4;
     private final Class<T> entityClass;
     private final Long2ObjectFunction<Visibility> intialSectionVisibility;
     private final Long2ObjectMap<EntitySection<T>> sections = new Long2ObjectOpenHashMap<>();
+
+    /**
+     * MODIFIED for porting: was lithium's minimal_nonvanilla.spawning EntitySectionStorageMixin. Mob spawning only needs the
+     * entities of the tracked sections, which is much cheaper to iterate than the level's full entity list.
+     */
+    @Override
+    public Iterable<T> lithium$IterateEntitiesInTrackedSections() {
+        it.unimi.dsi.fastutil.objects.ObjectCollection<EntitySection<T>> sections = this.sections.values();
+        return () -> {
+            it.unimi.dsi.fastutil.objects.ObjectIterator<EntitySection<T>> sectionsIterator = sections.iterator();
+            return new com.google.common.collect.AbstractIterator<T>() {
+                private java.util.Iterator<T> entityIterator;
+
+                @Override
+                protected @Nullable T computeNext() {
+                    if (this.entityIterator != null && this.entityIterator.hasNext()) {
+                        return this.entityIterator.next();
+                    }
+
+                    while (sectionsIterator.hasNext()) {
+                        EntitySection<T> section = sectionsIterator.next();
+                        if (section.getStatus().isAccessible() && !section.isEmpty()) {
+                            this.entityIterator = section.getCollection().iterator();
+                            if (this.entityIterator.hasNext()) {
+                                return this.entityIterator.next();
+                            }
+                        }
+                    }
+
+                    return this.endOfData();
+                }
+            };
+        };
+    }
     private final LongSortedSet sectionIds = new LongAVLTreeSet();
 
     public EntitySectionStorage(final Class<T> entityClass, final Long2ObjectFunction<Visibility> intialSectionVisibility) {
@@ -41,6 +76,31 @@ public class EntitySectionStorage<T extends EntityAccess> {
         int xMax = SectionPos.posToSectionCoord(bb.maxX + 2.0);
         int yMax = SectionPos.posToSectionCoord(bb.maxY + 0.0);
         int zMax = SectionPos.posToSectionCoord(bb.maxZ + 2.0);
+        // MODIFIED for porting: lithium entity.fast_retrieval EntitySectionStorageMixin#forEachInBox. For small boxes,
+        // looking the (at most 4x4 columns of) sections up directly is cheaper than walking the sorted section-id set, which
+        // may iterate over hundreds of irrelevant longs. For larger boxes vanilla's scan wins, so it is kept: it becomes
+        // increasingly likely that the far-away sections do not exist at all (player despawn range and so on).
+        if (xMax < xMin + 4 && zMax < zMin + 4) {
+            // The vanilla AVL set is sorted by ascending long value, and SectionPos packs x into the most significant bits,
+            // so the packed long is negative exactly when x is negative; y and z are effectively compared as unsigned. The
+            // loops below reproduce that visiting order.
+            for (int x = xMin; x <= xMax; x++) {
+                for (int z = Math.max(zMin, 0); z <= zMax; z++) {
+                    if (this.lithium$forEachInColumn(x, yMin, yMax, z, output).shouldAbort()) {
+                        return;
+                    }
+                }
+
+                int zBound = Math.min(-1, zMax);
+                for (int z = zMin; z <= zBound; z++) {
+                    if (this.lithium$forEachInColumn(x, yMin, yMax, z, output).shouldAbort()) {
+                        return;
+                    }
+                }
+            }
+
+            return;
+        }
 
         for (int x = xMin; x <= xMax; x++) {
             long lowestAbsoluteSectionKey = SectionPos.asLong(x, 0, 0);
@@ -62,6 +122,39 @@ public class EntitySectionStorage<T extends EntityAccess> {
                 }
             }
         }
+    }
+
+    // MODIFIED for porting: the next two helpers were lithium's entity.fast_retrieval EntitySectionStorageMixin
+    private AbortableIterationConsumer.Continuation lithium$forEachInColumn(
+        final int x, final int yMin, final int yMax, final int z, final AbortableIterationConsumer<EntitySection<T>> output
+    ) {
+        AbortableIterationConsumer.Continuation ret = AbortableIterationConsumer.Continuation.CONTINUE;
+
+        // y goes from negative to positive, but y is compared as unsigned in the packed long
+        for (int y = Math.max(yMin, 0); y <= yMax; y++) {
+            if ((ret = this.lithium$consumeSection(SectionPos.asLong(x, y, z), output)).shouldAbort()) {
+                return ret;
+            }
+        }
+
+        int yBound = Math.min(-1, yMax);
+        for (int y = yMin; y <= yBound; y++) {
+            if ((ret = this.lithium$consumeSection(SectionPos.asLong(x, y, z), output)).shouldAbort()) {
+                return ret;
+            }
+        }
+
+        return ret;
+    }
+
+    private AbortableIterationConsumer.Continuation lithium$consumeSection(final long pos, final AbortableIterationConsumer<EntitySection<T>> output) {
+        EntitySection<T> section = this.getSection(pos);
+        // size() instead of isEmpty(): util.entity_movement_tracking makes isEmpty() also consider attached listeners
+        if (section != null && section.size() != 0 && section.getStatus().isAccessible()) {
+            return output.accept(section);
+        }
+
+        return AbortableIterationConsumer.Continuation.CONTINUE;
     }
 
     public LongStream getExistingSectionPositionsInChunk(final long chunkKey) {
@@ -102,7 +195,10 @@ public class EntitySectionStorage<T extends EntityAccess> {
         long chunkPos = getChunkKeyFromSectionKey(sectionPos);
         Visibility chunkStatus = this.intialSectionVisibility.get(chunkPos);
         this.sectionIds.add(sectionPos);
-        return new EntitySection<>(this.entityClass, chunkStatus);
+        EntitySection<T> section = new EntitySection<>(this.entityClass, chunkStatus);
+        // MODIFIED for porting: lithium util.entity_section_position EntitySectionStorageMixin#rememberPos
+        ((net.caffeinemc.mods.lithium.common.entity.PositionedEntityTrackingSection)section).lithium$setPos(sectionPos);
+        return section;
     }
 
     public LongSet getAllChunksWithExistingSections() {

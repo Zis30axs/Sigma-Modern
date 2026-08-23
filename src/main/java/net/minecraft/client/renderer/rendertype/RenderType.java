@@ -15,16 +15,30 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Matrix4f;
 
 @OnlyIn(Dist.CLIENT)
-public class RenderType {
+public class RenderType
+    implements net.irisshaders.iris.mixin.rendertype.RenderTypeAccessor,
+    net.irisshaders.iris.mixinterface.RenderTypeInterface { // MODIFIED for porting: iris rendertype RenderTypeAccessor + injected RenderTypeInterface
     private static final int MEGABYTE = 1048576;
     public static final int BIG_BUFFER_SIZE = 4194304;
     public static final int SMALL_BUFFER_SIZE = 786432;
     public static final int TRANSIENT_BUFFER_SIZE = 1536;
     private final RenderSetup state;
+
+    // MODIFIED for porting: was iris's MixinRenderType (its RenderTypeInterface implementation)
+    @Override
+    public com.mojang.blaze3d.pipeline.RenderTarget iris$getRenderTarget() {
+        return this.state.outputTarget.getRenderTarget();
+    }
+
+    @Override
+    public com.mojang.blaze3d.pipeline.RenderPipeline iris$getPipeline() {
+        return this.state.pipeline;
+    }
     private final Optional<RenderType> outline;
     protected final String name;
 
-    private RenderType(final String name, final RenderSetup state) {
+// MODIFIED for porting: iris.accesswidener makes RenderType#<init>(String,RenderSetup) accessible
+    public RenderType(final String name, final RenderSetup state) {
         this.name = name;
         this.state = state;
         this.outline = state.outlineProperty == RenderSetup.OutlineProperty.AFFECTS_OUTLINE
@@ -32,7 +46,8 @@ public class RenderType {
             : Optional.empty();
     }
 
-    static RenderType create(final String name, final RenderSetup state) {
+// MODIFIED for porting: iris.accesswidener makes RenderType#create(String,RenderSetup) accessible
+    public static RenderType create(final String name, final RenderSetup state) {
         return new RenderType(name, state);
     }
 
@@ -76,8 +91,31 @@ public class RenderType {
         return RenderSystem.getDynamicUniforms().writeTransform(modelViewMatrix, this.state.textureTransform.createMatrix());
     }
 
+    /**
+     * MODIFIED for porting: was iris's vertices.immediate MixinRenderType#iris$change (@Inject RETURN, cancellable) - the same
+     * vertex format substitution as MixinRenderPipeline, but for the immediate-mode path, which additionally honours
+     * {@code renderWithExtendedVertexFormat}.
+     */
     public VertexFormat format() {
-        return this.state.pipeline.getVertexFormatBinding(0);
+        VertexFormat format = this.state.pipeline.getVertexFormatBinding(0);
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && net.irisshaders.iris.Iris.isPackInUseQuick()
+            && net.irisshaders.iris.vertices.ImmediateState.renderWithExtendedVertexFormat
+            && net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel) {
+            if (format.equals(com.mojang.blaze3d.vertex.DefaultVertexFormat.BLOCK)) {
+                return net.irisshaders.iris.vertices.IrisVertexFormats.TERRAIN;
+            }
+
+            if (format.equals(com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR)) {
+                return net.irisshaders.iris.vertices.IrisVertexFormats.GLYPH;
+            }
+
+            if (format.equals(com.mojang.blaze3d.vertex.DefaultVertexFormat.ENTITY)) {
+                return net.irisshaders.iris.vertices.IrisVertexFormats.ENTITY;
+            }
+        }
+
+        return format;
     }
 
     public PrimitiveTopology primitiveTopology() {

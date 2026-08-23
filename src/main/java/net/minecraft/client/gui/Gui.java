@@ -212,6 +212,10 @@ public class Gui {
 
         profiler.pop();
         graphics.applyCursor(this.minecraft.getWindow());
+        // MODIFIED for porting: was sodium-extra's gui MixinGui#onRender (@Inject TAIL, @Local GuiGraphicsExtractor)
+        if (shouldRenderLevel) {
+            me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.onHudRender(graphics, deltaTracker);
+        }
     }
 
     @Contract(pure = true)

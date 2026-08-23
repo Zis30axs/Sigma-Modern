@@ -72,7 +72,16 @@ public abstract class Biomes {
     public static final ResourceKey<Biome> SMALL_END_ISLANDS = register("small_end_islands");
     public static final ResourceKey<Biome> END_BARRENS = register("end_barrens");
 
+    // MODIFIED for porting: iris MixinBiomes @Unique field - the running index iris assigns to each vanilla biome
+    private static int iris$currentId = 0;
+
     private static ResourceKey<Biome> register(final String name) {
-        return ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace(name));
+        ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace(name));
+        // MODIFIED for porting: was iris's MixinBiomes#iris$registerBiome (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.BiomeUniforms.getBiomeMap().put(key, iris$currentId++);
+        }
+
+        return key;
     }
 }

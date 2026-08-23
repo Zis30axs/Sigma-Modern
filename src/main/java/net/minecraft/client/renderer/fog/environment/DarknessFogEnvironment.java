@@ -32,6 +32,13 @@ public class DarknessFogEnvironment extends MobEffectFogEnvironment {
                 fog.cloudEnd = distance;
             }
         }
+
+        // MODIFIED for porting: was sodium-extra's fog MixinDarknessFogEnvironment#postSetupFog (@Inject TAIL)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG && me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.shouldModifyProtectedGameplayFog()) {
+            me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyProtectedGameplayFog(
+                fog, me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getProtectedGameplayFogDistance(me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.ProtectedFogType.DARKNESS), 0.75F, 1.0F
+            );
+        }
     }
 
     @Override

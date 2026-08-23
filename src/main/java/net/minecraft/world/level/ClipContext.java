@@ -18,12 +18,30 @@ import net.minecraft.world.phys.shapes.EntityCollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-public class ClipContext {
-    private final Vec3 from;
+public class ClipContext implements net.caffeinemc.mods.lithium.common.world.explosions.ClipContextAccess { // MODIFIED for porting: lithium world.explosions.entity_raycast
+    // MODIFIED for porting: lithium world.explosions.entity_raycast ClipContextMixin makes `from` mutable so a single
+    // context object can be reused for all of an explosion's entity rays.
+    private Vec3 from;
     private final Vec3 to;
     private final ClipContext.Block block;
     private final ClipContext.Fluid fluid;
     private final CollisionContext collisionContext;
+
+    // MODIFIED for porting: the next two methods were lithium's world.explosions.entity_raycast ClipContextMixin
+    @Override
+    public void lithium$setFrom(final Vec3 from) {
+        this.from = from;
+    }
+
+    @Override
+    public CollisionContext lithium$getCollisionContext() {
+        return this.collisionContext;
+    }
+
+    // MODIFIED for porting: was lithium's world.raycast ClipContextAccessor Mixin
+    public ClipContext.Fluid getFluidHandling() {
+        return this.fluid;
+    }
 
     public ClipContext(final Vec3 from, final Vec3 to, final ClipContext.Block block, final ClipContext.Fluid fluid, final Entity entity) {
         this(from, to, block, fluid, CollisionContext.of(entity));

@@ -43,6 +43,12 @@ public class AtmosphericFogEnvironment extends FogEnvironment {
         }
 
         int skyColor = camera.attributeProbe().getValue(EnvironmentAttributes.SKY_COLOR, partialTicks);
+        // MODIFIED for porting: was sodium-extra's sky_colors MixinAtmosphericFogEnvironment#modifySkyColor
+        // (@ModifyArg index 0 on applyWeatherDarken)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.SKY_COLORS && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.skyColors) {
+            skyColor = 7907327;
+        }
+
         skyColor = applyWeatherDarken(skyColor, level.getRainLevel(partialTicks), level.getThunderLevel(partialTicks));
         float skyFogEnd = Math.min(camera.attributeProbe().getValue(EnvironmentAttributes.SKY_FOG_END_DISTANCE, partialTicks) / 16.0F, renderDistance);
         float skyColorMixFactor = Mth.clampedLerp(skyFogEnd / 32.0F, 0.25F, 1.0F);
@@ -83,6 +89,48 @@ public class AtmosphericFogEnvironment extends FogEnvironment {
             fog.environmentalEnd = Math.min(fog.environmentalEnd, 96.0F);
             fog.skyEnd = fog.environmentalEnd;
             fog.cloudEnd = fog.environmentalEnd;
+        }
+
+        // MODIFIED for porting: was sodium-extra's fog MixinAtmosphericFogEnvironment#postSetupFog (@Inject TAIL)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG) {
+            this.sodiumExtra$postSetupFog(fog, level, renderDistance);
+        }
+    }
+
+    // MODIFIED for porting: was the body of sodium-extra's fog MixinAtmosphericFogEnvironment#postSetupFog
+    private void sodiumExtra$postSetupFog(final FogData fog, final ClientLevel level, final float renderDistance) {
+        me.flashyreese.mods.sodiumextra.client.config.SodiumExtraGameOptions.AtmosphericFogSettings settings = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getAtmosphericSettings(level);
+        int fogDistance = settings.distanceChunks;
+        if (me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.isBossFogActive()) {
+            return;
+        }
+
+        if (fogDistance == me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.FOG_DISTANCE_VANILLA) {
+            sodiumExtra$applyCloudFog(fog, settings);
+            return;
+        }
+
+        if (me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.disablesFog(fogDistance)) {
+            // Keep vanilla sky fog; the sky shader uses it to blend the horizon cleanly.
+            fog.environmentalStart = Float.MAX_VALUE;
+            fog.environmentalEnd = Float.MAX_VALUE;
+            sodiumExtra$applyCloudFog(fog, settings);
+            return;
+        }
+
+        float end = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getEnd(fogDistance);
+        fog.environmentalStart = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getStart(settings);
+        fog.environmentalEnd = end;
+        // Match the sky's horizon tint to the custom terrain fog so the two don't seam.
+        fog.skyEnd = Math.min(end, renderDistance);
+        sodiumExtra$applyCloudFog(fog, settings);
+    }
+
+    // MODIFIED for porting: was sodium-extra's fog MixinAtmosphericFogEnvironment#applyCloudFog
+    private static void sodiumExtra$applyCloudFog(final FogData fog, final me.flashyreese.mods.sodiumextra.client.config.SodiumExtraGameOptions.AtmosphericFogSettings settings) {
+        if (settings.cloudFogPercent != me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.VANILLA_CLOUD_FOG_PERCENT) {
+            // Vanilla already capped cloudEnd with the dimension's fog attribute; only pull it closer.
+            fog.cloudEnd = Math.min(fog.cloudEnd, me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getCloudEnd(settings.cloudFogPercent));
         }
     }
 

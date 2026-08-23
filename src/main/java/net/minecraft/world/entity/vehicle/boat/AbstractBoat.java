@@ -280,7 +280,10 @@ public abstract class AbstractBoat extends VehicleEntity implements Leashable {
             }
         }
 
-        List<Entity> entities = this.level().getEntities(this, this.getBoundingBox().inflate(0.2F, -0.01F, 0.2F), EntitySelector.pushableBy(this));
+        // MODIFIED for porting: lithium entity.collisions.unpushable_cramming AbstractBoatMixin#getOtherPushableEntities
+        List<Entity> entities = Entity.lithium$getOtherPushableEntities(
+            this.level(), this, this.getBoundingBox().inflate(0.2F, -0.01F, 0.2F), EntitySelector.pushableBy(this)
+        );
         if (!entities.isEmpty()) {
             boolean addNewPassengers = !this.level().isClientSide() && !(this.getControllingPassenger() instanceof Player);
 

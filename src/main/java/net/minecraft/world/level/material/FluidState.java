@@ -26,8 +26,14 @@ public final class FluidState extends StateHolder<Fluid, FluidState> implements 
     public static final int AMOUNT_MAX = 9;
     public static final int AMOUNT_FULL = 8;
 
+    // MODIFIED for porting: lithium block.flatten_states FluidStateMixin caches Fluid#isEmpty, which is a constant per
+    // fluid type but was looked up through a virtual call on every FluidState#isEmpty.
+    private final boolean isEmptyCache;
+
     public FluidState(final Fluid owner, final Property<?>[] propertyKeys, final Comparable<?>[] propertyValues) {
         super(owner, propertyKeys, propertyValues);
+        // MODIFIED for porting: lithium block.flatten_states FluidStateMixin#initFluidCache (<init> RETURN)
+        this.isEmptyCache = this.getType().isEmpty();
     }
 
     public Fluid getType() {
@@ -43,7 +49,8 @@ public final class FluidState extends StateHolder<Fluid, FluidState> implements 
     }
 
     public boolean isEmpty() {
-        return this.getType().isEmpty();
+        // MODIFIED for porting: lithium block.flatten_states FluidStateMixin (@Overwrite) - use the cached property
+        return this.isEmptyCache;
     }
 
     public float getHeight(final BlockGetter level, final BlockPos pos) {

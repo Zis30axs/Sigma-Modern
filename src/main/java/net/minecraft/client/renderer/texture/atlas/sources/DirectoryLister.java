@@ -21,6 +21,16 @@ public record DirectoryLister(String sourcePath, String idPrefix) implements Spr
     public void run(final ResourceManager resourceManager, final SpriteSource.Output output) {
         FileToIdConverter converter = new FileToIdConverter("textures/" + this.sourcePath, ".png");
         converter.listMatchingResources(resourceManager).forEach((identifier, resource) -> {
+            // MODIFIED for porting: was iris's texture pbr MixinDirectoryLister#iris$modifyForEachAction (@ModifyArgs wrapping
+            // the BiConsumer passed to Map#forEach) - a PBR texture (foo_n.png / foo_s.png) must not be listed as a sprite of
+            // its own when the base texture exists.
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                String irisBasePath = net.irisshaders.iris.pbr.texture.PBRType.removeSuffix(identifier.getPath());
+                if (irisBasePath != null && resourceManager.getResource(identifier.withPath(irisBasePath)).isPresent()) {
+                    return;
+                }
+            }
+
             Identifier spriteLocation = converter.fileToId(identifier).withPrefix(this.idPrefix);
             output.add(spriteLocation, resource);
         });

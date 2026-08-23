@@ -22,7 +22,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
-public class CrafterBlockEntity extends RandomizableContainerBlockEntity implements CraftingContainer {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.crafter CrafterBlockEntityMixin
+public class CrafterBlockEntity extends RandomizableContainerBlockEntity
+    implements CraftingContainer, net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity {
     public static final int CONTAINER_WIDTH = 3;
     public static final int CONTAINER_HEIGHT = 3;
     public static final int CONTAINER_SIZE = 9;
@@ -35,6 +37,49 @@ public class CrafterBlockEntity extends RandomizableContainerBlockEntity impleme
     private static final Component DEFAULT_NAME = Component.translatable("container.crafter");
     private NonNullList<ItemStack> items = NonNullList.withSize(9, ItemStack.EMPTY);
     private int craftingTicksRemaining = 0;
+
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.crafter CrafterBlockEntityMixin
+    // A block entity that has nothing to do parks itself by swapping the ticker inside its tick wrapper for a
+    // no-op one, and is woken up again by the events below.
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
+    // MODIFIED for porting: lithium crafter CrafterBlockEntityMixin#checkSleep
+    private void lithium$checkSleep() {
+        if (this.craftingTicksRemaining == 0) {
+            this.lithium$startSleeping();
+        }
+    }
+
+    // MODIFIED for porting: lithium crafter CrafterBlockEntityMixin#lithium$handleSetChanged
+    @Override
+    public void lithium$handleSetChanged() {
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
+    }
+
     protected final ContainerData containerData = new ContainerData() {
         private final int[] slotStates = new int[9];
         private int triggered = 0;
@@ -133,6 +178,10 @@ public class CrafterBlockEntity extends RandomizableContainerBlockEntity impleme
             }
         });
         this.containerData.set(9, input.getIntOr("triggered", 0));
+            // MODIFIED for porting: lithium crafter CrafterBlockEntityMixin#wakeUpAfterRemainingTicksChanged (RETURN)
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
     }
 
     @Override
@@ -242,10 +291,19 @@ public class CrafterBlockEntity extends RandomizableContainerBlockEntity impleme
                 level.setBlock(blockPos, blockState.setValue(CrafterBlock.CRAFTING, false), 3);
             }
         }
+
+        // MODIFIED for porting: lithium crafter CrafterBlockEntityMixin#checkSleep (RETURN of serverTick)
+        if (craftingTicksRemaining < 0) {
+            entity.lithium$checkSleep();
+        }
     }
 
     public void setCraftingTicksRemaining(final int maxCraftingTicks) {
         this.craftingTicksRemaining = maxCraftingTicks;
+        // MODIFIED for porting: lithium crafter CrafterBlockEntityMixin#wakeUpAfterRemainingTicksChanged (RETURN)
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
     }
 
     public int getRedstoneSignal() {

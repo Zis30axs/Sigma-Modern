@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.doubles.DoubleList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import malte0811.ferritecore.mixin.accessors.VoxelShapeAccess; // MODIFIED for porting
 import net.minecraft.core.AxisCycle;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -18,12 +19,90 @@ import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.jspecify.annotations.Nullable;
 
-public abstract class VoxelShape {
-    protected final DiscreteVoxelShape shape;
+public abstract class VoxelShape implements VoxelShapeAccess,
+    net.caffeinemc.mods.lithium.common.shapes.OffsetVoxelShapeCache { // MODIFIED for porting: lithium block.moving_block_shapes VoxelShapeMixin
+    // MODIFIED for porting: `shape` and `faces` lost their `final`/private-only status so that FerriteCore's blockstate
+    // cache deduplication can replace the internals of a duplicate shape with those of the shape it keeps.
+    // `shape` is additionally public because lithium.accesswidener widened it.
+    public DiscreteVoxelShape shape;
+    /**
+     * MODIFIED for porting: lithium block.moving_block_shapes VoxelShapeMixin. Caches this shape moved by 0 / 0.5 / 1 blocks
+     * in each direction and simplified, because moving pistons request exactly those shapes every tick and
+     * {@link #optimize()} is expensive. Written with safe publication - both the render and the server thread use the cache.
+     */
+    private volatile VoxelShape @org.jspecify.annotations.Nullable [] offsetAndSimplified;
+
+    // MODIFIED for porting: lithium block.moving_block_shapes VoxelShapeMixin
+    @Override
+    public void lithium$setShape(final float offset, final Direction direction, final VoxelShape offsetShape) {
+        if (offsetShape == null) {
+            throw new IllegalArgumentException("offsetShape must not be null!");
+        }
+
+        int index = getIndexForOffsetSimplifiedShapes(offset, direction);
+        VoxelShape[] offsetAndSimplifiedShapes = this.offsetAndSimplified;
+        if (offsetAndSimplifiedShapes == null) {
+            offsetAndSimplifiedShapes = new VoxelShape[1 + 2 * 6];
+        } else {
+            offsetAndSimplifiedShapes = offsetAndSimplifiedShapes.clone();
+        }
+
+        offsetAndSimplifiedShapes[index] = offsetShape;
+        this.offsetAndSimplified = offsetAndSimplifiedShapes;
+    }
+
+    // MODIFIED for porting: lithium block.moving_block_shapes VoxelShapeMixin
+    @Override
+    public @org.jspecify.annotations.Nullable VoxelShape lithium$getOffsetSimplifiedShape(final float offset, final Direction direction) {
+        VoxelShape[] offsetAndSimplified = this.offsetAndSimplified;
+        if (offsetAndSimplified == null) {
+            return null;
+        }
+
+        return offsetAndSimplified[getIndexForOffsetSimplifiedShapes(offset, direction)];
+    }
+
+    // MODIFIED for porting: lithium block.moving_block_shapes VoxelShapeMixin
+    private static int getIndexForOffsetSimplifiedShapes(final float offset, final Direction direction) {
+        if (offset != 0.0F && offset != 0.5F && offset != 1.0F) {
+            throw new IllegalArgumentException("offset must be one of {0f, 0.5f, 1f}");
+        }
+
+        if (offset == 0.0F) {
+            // can treat offsetting by 0 in all directions the same
+            return 0;
+        }
+
+        return (int)(2.0F * offset) + 2 * direction.get3DDataValue();
+    }
     private @Nullable VoxelShape @Nullable [] faces;
 
     protected VoxelShape(final DiscreteVoxelShape shape) {
         this.shape = shape;
+    }
+
+    // MODIFIED for porting: was FerriteCore's VoxelShapeAccess accessor Mixin
+    @Override
+    public DiscreteVoxelShape getShape() {
+        return this.shape;
+    }
+
+    // MODIFIED for porting: was FerriteCore's VoxelShapeAccess accessor Mixin
+    @Override
+    public @Nullable VoxelShape[] getFaces() {
+        return this.faces;
+    }
+
+    // MODIFIED for porting: was FerriteCore's VoxelShapeAccess accessor Mixin
+    @Override
+    public void setShape(final DiscreteVoxelShape newPart) {
+        this.shape = newPart;
+    }
+
+    // MODIFIED for porting: was FerriteCore's VoxelShapeAccess accessor Mixin
+    @Override
+    public void setFaces(final @Nullable VoxelShape[] newCache) {
+        this.faces = newCache;
     }
 
     public double min(final Direction.Axis axis) {
@@ -156,8 +235,26 @@ public abstract class VoxelShape {
         return i <= 0 ? Double.NEGATIVE_INFINITY : this.get(aAxis, i);
     }
 
-    protected int findIndex(final Direction.Axis axis, final double coord) {
-        return Mth.binarySearch(0, this.shape.getSize(axis) + 1, index -> coord < this.get(axis, index)) - 1;
+    // MODIFIED for porting: lithium.accesswidener widened access, and lithium shapes.specialized_shapes
+    // VoxelShapeMixin#findIndex inlines the lambda that would otherwise be passed to Mth#binarySearch.
+    public int findIndex(final Direction.Axis axis, final double coord) {
+        DoubleList list = this.getCoords(axis);
+        int size = this.shape.getSize(axis);
+        int start = 0;
+        int len = size + 1 - start;
+
+        while (len > 0) {
+            int half = len / 2;
+            int middle = start + half;
+            if (middle >= 0 && (middle > size || coord < list.getDouble(middle))) {
+                len = half;
+            } else {
+                start = middle + 1;
+                len -= half + 1;
+            }
+        }
+
+        return start - 1;
     }
 
     public @Nullable BlockHitResult clip(final Vec3 from, final Vec3 to, final BlockPos pos) {
@@ -253,6 +350,11 @@ public abstract class VoxelShape {
         return this.collideX(AxisCycle.between(axis, Direction.Axis.X), moving, distance);
     }
 
+    /**
+     * MODIFIED for porting: lithium shapes.specialized_shapes VoxelShapeMixin#collideX. Same algorithm as vanilla, but the
+     * b/c index bounds are only computed once the outer loop actually has an iteration to do - for the common case of a
+     * shape the box cannot reach at all, none of the six binary searches run.
+     */
     protected double collideX(final AxisCycle transform, final AABB moving, double distance) {
         if (this.isEmpty()) {
             return distance;
@@ -266,18 +368,27 @@ public abstract class VoxelShape {
         Direction.Axis aAxis = inverse.cycle(Direction.Axis.X);
         Direction.Axis bAxis = inverse.cycle(Direction.Axis.Y);
         Direction.Axis cAxis = inverse.cycle(Direction.Axis.Z);
-        double maxA = moving.max(aAxis);
-        double minA = moving.min(aAxis);
-        int aMin = this.findIndex(aAxis, minA + 1.0E-7);
-        int aMax = this.findIndex(aAxis, maxA - 1.0E-7);
-        int bMin = Math.max(0, this.findIndex(bAxis, moving.min(bAxis) + 1.0E-7));
-        int bMax = Math.min(this.shape.getSize(bAxis), this.findIndex(bAxis, moving.max(bAxis) - 1.0E-7) + 1);
-        int cMin = Math.max(0, this.findIndex(cAxis, moving.min(cAxis) + 1.0E-7));
-        int cMax = Math.min(this.shape.getSize(cAxis), this.findIndex(cAxis, moving.max(cAxis) - 1.0E-7) + 1);
-        int aSize = this.shape.getSize(aAxis);
+        int bMin = Integer.MIN_VALUE;
+        int bMax = Integer.MIN_VALUE;
+        int cMin = Integer.MIN_VALUE;
+        int cMax = Integer.MIN_VALUE;
         if (distance > 0.0) {
+            double maxA = moving.max(aAxis);
+            int aMax = this.findIndex(aAxis, maxA - 1.0E-7);
+            int aSize = this.shape.getSize(aAxis);
+
             for (int a = aMax + 1; a < aSize; a++) {
+                bMin = bMin == Integer.MIN_VALUE ? Math.max(0, this.findIndex(bAxis, moving.min(bAxis) + 1.0E-7)) : bMin;
+                bMax = bMax == Integer.MIN_VALUE
+                    ? Math.min(this.shape.getSize(bAxis), this.findIndex(bAxis, moving.max(bAxis) - 1.0E-7) + 1)
+                    : bMax;
+
                 for (int b = bMin; b < bMax; b++) {
+                    cMin = cMin == Integer.MIN_VALUE ? Math.max(0, this.findIndex(cAxis, moving.min(cAxis) + 1.0E-7)) : cMin;
+                    cMax = cMax == Integer.MIN_VALUE
+                        ? Math.min(this.shape.getSize(cAxis), this.findIndex(cAxis, moving.max(cAxis) - 1.0E-7) + 1)
+                        : cMax;
+
                     for (int c = cMin; c < cMax; c++) {
                         if (this.shape.isFullWide(inverse, a, b, c)) {
                             double newDistance = this.get(aAxis, a) - maxA;
@@ -291,8 +402,21 @@ public abstract class VoxelShape {
                 }
             }
         } else if (distance < 0.0) {
+            double minA = moving.min(aAxis);
+            int aMin = this.findIndex(aAxis, minA + 1.0E-7);
+
             for (int a = aMin - 1; a >= 0; a--) {
+                bMin = bMin == Integer.MIN_VALUE ? Math.max(0, this.findIndex(bAxis, moving.min(bAxis) + 1.0E-7)) : bMin;
+                bMax = bMax == Integer.MIN_VALUE
+                    ? Math.min(this.shape.getSize(bAxis), this.findIndex(bAxis, moving.max(bAxis) - 1.0E-7) + 1)
+                    : bMax;
+
                 for (int b = bMin; b < bMax; b++) {
+                    cMin = cMin == Integer.MIN_VALUE ? Math.max(0, this.findIndex(cAxis, moving.min(cAxis) + 1.0E-7)) : cMin;
+                    cMax = cMax == Integer.MIN_VALUE
+                        ? Math.min(this.shape.getSize(cAxis), this.findIndex(cAxis, moving.max(cAxis) - 1.0E-7) + 1)
+                        : cMax;
+
                     for (int c = cMin; c < cMax; c++) {
                         if (this.shape.isFullWide(inverse, a, b, c)) {
                             double newDistance = this.get(aAxis, a + 1) - minA;

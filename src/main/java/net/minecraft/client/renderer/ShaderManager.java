@@ -44,6 +44,9 @@ import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
 public class ShaderManager extends SimplePreparableReloadListener<ShaderManager.Configs> implements AutoCloseable {
+    // MODIFIED for porting: was sodium-extra's fog MixinShaderManager#SODIUM_TERRAIN_SHADER
+    private static final Identifier SODIUM_TERRAIN_SHADER = Identifier.fromNamespaceAndPath("sodium", "blocks/block_layer_opaque");
+
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final int MAX_LOG_LENGTH = 32768;
     public static final String SHADER_PATH = "shaders";
@@ -203,8 +206,18 @@ public class ShaderManager extends SimplePreparableReloadListener<ShaderManager.
         this.postChainProjectionMatrixBuffer.close();
     }
 
+    /**
+     * MODIFIED for porting: was sodium-extra's fog MixinShaderManager#sodiumExtra$injectRenderDistanceShape
+     * (@ModifyReturnValue) - applies the fog-shape transform only to sodium's terrain shader, after vanilla resolved the
+     * source.
+     */
     public @Nullable String getShader(final Identifier id, final ShaderType type) {
-        return this.compilationCache.getShaderSource(id, type);
+        String source = this.compilationCache.getShaderSource(id, type);
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG && id.equals(SODIUM_TERRAIN_SHADER)) {
+            return me.flashyreese.mods.sodiumextra.client.fog.FogShaderTransformer.injectRenderDistanceShape(source);
+        }
+
+        return source;
     }
 
     @OnlyIn(Dist.CLIENT)

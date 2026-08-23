@@ -10,6 +10,13 @@ import org.jspecify.annotations.Nullable;
 @OnlyIn(Dist.CLIENT)
 public class DebugScreenEntries {
     private static final Map<Identifier, DebugScreenEntry> ENTRIES_BY_ID = new HashMap<>();
+
+    // MODIFIED for porting: was sodium's DebugScreenEntriesAccessor @Accessor("ENTRIES_BY_ID") - sodium registers its
+    // own debug screen entries directly into this map.
+    public static Map<Identifier, DebugScreenEntry> sodium$getEntries() {
+        return ENTRIES_BY_ID;
+    }
+
     public static final Identifier GAME_VERSION = register("game_version", new DebugEntryVersion());
     public static final Identifier FPS = register("fps", new DebugEntryFps());
     public static final Identifier TPS = register("tps", new DebugEntryTps());
@@ -55,13 +62,20 @@ public class DebugScreenEntries {
     public static final Identifier VISUALIZE_CHUNKS_ON_SERVER = register("visualize_chunks_on_server", new DebugEntryNoop());
     public static final Identifier VISUALIZE_SKY_LIGHT_SECTIONS = register("visualize_sky_light_sections", new DebugEntryNoop());
     public static final Identifier CHUNK_SECTION_VISIBILITY = register("chunk_section_visibility", new DebugEntryNoop());
-    public static final Map<DebugScreenProfile, Map<Identifier, DebugScreenEntryStatus>> PROFILES;
+    /**
+     * MODIFIED for porting: {@code mutable field ... PROFILES} in sodium-extra.accesswidener - sodium-extra replaces this map
+     * to add its own entries to the default and performance profiles.
+     */
+    public static Map<DebugScreenProfile, Map<Identifier, DebugScreenEntryStatus>> PROFILES;
 
     private static Identifier register(final String id, final DebugScreenEntry entry) {
         return register(Identifier.withDefaultNamespace(id), entry);
     }
 
-    private static Identifier register(final Identifier identifier, final DebugScreenEntry entry) {
+    // MODIFIED for porting: widened for sodium-extra, which registers its own debug screen entries through this method
+    // (upstream it is reached through the loader's registration hook: DebugScreenEntries::register on Fabric,
+    // RegisterDebugEntriesEvent::register on NeoForge).
+    public static Identifier register(final Identifier identifier, final DebugScreenEntry entry) {
         ENTRIES_BY_ID.put(identifier, entry);
         return identifier;
     }
@@ -108,5 +122,10 @@ public class DebugScreenEntries {
             DebugScreenEntryStatus.IN_OVERLAY
         );
         PROFILES = Map.of(DebugScreenProfile.DEFAULT, defaultProfile, DebugScreenProfile.PERFORMANCE, performance);
+        // MODIFIED for porting: was iris's MixinDebugEntries#onInit (@Inject into <clinit> at RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            register(Identifier.fromNamespaceAndPath("iris", "iris"), new net.irisshaders.iris.gui.debug.IrisDebugEntry());
+            register(Identifier.fromNamespaceAndPath("iris", "debug"), new net.irisshaders.iris.gui.debug.IrisTrueDebugEntry());
+        }
     }
 }

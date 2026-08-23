@@ -37,6 +37,18 @@ public class FluidStateModelSet {
     }
 
     public FluidModel get(final FluidState state) {
-        return this.modelByFluid.getOrDefault(state.getType(), this.missingModel);
+        // MODIFIED for porting: sodium features.textures.animations.tracking FluidStateModelSetMixin#sodium$catchUsedSprites
+        // (RETURN) - catches fluid sprites accessed outside the chunk fluid rendering path.
+        FluidModel model = this.modelByFluid.getOrDefault(state.getType(), this.missingModel);
+        if (model != null) {
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(model.stillMaterial().sprite());
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(model.flowingMaterial().sprite());
+            net.minecraft.client.resources.model.sprite.Material.Baked overlay = model.overlayMaterial();
+            if (overlay != null) {
+                net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(overlay.sprite());
+            }
+        }
+
+        return model;
     }
 }

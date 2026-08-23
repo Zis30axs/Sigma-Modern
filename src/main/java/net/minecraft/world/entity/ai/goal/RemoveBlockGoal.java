@@ -39,7 +39,11 @@ public class RemoveBlockGoal extends MoveToBlockGoal {
         } else if (this.nextStartTick > 0) {
             this.nextStartTick--;
             return false;
-        } else if (this.findNearestBlock()) {
+            // MODIFIED for porting: lithium ai.non_poi_block_search RemoveBlockGoalMixin#redirectFindNearestBlock
+            // (@Redirect). The condition is split so the block predicate can be evaluated against a chunk section's
+            // palette first (ChunkSection#maybeHas). shouldChunkLoad is false because the vanilla check uses
+            // getChunk(..., false).
+        } else if (this.lithium$findNearestBlock(this::lithium$isValidTargetBlock, LITHIUM_IS_VALID_TARGET_ABOVE_BIPREDICATE, false)) {
             this.nextStartTick = reducedTickDelay(20);
             return true;
         } else {
@@ -132,6 +136,19 @@ public class RemoveBlockGoal extends MoveToBlockGoal {
         }
 
         return null;
+    }
+
+    // MODIFIED for porting: lithium ai.non_poi_block_search RemoveBlockGoalMixin - the vanilla isValidTarget condition
+    // split in two so that the block check can run against the chunk section palette
+    private static final java.util.function.BiPredicate<ChunkAccess, BlockPos.MutableBlockPos> LITHIUM_IS_VALID_TARGET_ABOVE_BIPREDICATE =
+        RemoveBlockGoal::lithium$isValidTargetAbove;
+
+    private boolean lithium$isValidTargetBlock(final net.minecraft.world.level.block.state.BlockState blockState) {
+        return blockState.is(this.blockToRemove);
+    }
+
+    private static boolean lithium$isValidTargetAbove(final ChunkAccess chunkAccess, final BlockPos.MutableBlockPos mutable) {
+        return chunkAccess.getBlockState(mutable.move(0, 1, 0)).isAir() && chunkAccess.getBlockState(mutable.move(0, 1, 0)).isAir();
     }
 
     @Override

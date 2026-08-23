@@ -130,7 +130,12 @@ public class LevelLoadTracker implements LevelLoadListener {
                 LevelLoadTracker.LOGGER.warn("Timed out while waiting for the client to load chunks, letting the player into the world anyway");
                 return true;
             } else {
-                BlockPos playerPos = this.player.blockPosition();
+                // MODIFIED for porting: sodium core.gui LevelLoadTrackerMixin#redirect$getPlayerBlockPosition
+                // (@Redirect). Ensure the "eye" position (which the chunk rendering code is actually concerned about) is
+                // used instead of the "feet" position. This solves a problem where the loading screen can become stuck
+                // waiting for the chunk at the player's feet to load, when it is determined to not be visible due to the
+                // true location of the player's eyes.
+                BlockPos playerPos = BlockPos.containing(this.player.getX(), this.player.getEyeY(), this.player.getZ());
                 BlockPos cameraPos = Minecraft.getInstance().gameRenderer.mainCamera().blockPosition();
                 return !this.level.isOutsideBuildHeight(playerPos.getY())
                         && !this.level.isOutsideBuildHeight(cameraPos.getY())

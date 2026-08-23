@@ -12,10 +12,14 @@ import net.minecraft.world.level.material.FluidState;
 import org.jspecify.annotations.Nullable;
 
 public class EntityCollisionContext implements CollisionContext {
-    private final boolean descending;
+    // MODIFIED for porting: lithium shapes.lazy_shape_context EntityCollisionContextMixin makes both `descending` and
+    // `heldItem` lazy: reading the held item needs an inventory access and isDescending() needs entity state, and most
+    // collision contexts never ask for either.
+    private boolean descending;
     private final double entityBottom;
     private final boolean placement;
-    private final ItemStack heldItem;
+    private @Nullable ItemStack heldItem;
+    private boolean lithium$isDescendingNeedsInitialization;
     private final boolean alwaysCollideWithFluid;
     private final @Nullable Entity entity;
 
@@ -38,17 +42,39 @@ public class EntityCollisionContext implements CollisionContext {
     @Deprecated
     protected EntityCollisionContext(final Entity entity, final boolean alwaysCollideWithFluid, final boolean placement) {
         this(
-            entity.isDescending(),
+            // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#skipIsDescending
+            false,
             placement,
             entity.getY(),
-            entity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY,
+            // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#redirectInstanceOf makes the
+            // instanceof always fail here; #initFields then nulls the field so it can be filled in on demand.
+            ItemStack.EMPTY,
             alwaysCollideWithFluid,
             entity
         );
+        this.heldItem = null;
+        // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#initVars (RETURN)
+        this.lithium$isDescendingNeedsInitialization = true;
+    }
+
+    // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#initHeldItem
+    private void lithium$initHeldItem() {
+        if (this.heldItem == null) {
+            this.heldItem = this.entity instanceof LivingEntity livingEntity ? livingEntity.getMainHandItem() : ItemStack.EMPTY;
+        }
+    }
+
+    // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin declares this getter (as @Intrinsic) so
+    // that anything reading the held item goes through the lazy initialization.
+    public ItemStack getHeldItem() {
+        this.lithium$initHeldItem();
+        return this.heldItem;
     }
 
     @Override
     public boolean isHoldingItem(final Item item) {
+        // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#isHolding (HEAD)
+        this.lithium$initHeldItem();
         return this.heldItem.is(item);
     }
 
@@ -71,6 +97,12 @@ public class EntityCollisionContext implements CollisionContext {
 
     @Override
     public boolean isDescending() {
+        // MODIFIED for porting: lithium lazy_shape_context EntityCollisionContextMixin#initIsDescending (HEAD)
+        if (this.lithium$isDescendingNeedsInitialization) {
+            this.lithium$isDescendingNeedsInitialization = false;
+            this.descending = this.entity != null && this.entity.isDescending();
+        }
+
         return this.descending;
     }
 

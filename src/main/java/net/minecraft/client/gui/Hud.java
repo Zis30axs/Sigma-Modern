@@ -218,7 +218,33 @@ public class Hud {
         this.titleFadeOutTime = 20;
     }
 
+    /**
+     * MODIFIED for porting: was iris's gui MixinGui#iris$handleHudHidingScreens (@WrapMethod) - iris's own screens implement
+     * {@link net.irisshaders.iris.gui.screen.HudHideable} to suppress the HUD, and the whole HUD is wrapped in a GL debug
+     * group.
+     */
     public void extractRenderState(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (this.minecraft.gui.screen() instanceof net.irisshaders.iris.gui.screen.HudHideable) {
+                return;
+            }
+
+            net.irisshaders.iris.gl.GLDebug.pushGroup(1000, "GUI");
+
+            try {
+                this.iris$extractRenderState(graphics, deltaTracker);
+            } finally {
+                net.irisshaders.iris.gl.GLDebug.popGroup();
+            }
+
+            return;
+        }
+
+        this.iris$extractRenderState(graphics, deltaTracker);
+    }
+
+    // MODIFIED for porting: original vanilla body of extractRenderState, wrapped above
+    private void iris$extractRenderState(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
         this.minecraft.gameRenderer.gameRenderState().guiRenderState.isHudHidden = this.isHidden;
         if (!(this.minecraft.gui.screen() instanceof LevelLoadingScreen)) {
             if (!this.isHidden) {
@@ -1074,6 +1100,15 @@ public class Hud {
     }
 
     private void extractVignette(final GuiGraphicsExtractor graphics, final @Nullable Entity camera) {
+        // MODIFIED for porting: was iris's gui MixinHud#iris$disableVignetteRendering (@Inject HEAD, cancellable) - a shader
+        // pack can draw its own vignette.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pipeline.WorldRenderingPipeline irisPipeline = net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable();
+            if (irisPipeline != null && !irisPipeline.shouldRenderVignette()) {
+                return;
+            }
+        }
+
         WorldBorder worldBorder = this.minecraft.level.getWorldBorder();
         float borderWarningStrength = 0.0F;
         if (camera != null) {

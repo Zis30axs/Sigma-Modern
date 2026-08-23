@@ -19,10 +19,20 @@ public class BiomeColors {
     }
 
     public static int getAverageGrassColor(final BlockAndTintGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was sodium-extra's biome_colors MixinBiomeColors#grassColor (@Inject RETURN, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.BIOME_COLORS && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.biomeColors) {
+            return 9551193; // 9551193 5877296
+        }
+
         return getAverageColor(level, pos, GRASS_COLOR_RESOLVER);
     }
 
     public static int getAverageFoliageColor(final BlockAndTintGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was sodium-extra's biome_colors MixinBiomeColors#foliageColor (@Inject RETURN, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.BIOME_COLORS && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.biomeColors) {
+            return 5877296;
+        }
+
         return getAverageColor(level, pos, FOLIAGE_COLOR_RESOLVER);
     }
 
@@ -31,6 +41,11 @@ public class BiomeColors {
     }
 
     public static int getAverageWaterColor(final BlockAndTintGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was sodium-extra's biome_colors MixinBiomeColors#waterColor (@Inject RETURN, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.BIOME_COLORS && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.biomeColors) {
+            return 4159204;
+        }
+
         return getAverageColor(level, pos, WATER_COLOR_RESOLVER);
     }
 }

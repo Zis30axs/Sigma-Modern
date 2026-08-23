@@ -6,7 +6,7 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public class EndFlashState {
+public class EndFlashState implements net.irisshaders.iris.mixin.EndFlashAccess { // MODIFIED for porting: iris EndFlashAccess
     public static final int SOUND_DELAY_IN_TICKS = 30;
     private static final int FLASH_INTERVAL_IN_TICKS = 600;
     private static final int MAX_FLASH_OFFSET_IN_TICKS = 200;
@@ -19,6 +19,19 @@ public class EndFlashState {
     private float oldIntensity;
     private float xAngle;
     private float yAngle;
+    // MODIFIED for porting: iris MixinEndFlash constant - degrees above the horizon
+    private static final float IRIS_ABOVE_HORIZON_EPS = 5.0F;
+
+    // MODIFIED for porting: was iris's EndFlashAccess @Accessor("xAngle") / @Accessor("yAngle")
+    @Override
+    public void setXAngle(final float xAngle) {
+        this.xAngle = xAngle;
+    }
+
+    @Override
+    public void setYAngle(final float yAngle) {
+        this.yAngle = yAngle;
+    }
 
     public void tick(final long clockTime) {
         this.calculateFlashParameters(clockTime);
@@ -33,6 +46,16 @@ public class EndFlashState {
             randomSource.nextFloat();
             this.offset = Mth.randomBetweenInclusive(randomSource, 0, 200);
             this.duration = Mth.randomBetweenInclusive(randomSource, 100, Math.min(380, 600 - this.offset));
+            // MODIFIED for porting: was iris's MixinEndFlash#iris$calculateNewAngles (@Inject at the first INVOKE of
+            // Mth#randomBetween, cancellable) - with a shader pack loaded the flash is kept above the horizon, because the
+            // shader's sky is not drawn below it.
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.getCurrentPack().isPresent()) {
+                this.xAngle = -Mth.randomBetween(randomSource, IRIS_ABOVE_HORIZON_EPS, 60.0F); // [-60, -5]
+                this.yAngle = Mth.randomBetween(randomSource, -180.0F, 180.0F);
+                this.flashSeed = newSeed;
+                return;
+            }
+
             this.xAngle = Mth.randomBetween(randomSource, -60.0F, 10.0F);
             this.yAngle = Mth.randomBetween(randomSource, -180.0F, 180.0F);
             this.flashSeed = newSeed;

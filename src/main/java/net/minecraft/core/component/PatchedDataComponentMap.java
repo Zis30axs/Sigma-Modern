@@ -12,12 +12,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
+import malte0811.ferritecore.mixin.config.FerriteConfig; // MODIFIED for porting
 import org.jspecify.annotations.Nullable;
 
-public final class PatchedDataComponentMap implements DataComponentMap {
+// MODIFIED for porting: lithium util.item_component_and_count_tracking PatchedDataComponentMapMixin
+public final class PatchedDataComponentMap implements DataComponentMap, net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<PatchedDataComponentMap> {
     private final DataComponentMap prototype;
     private Reference2ObjectMap<DataComponentType<?>, Optional<?>> patch;
     private boolean copyOnWrite;
+    // MODIFIED for porting: lithium util.item_component_and_count_tracking PatchedDataComponentMapMixin @Unique field
+    private net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<PatchedDataComponentMap> lithium$subscriber;
 
     public PatchedDataComponentMap(final DataComponentMap prototype) {
         this(prototype, Reference2ObjectMaps.emptyMap(), true);
@@ -76,7 +80,9 @@ public final class PatchedDataComponentMap implements DataComponentMap {
             lastValue = (Optional<T>)this.patch.put(type, Optional.ofNullable(value));
         }
 
-        return lastValue != null ? lastValue.orElse(defaultValue) : defaultValue;
+        T result = lastValue != null ? lastValue.orElse(defaultValue) : defaultValue;
+        this.saveMemoryIfEmpty(); // MODIFIED for porting: FerriteCore injects at RETURN of set
+        return result;
     }
 
     public <T> @Nullable T set(final TypedDataComponent<T> value) {
@@ -93,7 +99,19 @@ public final class PatchedDataComponentMap implements DataComponentMap {
             lastValue = (Optional<? extends T>)this.patch.remove(type);
         }
 
-        return (T)(lastValue != null ? lastValue.orElse(null) : defaultValue);
+        T result = (T)(lastValue != null ? lastValue.orElse(null) : defaultValue);
+        this.saveMemoryIfEmpty(); // MODIFIED for porting: FerriteCore injects at RETURN of remove
+        return result;
+    }
+
+    // MODIFIED for porting: was FerriteCore's PatchedDataComponentMapMixin#saveMemoryIfEmpty
+    private void saveMemoryIfEmpty() {
+        if (FerriteConfig.DATACOMPONENTS.isEnabled() && this.patch.isEmpty()) {
+            // Use a singleton empty map to reduce memory overhead from empty maps, use copyOnWrite to ensure we never
+            // try to modify this map
+            this.patch = Reference2ObjectMaps.emptyMap();
+            this.copyOnWrite = true;
+        }
     }
 
     public void applyPatch(final DataComponentPatch patch) {
@@ -102,6 +120,8 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         for (Entry<DataComponentType<?>, Optional<?>> entry : Reference2ObjectMaps.fastIterable(patch.map)) {
             this.applyPatch(entry.getKey(), entry.getValue());
         }
+
+        this.saveMemoryIfEmpty(); // MODIFIED for porting: FerriteCore injects at RETURN of applyPatch
     }
 
     private void applyPatch(final DataComponentType<?> type, final Optional<?> value) {
@@ -123,6 +143,7 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         this.ensureMapOwnership();
         this.patch.clear();
         this.patch.putAll(patch.map);
+        this.saveMemoryIfEmpty(); // MODIFIED for porting: FerriteCore injects at RETURN of restorePatch
     }
 
     public void clearPatch() {
@@ -136,7 +157,28 @@ public final class PatchedDataComponentMap implements DataComponentMap {
         }
     }
 
+    // MODIFIED for porting: the next two methods were lithium's PatchedDataComponentMapMixin
+    @Override
+    public void lithium$subscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<PatchedDataComponentMap> subscriber, final int subscriberData) {
+        if (subscriberData != 0) {
+            throw new UnsupportedOperationException("ComponentMapImpl does not support subscriber data");
+        }
+
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.combine(this.lithium$subscriber, 0, subscriber, 0);
+    }
+
+    @Override
+    public int lithium$unsubscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<PatchedDataComponentMap> subscriber) {
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.without(this.lithium$subscriber, subscriber);
+        return 0;
+    }
+
     private void ensureMapOwnership() {
+        // MODIFIED for porting: lithium PatchedDataComponentMapMixin#trackBeforeChange (HEAD)
+        if (this.lithium$subscriber != null) {
+            this.lithium$subscriber.lithium$notify(this, 0);
+        }
+
         if (this.copyOnWrite) {
             this.patch = new Reference2ObjectArrayMap<>(this.patch);
             this.copyOnWrite = false;

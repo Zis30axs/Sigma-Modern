@@ -50,7 +50,11 @@ public abstract class AgeableWaterCreature extends AgeableMob {
     public void baseTick() {
         int airSupply = this.getAirSupply();
         super.baseTick();
-        this.handleAirSupply(airSupply);
+        // MODIFIED for porting: lithium client_tick.entity.base_tick.unused_water_supply AgeableWaterCreatureMixin
+        // #isServerSide (@WrapWithCondition) - the breathing state is synced from the server
+        if (!this.level().isClientSide()) {
+            this.handleAirSupply(airSupply);
+        }
     }
 
     @Override

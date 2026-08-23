@@ -54,7 +54,14 @@ public class TheEndGatewayRenderer extends AbstractEndPortalRenderer<TheEndGatew
             );
         }
 
-        submitCube(state.facesToShow, RenderTypes.endGateway(), poseStack, submitNodeCollector);
+        // MODIFIED for porting: was iris's MixinTheEndGatewayRenderer#iris$renderType (@WrapOperation around
+        // RenderTypes#endGateway) - with a shader pack loaded the gateway uses the plain end-portal texture, because the
+        // vanilla end-gateway render type relies on a post effect the pack replaces.
+        net.minecraft.client.renderer.rendertype.RenderType irisEndGatewayType = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                && net.irisshaders.iris.Iris.getCurrentPack().isPresent()
+            ? RenderTypes.entitySolid(TheEndPortalRenderer.END_PORTAL_LOCATION)
+            : RenderTypes.endGateway();
+        submitCube(state.facesToShow, irisEndGatewayType, poseStack, submitNodeCollector);
     }
 
     @Override

@@ -25,12 +25,289 @@ import net.minecraft.util.debug.DebugPoiInfo;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public class PoiSection {
+// MODIFIED for porting: implements lithium's PointOfInterestSetExtended (ai.poi PoiSectionMixin), a set of stream-free
+// lookups over the records of this section.
+// Note: byType must stay a HashMap of HashSets - the iteration order is detectable in game.
+public class PoiSection implements net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestSetExtended {
     private static final Logger LOGGER = LogUtils.getLogger();
     private final Short2ObjectMap<PoiRecord> records = new Short2ObjectOpenHashMap<>();
     private final Map<Holder<PoiType>, Set<PoiRecord>> byType = Maps.newHashMap();
     private final Runnable setDirty;
     private boolean isValid;
+
+    // MODIFIED for porting: everything below was lithium's ai.poi PoiSectionMixin
+    @Override
+    public void lithium$collectMatchingPoints(
+        final Predicate<Holder<PoiType>> type, final PoiManager.Occupancy status, final Consumer<PoiRecord> consumer
+    ) {
+        if (type instanceof net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter singleTypeFilter) {
+            this.lithium$collectWithSingleTypeFilter(singleTypeFilter.getType(), status, consumer);
+        } else {
+            this.lithium$collectWithDynamicTypeFilter(type, status, consumer);
+        }
+    }
+
+    @Override
+    public @Nullable PoiRecord lithium$getL2ClosestMatchingPoint(
+        final BlockPos center, final Predicate<Holder<PoiType>> typeFilter, final Predicate<? super PoiRecord> poiPredicate
+    ) {
+        if (typeFilter instanceof net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter singleTypeFilter) {
+            return this.lithium$getL2ClosestMatchingPoint(center, singleTypeFilter.getType(), poiPredicate);
+        } else {
+            return this.lithium$getL2ClosestMatchingPointDynamic(center, typeFilter, poiPredicate);
+        }
+    }
+
+    private @Nullable PoiRecord lithium$getL2ClosestMatchingPoint(
+        final BlockPos center, final Holder<PoiType> type, final Predicate<? super PoiRecord> poiPredicate
+    ) {
+        Set<PoiRecord> poiRecords = this.byType.get(type);
+        if (poiRecords == null || poiRecords.isEmpty()) {
+            return null;
+        }
+
+        PoiRecord closest = null;
+        long closestDistanceSq = Long.MAX_VALUE;
+
+        for (PoiRecord poiRecord : poiRecords) {
+            long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(center, poiRecord.getPos());
+            if (distanceSq < closestDistanceSq && poiPredicate.test(poiRecord)) {
+                closestDistanceSq = distanceSq;
+                closest = poiRecord;
+            }
+        }
+
+        return closest;
+    }
+
+    private @Nullable PoiRecord lithium$getL2ClosestMatchingPointDynamic(
+        final BlockPos center, final Predicate<Holder<PoiType>> typeFilter, final Predicate<? super PoiRecord> poiPredicate
+    ) {
+        PoiRecord closest = null;
+        long closestDistanceSq = Long.MAX_VALUE;
+
+        for (Map.Entry<Holder<PoiType>, Set<PoiRecord>> entry : this.byType.entrySet()) {
+            if (!typeFilter.test(entry.getKey()) || entry.getValue().isEmpty()) {
+                continue;
+            }
+
+            for (PoiRecord poiRecord : entry.getValue()) {
+                long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(center, poiRecord.getPos());
+                if (distanceSq < closestDistanceSq && poiPredicate.test(poiRecord)) {
+                    closestDistanceSq = distanceSq;
+                    closest = poiRecord;
+                }
+            }
+        }
+
+        return closest;
+    }
+
+    @Override
+    public void lithium$collectMatchingPointsL2Limited(
+        final BlockPos center,
+        final long maxDistanceSq,
+        final Predicate<Holder<PoiType>> typeFilter,
+        final Predicate<? super PoiRecord> poiPredicate,
+        final Consumer<PoiRecord> consumer,
+        final int limit
+    ) {
+        if (typeFilter instanceof net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter singleTypeFilter) {
+            this.lithium$collectMatchingPointsL2Limited(center, maxDistanceSq, singleTypeFilter.getType(), poiPredicate, consumer, limit);
+        } else {
+            this.lithium$collectMatchingPointsL2LimitedDynamic(center, maxDistanceSq, typeFilter, poiPredicate, consumer, limit);
+        }
+    }
+
+    private void lithium$collectMatchingPointsL2Limited(
+        final BlockPos center,
+        final long maxDistanceSq,
+        final Holder<PoiType> type,
+        final Predicate<? super PoiRecord> poiPredicate,
+        final Consumer<PoiRecord> consumer,
+        int limit
+    ) {
+        Set<PoiRecord> poiRecords = this.byType.get(type);
+        if (poiRecords == null || poiRecords.isEmpty()) {
+            return;
+        }
+
+        for (PoiRecord poiRecord : poiRecords) {
+            long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(center, poiRecord.getPos());
+            if (distanceSq <= maxDistanceSq && poiPredicate.test(poiRecord)) {
+                consumer.accept(poiRecord);
+                if (--limit == 0) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private void lithium$collectMatchingPointsL2LimitedDynamic(
+        final BlockPos center,
+        final long maxDistanceSq,
+        final Predicate<Holder<PoiType>> typeFilter,
+        final Predicate<? super PoiRecord> poiPredicate,
+        final Consumer<PoiRecord> consumer,
+        int limit
+    ) {
+        for (Map.Entry<Holder<PoiType>, Set<PoiRecord>> entry : this.byType.entrySet()) {
+            if (!typeFilter.test(entry.getKey()) || entry.getValue().isEmpty()) {
+                continue;
+            }
+
+            for (PoiRecord poiRecord : entry.getValue()) {
+                long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(center, poiRecord.getPos());
+                if (distanceSq <= maxDistanceSq && poiPredicate.test(poiRecord)) {
+                    consumer.accept(poiRecord);
+                    if (--limit == 0) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public @Nullable PoiRecord lithium$getFirstMatchingPoint(
+        final BlockPos pos,
+        final long maxDistSq,
+        final Predicate<Holder<PoiType>> typeFilter,
+        final Predicate<BlockPos> posPredicate,
+        final PoiManager.Occupancy status
+    ) {
+        if (typeFilter instanceof net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter singleTypeFilter) {
+            return this.lithium$getFirstMatchingPoint(pos, maxDistSq, singleTypeFilter.getType(), posPredicate, status);
+        } else {
+            return this.lithium$getFirstMatchingPointDynamic(pos, maxDistSq, typeFilter, posPredicate, status);
+        }
+    }
+
+    private @Nullable PoiRecord lithium$getFirstMatchingPoint(
+        final BlockPos pos,
+        final long maxDistSq,
+        final Holder<PoiType> type,
+        final Predicate<BlockPos> posPredicate,
+        final PoiManager.Occupancy status
+    ) {
+        Set<PoiRecord> poiRecords = this.byType.get(type);
+        if (poiRecords == null || poiRecords.isEmpty()) {
+            return null;
+        }
+
+        Predicate<? super PoiRecord> statusPredicate = status.getTest();
+
+        for (PoiRecord poiRecord : poiRecords) {
+            long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(pos, poiRecord.getPos());
+            if (distanceSq <= maxDistSq && posPredicate.test(poiRecord.getPos()) && statusPredicate.test(poiRecord)) {
+                return poiRecord;
+            }
+        }
+
+        return null;
+    }
+
+    private @Nullable PoiRecord lithium$getFirstMatchingPointDynamic(
+        final BlockPos pos,
+        final long maxDistSq,
+        final Predicate<Holder<PoiType>> typeFilter,
+        final Predicate<BlockPos> posPredicate,
+        final PoiManager.Occupancy status
+    ) {
+        Predicate<? super PoiRecord> statusPredicate = status.getTest();
+
+        for (Map.Entry<Holder<PoiType>, Set<PoiRecord>> entry : this.byType.entrySet()) {
+            if (!typeFilter.test(entry.getKey()) || entry.getValue().isEmpty()) {
+                continue;
+            }
+
+            for (PoiRecord poiRecord : entry.getValue()) {
+                long distanceSq = net.caffeinemc.mods.lithium.common.util.Distances.distanceSq(pos, poiRecord.getPos());
+                if (distanceSq <= maxDistSq && posPredicate.test(poiRecord.getPos()) && statusPredicate.test(poiRecord)) {
+                    return poiRecord;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void lithium$collectWithDynamicTypeFilter(
+        final Predicate<Holder<PoiType>> typeFilter, final PoiManager.Occupancy status, final Consumer<PoiRecord> consumer
+    ) {
+        for (Map.Entry<Holder<PoiType>, Set<PoiRecord>> entry : this.byType.entrySet()) {
+            if (!typeFilter.test(entry.getKey()) || entry.getValue().isEmpty()) {
+                continue;
+            }
+
+            for (PoiRecord poi : entry.getValue()) {
+                if (status.getTest().test(poi)) {
+                    consumer.accept(poi);
+                }
+            }
+        }
+    }
+
+    private void lithium$collectWithSingleTypeFilter(
+        final Holder<PoiType> type, final PoiManager.Occupancy status, final Consumer<PoiRecord> consumer
+    ) {
+        Set<PoiRecord> entries = this.byType.get(type);
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
+
+        for (PoiRecord poi : entries) {
+            if (status.getTest().test(poi)) {
+                consumer.accept(poi);
+            }
+        }
+    }
+
+    @Override
+    public @Nullable PoiRecord lithium$getAt(final BlockPos pos) {
+        return this.getPoiRecord(pos).orElse(null);
+    }
+
+    @Override
+    public java.util.Iterator<PoiRecord> lithium$iterate(final Predicate<Holder<PoiType>> typeFilter) {
+        if (typeFilter instanceof net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter singleTypeFilter) {
+            return this.lithium$iterateWithSingleTypeFilter(singleTypeFilter.getType());
+        } else {
+            return this.lithium$iterateWithDynamicTypeFilter(typeFilter);
+        }
+    }
+
+    private java.util.Iterator<PoiRecord> lithium$iterateWithSingleTypeFilter(final Holder<PoiType> type) {
+        Set<PoiRecord> entries = this.byType.get(type);
+        if (entries == null || entries.isEmpty()) {
+            return java.util.Collections.emptyIterator();
+        }
+
+        return entries.iterator();
+    }
+
+    private java.util.Iterator<PoiRecord> lithium$iterateWithDynamicTypeFilter(final Predicate<Holder<PoiType>> typeFilter) {
+        java.util.Iterator<Map.Entry<Holder<PoiType>, Set<PoiRecord>>> entryIterator = this.byType.entrySet().iterator();
+        return new com.google.common.collect.AbstractIterator<>() {
+            private java.util.Iterator<PoiRecord> currentSetIterator = java.util.Collections.emptyIterator();
+
+            @Override
+            protected PoiRecord computeNext() {
+                while (true) {
+                    if (this.currentSetIterator.hasNext()) {
+                        return this.currentSetIterator.next();
+                    } else if (entryIterator.hasNext()) {
+                        Map.Entry<Holder<PoiType>, Set<PoiRecord>> entry = entryIterator.next();
+                        if (typeFilter.test(entry.getKey())) {
+                            this.currentSetIterator = entry.getValue().iterator();
+                        }
+                    } else {
+                        return this.endOfData();
+                    }
+                }
+            }
+        };
+    }
 
     public PoiSection(final Runnable setDirty) {
         this(setDirty, true, ImmutableList.of());

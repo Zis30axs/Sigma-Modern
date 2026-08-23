@@ -156,6 +156,15 @@ public class ScreenEffectRenderer {
     }
 
     private static void submitWater(final Minecraft minecraft, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector) {
+        // MODIFIED for porting: was iris's MixinScreenEffectRenderer#iris$disableUnderWaterOverlayRendering
+        // (@Inject HEAD, cancellable) - a shader pack can draw its own underwater overlay.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pipeline.WorldRenderingPipeline irisPipeline = net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable();
+            if (irisPipeline != null && !irisPipeline.shouldRenderUnderwaterOverlay()) {
+                return;
+            }
+        }
+
         LocalPlayer player = minecraft.player;
         BlockPos pos = BlockPos.containing(player.getEyePosition());
         float brightness = Lightmap.getBrightness(player.level().dimensionType(), player.level().getMaxLocalRawBrightness(pos));

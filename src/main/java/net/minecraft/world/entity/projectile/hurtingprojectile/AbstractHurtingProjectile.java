@@ -75,7 +75,12 @@ public abstract class AbstractHurtingProjectile extends Projectile {
         Entity owner = this.getOwner();
         this.applyInertia();
         if (this.level().isClientSide() || (owner == null || !owner.isRemoved()) && this.level().hasChunkAt(this.blockPosition())) {
-            HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity, this.getClipType());
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions AbstractHurtingProjectileMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
+            HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(
+                this, new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity), this.getClipType()
+            );
             Vec3 newPosition;
             if (hitResult.getType() != HitResult.Type.MISS) {
                 newPosition = hitResult.getLocation();

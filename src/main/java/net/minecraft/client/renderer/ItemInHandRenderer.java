@@ -38,7 +38,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public class ItemInHandRenderer {
+// MODIFIED for porting: iris injects this interface into the class (loom:injected_interfaces in fabric.mod.json)
+public class ItemInHandRenderer implements net.irisshaders.iris.mixinterface.ItemInHandInterface {
     private static final RenderType MAP_BACKGROUND = RenderTypes.text(Identifier.withDefaultNamespace("textures/map/map_background.png"));
     private static final RenderType MAP_BACKGROUND_CHECKERBOARD = RenderTypes.text(
         Identifier.withDefaultNamespace("textures/map/map_background_checkerboard.png")
@@ -115,6 +116,35 @@ public class ItemInHandRenderer {
     private static final float BOW_MIN_SHAKE_CHARGE = 0.1F;
     private final Minecraft minecraft;
     private final MapRenderState mapRenderState = new MapRenderState();
+    // MODIFIED for porting: iris MixinItemInHandRenderer @Unique field (its ItemInHandInterface implementation)
+    private net.irisshaders.iris.pathways.HandRenderer iris$customRenderer;
+
+    @Override
+    public void iris$renderHandsWithCustomRenderer(
+        final net.irisshaders.iris.pathways.HandRenderer handRenderer,
+        final float tickDelta,
+        final PoseStack poseStack,
+        final net.minecraft.client.renderer.SubmitNodeStorage submitNodeCollector,
+        final @org.jspecify.annotations.Nullable LocalPlayer player,
+        final int packedLightCoords
+    ) {
+        this.iris$customRenderer = handRenderer;
+        this.submitHandsWithItems(tickDelta, poseStack, submitNodeCollector, player, packedLightCoords);
+        this.iris$customRenderer = null;
+    }
+
+    @Override
+    public boolean iris$isAnyHandTranslucent() {
+        return net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isHandTranslucent(this.mainHandItem)
+            || net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isHandTranslucent(this.offHandItem);
+    }
+
+    @Override
+    public boolean iris$isAnyHandSolid() {
+        return !(net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isHandTranslucent(this.mainHandItem)
+            && net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isHandTranslucent(this.offHandItem));
+    }
+
     private ItemStack mainHandItem = ItemStack.EMPTY;
     private ItemStack offHandItem = ItemStack.EMPTY;
     private float mainHandHeight;
@@ -393,6 +423,11 @@ public class ItemInHandRenderer {
                 lightCoords
             );
         }
+
+        // MODIFIED for porting: was iris's MixinItemInHandRenderer#iris$wrapHand2 (@Inject RETURN)
+        if (this.iris$customRenderer != null) {
+            this.iris$customRenderer.endRender();
+        }
     }
 
     @VisibleForTesting
@@ -440,6 +475,14 @@ public class ItemInHandRenderer {
         final SubmitNodeCollector submitNodeCollector,
         final int lightCoords
     ) {
+        // MODIFIED for porting: was iris's MixinItemInHandRenderer#iris$skipTranslucentHands (@Inject HEAD, cancellable) - iris
+        // draws the hands in two passes (solid and translucent), so each pass has to skip the items that belong to the other.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && net.irisshaders.iris.Iris.isPackInUseQuick()
+            && net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isRenderingSolid() == net.irisshaders.iris.pathways.HandRenderer.INSTANCE.isHandTranslucent(itemStack)) {
+            return;
+        }
+
         if (!player.isScoping()) {
             boolean isMainHand = hand == InteractionHand.MAIN_HAND;
             HumanoidArm arm = isMainHand ? player.getMainArm() : player.getMainArm().getOpposite();

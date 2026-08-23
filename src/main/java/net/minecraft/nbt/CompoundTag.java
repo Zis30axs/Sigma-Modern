@@ -50,7 +50,8 @@ public final class CompoundTag implements Tag {
 
         private static CompoundTag loadCompound(final DataInput input, final NbtAccounter accounter) throws IOException {
             accounter.accountBytes(48L);
-            Map<String, Tag> values = Maps.newHashMap();
+            // MODIFIED for porting: lithium alloc.nbt CompoundTagMixin$Type#useFasterCollection
+            Map<String, Tag> values = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
 
             byte tagType;
             while ((tagType = input.readByte()) != 0) {
@@ -159,12 +160,14 @@ public final class CompoundTag implements Tag {
     };
     private final Map<String, Tag> tags;
 
-    CompoundTag(final Map<String, Tag> tags) {
+    public CompoundTag(final Map<String, Tag> tags) { // MODIFIED for porting: lithium.accesswidener widened access
         this.tags = tags;
     }
 
     public CompoundTag() {
-        this(new HashMap<>());
+        // MODIFIED for porting: lithium alloc.nbt CompoundTagMixin#useFasterCollection - Object2ObjectOpenHashMap reduces
+        // NBT memory consumption and iterates faster than HashMap.
+        this(new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>());
     }
 
     @Override
@@ -392,7 +395,8 @@ public final class CompoundTag implements Tag {
     }
 
     public CompoundTag copy() {
-        HashMap<String, Tag> newTags = new HashMap<>();
+        // MODIFIED for porting: lithium alloc.nbt CompoundTagMixin#copy (see useFasterCollection above)
+        Map<String, Tag> newTags = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
         this.tags.forEach((key, tag) -> newTags.put(key, tag.copy()));
         return new CompoundTag(newTags);
     }

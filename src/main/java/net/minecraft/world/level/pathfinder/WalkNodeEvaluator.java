@@ -517,7 +517,7 @@ public class WalkNodeEvaluator extends NodeEvaluator {
         return blockPathType;
     }
 
-    protected static PathType getPathTypeFromState(final BlockGetter level, final BlockPos pos) {
+    public static PathType getPathTypeFromState(final BlockGetter level, final BlockPos pos) { // MODIFIED for porting: lithium.accesswidener widened access
         BlockState blockState = level.getBlockState(pos);
         Block block = blockState.getBlock();
         if (blockState.isAir()) {

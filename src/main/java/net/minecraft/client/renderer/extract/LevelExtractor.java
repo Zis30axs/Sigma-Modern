@@ -68,7 +68,17 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
+// MODIFIED for porting: sodium core.render.world LevelExtractorMixin. Terrain culling, chunk invalidation, the block
+// entity extraction and the terrain statistics are all forwarded to SodiumWorldRenderer.
 public class LevelExtractor implements ResourceManagerReloadListener {
+    // MODIFIED for porting: sodium core.render.world LevelExtractorMixin @Unique field
+    private net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer sodium$renderer;
+
+    // MODIFIED for porting: sodium core.render.world LevelExtractorMixin#checkRenderer
+    private void sodium$checkRenderer() {
+        this.sodium$renderer = ((net.caffeinemc.mods.sodium.client.world.LevelRendererExtension)net.minecraft.client.Minecraft.getInstance().levelRenderer).sodium$getWorldRenderer();
+    }
+
     private static final float CHUNK_VISIBILITY_THRESHOLD = 0.3F;
     private final Minecraft minecraft;
     private final LevelRenderer levelRenderer;
@@ -93,6 +103,8 @@ public class LevelExtractor implements ResourceManagerReloadListener {
     }
 
     public void extract(final DeltaTracker deltaTracker, final Camera camera, final float deltaPartialTick) {
+        // MODIFIED for porting: sodium core.render.world LevelExtractorMixin#sodium$setRenderer (HEAD)
+        this.sodium$checkRenderer();
         if (this.minecraft.options.getEffectiveRenderDistance() != this.lastViewDistance) {
             this.allChanged();
         }
@@ -125,9 +137,13 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         } else if (camera.getCapturedFrustum() == null) {
             double camRotX = Math.floor(camera.xRot() / 2.0F);
             double camRotY = Math.floor(camera.yRot() / 2.0F);
+            // MODIFIED for porting: sodium core.render.world LevelExtractorMixin#cullTerrain (injected before the
+            // consumeFrustumUpdate call) - the terrain setup phase is redirected to sodium's renderer.
+            this.sodium$cullTerrain(camera, cullFrustum);
             if (this.levelRenderer.sectionOcclusionGraph().consumeFrustumUpdate() || camRotX != this.prevCamRotX || camRotY != this.prevCamRotY) {
                 profiler.popPush("applyFrustum");
-                this.applyFrustum(cullFrustum);
+                // MODIFIED for porting: sodium core.render.world LevelExtractorMixin#sodium$cancel (@Redirect of
+                // applyFrustum) - the vanilla visible-section list is not used any more.
                 this.prevCamRotX = camRotX;
                 this.prevCamRotY = camRotY;
             }
@@ -229,7 +245,16 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         );
         EntityRenderDispatcher entityRenderDispatcher = this.levelRenderer.entityRenderDispatcher();
 
-        for (Entity entity : this.level.entitiesForRendering()) {
+        // MODIFIED for porting: was iris's MixinLevelRenderer_SkipRendering#skipRenderEntities (@WrapOperation around
+        // ClientLevel#entitiesForRendering) - a pipeline can skip all rendering entirely. Upstream's trailing
+        // "// TODO IMS 24w35a block entities" note means block entities are deliberately not covered yet.
+        Iterable<Entity> irisEntities = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                && net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable() instanceof net.irisshaders.iris.pipeline.IrisRenderingPipeline irisPipeline
+                && irisPipeline.skipAllRendering()
+            ? java.util.Collections.emptyList()
+            : this.level.entitiesForRendering();
+
+        for (Entity entity : irisEntities) {
             if (this.isEntityVisible(entity, frustum, camX, camY, camZ)
                 && (entity != camera.entity() || camera.isDetached() || camera.entity() instanceof LivingEntity && ((LivingEntity)camera.entity()).isSleeping())
                 && (!(entity instanceof LocalPlayer) || camera.entity() == entity)) {
@@ -264,7 +289,35 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         return this.levelRenderer.entityRenderDispatcher().extractEntity(entity, partialTickTime);
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#extractVisibleBlockEntities (HEAD, cancellable) -
+     * sodium tracks the visible block entities itself.
+     */
     private void extractVisibleBlockEntities(final Camera camera, final float deltaPartialTick, final LevelRenderState levelRenderState) {
+        this.sodium$renderer.extractBlockEntities(camera, deltaPartialTick, this.level.destructionProgress(), levelRenderState);
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's core.render.world LevelExtractorMixin#cullTerrain.
+     */
+    private void sodium$cullTerrain(final Camera camera, final Frustum frustum) {
+        net.caffeinemc.mods.sodium.client.render.viewport.Viewport viewport = ((net.caffeinemc.mods.sodium.client.render.viewport.ViewportProvider)frustum).sodium$createViewport();
+        boolean updateChunksImmediately = net.caffeinemc.mods.sodium.client.util.FlawlessFrames.isActive();
+        boolean useOcclusionCulling = this.levelRenderState.cameraRenderState.smartCull;
+        this.sodium$renderer
+            .setupTerrain(
+                camera,
+                viewport,
+                ((net.caffeinemc.mods.sodium.client.util.FogStorage)net.minecraft.client.Minecraft.getInstance().gameRenderer).sodium$getFogParameters(),
+                useOcclusionCulling,
+                updateChunksImmediately,
+                ((net.caffeinemc.mods.sodium.mixin.core.render.world.FrustumAccessor)frustum).sodium$getMatrix()
+            );
+    }
+
+    // MODIFIED for porting: original vanilla body of extractVisibleBlockEntities, replaced above
+    @SuppressWarnings("unused")
+    private void sodium$vanillaExtractVisibleBlockEntities(final Camera camera, final float deltaPartialTick, final LevelRenderState levelRenderState) {
         Vec3 cameraPos = camera.position();
         double camX = cameraPos.x();
         double camY = cameraPos.y();
@@ -385,12 +438,41 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         return !camera.isPanoramicMode() && this.minecraft.player != null;
     }
 
+    /**
+     * MODIFIED for porting: iris fabulous MixinDisableFabulousGraphics @Unique method - fabulous graphics (improved
+     * transparency) is incompatible with shader packs, so it is switched off whenever shaders are on.
+     */
+    private static void iris$disableFabulousGraphics() {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return;
+        }
+
+        net.minecraft.client.Options options = net.minecraft.client.Minecraft.getInstance().options;
+
+        if (!net.irisshaders.iris.Iris.getIrisConfig().areShadersEnabled()) {
+            // Nothing to do here, shaders are disabled.
+            return;
+        }
+
+        if (options.improvedTransparency().get()) {
+            options.improvedTransparency().set(false);
+            options.graphicsPreset().set(net.minecraft.client.GraphicsPreset.CUSTOM);
+        }
+    }
+
     @Override
     public void onResourceManagerReload(final ResourceManager resourceManager) {
+        // MODIFIED for porting: iris fabulous MixinDisableFabulousGraphics#iris$disableFabulousGraphicsOnResourceReload (HEAD)
+        iris$disableFabulousGraphics();
         this.shouldResetSkyRenderer = true;
     }
 
     public void setLevel(final @Nullable ClientLevel level) {
+        // MODIFIED for porting: sodium core.render.world LevelExtractorMixin#sodium$setRenderer (RETURN of setLevel). It is
+        // done first here because the vanilla body below has no other exit path and the renderer must know the level before
+        // anything else uses it.
+        this.sodium$checkRenderer();
+        this.sodium$renderer.setLevel(level);
         this.level = level;
         if (level != null) {
             this.allChanged();
@@ -404,6 +486,9 @@ public class LevelExtractor implements ResourceManagerReloadListener {
     }
 
     public void allChanged() {
+        // MODIFIED for porting: iris fabulous MixinDisableFabulousGraphics#iris$disableFabulousGraphicsOnLevelRendererReload
+        // (@Inject HEAD) - this runs whenever the user changes the graphics mode, so the change can still be reverted here.
+        iris$disableFabulousGraphics();
         if (this.level != null) {
             this.level.clearTintCaches();
             Options options = this.minecraft.options;
@@ -424,7 +509,21 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         this.setBlockDirty(pos, (updateFlags & 8) != 0);
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#setBlockDirty (@Overwrite) - redirect chunk updates
+     * to sodium's renderer.
+     */
     private void setBlockDirty(final BlockPos pos, final boolean playerChanged) {
+        this.sodium$checkRenderer();
+        this.sodium$renderer
+            .scheduleRebuildForBlockArea(
+                pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1, pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1, playerChanged
+            );
+    }
+
+    // MODIFIED for porting: original vanilla body of setBlockDirty(BlockPos, boolean), replaced above
+    @SuppressWarnings("unused")
+    private void sodium$vanillaSetBlockDirty(final BlockPos pos, final boolean playerChanged) {
         for (int z = pos.getZ() - 1; z <= pos.getZ() + 1; z++) {
             for (int x = pos.getX() - 1; x <= pos.getX() + 1; x++) {
                 for (int y = pos.getY() - 1; y <= pos.getY() + 1; y++) {
@@ -434,7 +533,18 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#setBlocksDirty (@Overwrite) - redirect chunk updates
+     * to sodium's renderer.
+     */
     public void setBlocksDirty(final int x0, final int y0, final int z0, final int x1, final int y1, final int z1) {
+        this.sodium$checkRenderer();
+        this.sodium$renderer.scheduleRebuildForBlockArea(x0, y0, z0, x1, y1, z1, false);
+    }
+
+    // MODIFIED for porting: original vanilla body of setBlocksDirty, replaced above
+    @SuppressWarnings("unused")
+    private void sodium$vanillaSetBlocksDirty(final int x0, final int y0, final int z0, final int x1, final int y1, final int z1) {
         for (int z = z0 - 1; z <= z1 + 1; z++) {
             for (int x = x0 - 1; x <= x1 + 1; x++) {
                 for (int y = y0 - 1; y <= y1 + 1; y++) {
@@ -450,8 +560,14 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#setSectionDirtyWithNeighbors (@Overwrite) - redirect
+     * chunk updates to sodium's renderer.
+     */
     public void setSectionDirtyWithNeighbors(final int sectionX, final int sectionY, final int sectionZ) {
-        this.setSectionRangeDirty(sectionX - 1, sectionY - 1, sectionZ - 1, sectionX + 1, sectionY + 1, sectionZ + 1);
+        this.sodium$checkRenderer();
+        this.sodium$renderer
+            .scheduleRebuildForChunks(sectionX - 1, sectionY - 1, sectionZ - 1, sectionX + 1, sectionY + 1, sectionZ + 1, false);
     }
 
     public void setSectionRangeDirty(
@@ -470,28 +586,41 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         this.setSectionDirty(sectionX, sectionY, sectionZ, false);
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#setSectionDirty (@Overwrite) - redirect chunk
+     * updates to sodium's renderer.
+     */
     private void setSectionDirty(final int sectionX, final int sectionY, final int sectionZ, final boolean playerChanged) {
-        this.sectionUpdateTracker.setDirty(sectionX, sectionY, sectionZ, playerChanged);
+        this.sodium$checkRenderer();
+        this.sodium$renderer.scheduleRebuildForChunk(sectionX, sectionY, sectionZ, playerChanged);
     }
 
     public Gizmos.TemporaryCollection collectPerFrameMainThreadGizmos() {
         return Gizmos.withCollector(this.mainThreadGizmos);
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#countRenderedSections (@Overwrite) - redirect to
+     * sodium's renderer.
+     */
     public int countRenderedSections() {
-        int rendered = 0;
-
-        for (SectionRenderDispatcher.RenderSection section : this.levelRenderer.visibleSections()) {
-            if (section.getSectionMesh().hasRenderableLayers()) {
-                rendered++;
-            }
-        }
-
-        return rendered;
+        this.sodium$checkRenderer();
+        return this.sodium$renderer.getVisibleChunkCount();
     }
 
     @VisibleForDebug
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelExtractorMixin#sectionStatistics (@Overwrite) - replace the debug
+     * string with sodium's own.
+     */
     public @Nullable String sectionStatistics() {
+        this.sodium$checkRenderer();
+        return this.sodium$renderer.getChunksDebugString();
+    }
+
+    // MODIFIED for porting: original vanilla body of sectionStatistics, replaced above
+    @SuppressWarnings("unused")
+    private @Nullable String sodium$vanillaSectionStatistics() {
         ViewArea viewArea = this.levelRenderer.viewArea();
         if (viewArea == null) {
             return null;

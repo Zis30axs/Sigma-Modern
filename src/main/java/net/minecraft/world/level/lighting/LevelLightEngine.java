@@ -30,6 +30,11 @@ public class LevelLightEngine implements LightEventListener {
 
     @Override
     public void checkBlock(final BlockPos pos) {
+        // MODIFIED for porting: was sodium-extra's light_updates MixinLevelLightEngine#checkBlock (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.LIGHT_UPDATES && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.lightUpdates) {
+            return;
+        }
+
         if (this.blockEngine != null) {
             this.blockEngine.checkBlock(pos);
         }
@@ -53,6 +58,13 @@ public class LevelLightEngine implements LightEventListener {
 
         if (this.skyEngine != null) {
             count += this.skyEngine.runLightUpdates();
+        }
+
+        // MODIFIED for porting: was sodium-extra's light_updates MixinLevelLightEngine#doLightUpdates
+        // (@Inject RETURN, cancellable) - the updates above still run, only the reported count is forced to zero, exactly as
+        // the injection did.
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.LIGHT_UPDATES && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.lightUpdates) {
+            return 0;
         }
 
         return count;

@@ -92,6 +92,11 @@ public class Goat extends Animal {
         this.getNavigation().setCanFloat(true);
         this.setPathfindingMalus(PathType.POWDER_SNOW, -1.0F);
         this.setPathfindingMalus(PathType.ON_TOP_OF_POWDER_SNOW, -1.0F);
+        // MODIFIED for porting: lithium ai.useless_sensors.goat_item_sensor GoatMixin#disableItemSensor.
+        // NEAREST_VISIBLE_WANTED_ITEM is never used by the goat and is not saved, so not producing it saves a bit of work.
+        if (!this.level().isClientSide()) {
+            net.caffeinemc.mods.lithium.common.ai.brain.SensorHelper.disableSensor(this, net.minecraft.world.entity.ai.sensing.SensorType.NEAREST_ITEMS);
+        }
     }
 
     public ItemStack createHorn() {

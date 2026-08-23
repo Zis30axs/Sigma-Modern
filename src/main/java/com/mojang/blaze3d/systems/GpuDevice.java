@@ -21,8 +21,22 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class GpuDevice {
+// MODIFIED for porting: implements sodium's GpuDeviceAccessor (mixin.core.GpuDeviceAccessor)
+public class GpuDevice implements net.caffeinemc.mods.sodium.mixin.core.GpuDeviceAccessor,
+    net.irisshaders.iris.mixin.GpuDeviceAccessor { // MODIFIED for porting: iris GpuDeviceAccessor
+    // MODIFIED for porting: was sodium's GpuDeviceAccessor @Accessor("backend")
+    @Override
+    public GpuDeviceBackend sodium$getBackend() {
+        return this.backend;
+    }
+
     private final GpuDeviceBackend backend;
+
+    // MODIFIED for porting: was iris's GpuDeviceAccessor @Accessor("backend")
+    @Override
+    public GpuDeviceBackend getBackend() {
+        return this.backend;
+    }
     private final Runnable criticalShaderLoader;
     private final @Nullable TracyGpuProfiler profiler;
 

@@ -127,7 +127,8 @@ public class Stitcher<T extends Stitcher.Entry> {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record Holder<T extends Stitcher.Entry>(T entry, int width, int height) {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public record Holder<T extends Stitcher.Entry>(T entry, int width, int height) {
     }
 
     @OnlyIn(Dist.CLIENT)

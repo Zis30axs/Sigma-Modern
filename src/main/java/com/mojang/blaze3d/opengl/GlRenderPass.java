@@ -23,13 +23,18 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.PointerBuffer;
 
 @OnlyIn(Dist.CLIENT)
-class GlRenderPass implements RenderPassBackend {
+public class GlRenderPass implements RenderPassBackend, net.caffeinemc.mods.sodium.mixin.core.GlRenderPassAccessor { // MODIFIED for porting: sodium GlRenderPassAccessor
     public static final boolean VALIDATION = SharedConstants.IS_RUNNING_IN_IDE;
     private final GlCommandEncoder encoder;
     private final GlDevice device;
     private final boolean hasDepthTexture;
     private final ScissorState defaultScissorState;
     protected @Nullable GlRenderPipeline pipeline;
+    // MODIFIED for porting: was sodium's GlRenderPassAccessor @Accessor
+    @Override
+    public com.mojang.blaze3d.opengl.GlRenderPipeline getPipeline() {
+        return this.pipeline;
+    }
     protected final @Nullable GpuBufferSlice[] vertexBuffers = new GpuBufferSlice[16];
     protected boolean vertexBufferDirty = true;
     protected @Nullable GpuBuffer indexBuffer;
@@ -205,6 +210,6 @@ class GlRenderPass implements RenderPassBackend {
     }
 
     @OnlyIn(Dist.CLIENT)
-    protected record TextureViewAndSampler(GlTextureView view, GlSampler sampler) {
+    public record TextureViewAndSampler(GlTextureView view, GlSampler sampler) {
     }
 }

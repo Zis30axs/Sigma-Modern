@@ -69,7 +69,9 @@ public class GateBehavior<E extends LivingEntity> implements BehaviorControl<E> 
         if (this.hasRequiredMemories(body)) {
             this.status = Behavior.Status.RUNNING;
             this.orderPolicy.apply(this.behaviors);
-            this.runningPolicy.apply(this.behaviors.stream(), level, body, timestamp);
+            // MODIFIED for porting: lithium ai.task.replace_streams GateBehaviorMixin#tryStart (@WrapOperation) - the
+            // running policies implement a stream-free variant. RunningPolicy is an enum, so every instance has it.
+            this.runningPolicy.lithium$apply(this.behaviors, level, body, timestamp);
             return true;
         } else {
             return false;
@@ -78,17 +80,39 @@ public class GateBehavior<E extends LivingEntity> implements BehaviorControl<E> 
 
     @Override
     public final void tickOrStop(final ServerLevel level, final E body, final long timestamp) {
-        this.behaviors.stream().filter(goal -> goal.getStatus() == Behavior.Status.RUNNING).forEach(goal -> goal.tickOrStop(level, body, timestamp));
-        if (this.behaviors.stream().noneMatch(g -> g.getStatus() == Behavior.Status.RUNNING)) {
+        // MODIFIED for porting: lithium ai.task.replace_streams GateBehaviorMixin#tickOrStop (@Overwrite) - replace the
+        // stream code (which also walked the list twice) with a single traditional iteration.
+        boolean hasOneTaskRunning = false;
+
+        for (BehaviorControl<? super E> task : this.behaviors) {
+            if (task.getStatus() == Behavior.Status.RUNNING) {
+                task.tickOrStop(level, body, timestamp);
+                hasOneTaskRunning |= task.getStatus() == Behavior.Status.RUNNING;
+            }
+        }
+
+        if (!hasOneTaskRunning) {
             this.doStop(level, body, timestamp);
         }
     }
 
     @Override
     public final void doStop(final ServerLevel level, final E body, final long timestamp) {
+        // MODIFIED for porting: lithium ai.task.replace_streams GateBehaviorMixin#doStop (@Overwrite) - replace stream code
+        // with traditional iteration
         this.status = Behavior.Status.STOPPED;
-        this.behaviors.stream().filter(goal -> goal.getStatus() == Behavior.Status.RUNNING).forEach(goal -> goal.doStop(level, body, timestamp));
-        this.exitErasedMemories.forEach(body.getBrain()::eraseMemory);
+
+        for (BehaviorControl<? super E> task : this.behaviors) {
+            if (task.getStatus() == Behavior.Status.RUNNING) {
+                task.doStop(level, body, timestamp);
+            }
+        }
+
+        net.minecraft.world.entity.ai.Brain<?> brain = body.getBrain();
+
+        for (MemoryModuleType<?> module : this.exitErasedMemories) {
+            brain.eraseMemory(module);
+        }
     }
 
     @Override
@@ -116,13 +140,27 @@ public class GateBehavior<E extends LivingEntity> implements BehaviorControl<E> 
         }
     }
 
-    public enum RunningPolicy {
+    // MODIFIED for porting: lithium ai.task.replace_streams RunningPolicyRunOneMixin / RunningPolicyTryAllMixin target
+    // the anonymous subclasses GateBehavior$RunningPolicy$1 and $2, i.e. the two enum constant bodies below.
+    public enum RunningPolicy implements net.caffeinemc.mods.lithium.common.ai.brain.RunningPolicyNoStream {
         RUN_ONE {
             @Override
             public <E extends LivingEntity> void apply(
                 final Stream<BehaviorControl<? super E>> behaviors, final ServerLevel level, final E body, final long timestamp
             ) {
                 behaviors.filter(goal -> goal.getStatus() == Behavior.Status.STOPPED).filter(goal -> goal.tryStart(level, body, timestamp)).findFirst();
+            }
+
+            // MODIFIED for porting: lithium ai.task.replace_streams RunningPolicyRunOneMixin
+            @Override
+            public <E extends LivingEntity> void lithium$apply(
+                final ShufflingList<BehaviorControl<? super E>> behaviors, final ServerLevel level, final E body, final long timestamp
+            ) {
+                for (BehaviorControl<? super E> behaviorControl : behaviors) {
+                    if (behaviorControl.getStatus() == Behavior.Status.STOPPED && behaviorControl.tryStart(level, body, timestamp)) {
+                        return;
+                    }
+                }
             }
         },
         TRY_ALL {
@@ -131,6 +169,18 @@ public class GateBehavior<E extends LivingEntity> implements BehaviorControl<E> 
                 final Stream<BehaviorControl<? super E>> behaviors, final ServerLevel level, final E body, final long timestamp
             ) {
                 behaviors.filter(goal -> goal.getStatus() == Behavior.Status.STOPPED).forEach(goal -> goal.tryStart(level, body, timestamp));
+            }
+
+            // MODIFIED for porting: lithium ai.task.replace_streams RunningPolicyTryAllMixin
+            @Override
+            public <E extends LivingEntity> void lithium$apply(
+                final ShufflingList<BehaviorControl<? super E>> behaviors, final ServerLevel level, final E body, final long timestamp
+            ) {
+                for (BehaviorControl<? super E> behaviorControl : behaviors) {
+                    if (behaviorControl.getStatus() == Behavior.Status.STOPPED) {
+                        behaviorControl.tryStart(level, body, timestamp);
+                    }
+                }
             }
         };
 

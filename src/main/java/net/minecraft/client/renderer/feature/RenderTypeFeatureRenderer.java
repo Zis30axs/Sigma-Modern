@@ -69,8 +69,19 @@ public abstract class RenderTypeFeatureRenderer<Submit extends SubmitNode> imple
             this.canReorder = canReorder;
         }
 
+        /**
+         * MODIFIED for porting: was iris's entity_render_context FixRenderTypeIdentityMixin#iris$replaceEqualityCheck
+         * (@ModifyExpressionValue on the {@code this.lastRenderType != ?} expression) - iris wraps render types
+         * (OuterWrappedRenderType), so reference inequality is not enough: two wrappers of the same type must also be compared
+         * by class and by equals, or geometry with different iris state would be consolidated into one draw.
+         */
         public VertexConsumer getVertexBuilder(final RenderType renderType) {
-            if (this.lastDraw == null || this.lastRenderType != renderType || !renderType.canConsolidateConsecutiveGeometry()) {
+            boolean irisDifferentRenderType = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                ? this.lastRenderType == null
+                    || !this.lastRenderType.getClass().equals(renderType.getClass())
+                    || !java.util.Objects.equals(this.lastRenderType, renderType)
+                : this.lastRenderType != renderType;
+            if (this.lastDraw == null || irisDifferentRenderType || !renderType.canConsolidateConsecutiveGeometry()) {
                 this.lastDraw = this.getOrAddDraw(renderType);
                 this.lastRenderType = renderType;
             }

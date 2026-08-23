@@ -26,12 +26,15 @@ import org.jspecify.annotations.Nullable;
 public class ItemModelGenerator implements UnbakedModel {
     public static final Identifier GENERATED_ITEM_MODEL_ID = Identifier.withDefaultNamespace("builtin/generated");
     public static final List<String> LAYERS = List.of("layer0", "layer1", "layer2", "layer3", "layer4");
-    private static final float MIN_Z = 7.5F;
-    private static final float MAX_Z = 8.5F;
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public static final float MIN_Z = 7.5F;
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public static final float MAX_Z = 8.5F;
     private static final TextureSlots.Data TEXTURE_SLOTS = new TextureSlots.Data.Builder().addReference("particle", "layer0").build();
     private static final CuboidFace.UVs SOUTH_FACE_UVS = new CuboidFace.UVs(0.0F, 0.0F, 16.0F, 16.0F);
     private static final CuboidFace.UVs NORTH_FACE_UVS = new CuboidFace.UVs(16.0F, 0.0F, 0.0F, 16.0F);
-    private static final float UV_SHRINK = 0.1F;
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public static final float UV_SHRINK = 0.1F;
 
     @Override
     public TextureSlots.Data textureSlots() {
@@ -90,7 +93,19 @@ public class ItemModelGenerator implements UnbakedModel {
         bakeSideFaces(builder, interner, modelState, materialInfo);
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.model ItemModelGeneratorMixin#improvedBakeSideFaces (@WrapMethod) - sodium
+     * merges the generated side faces instead of emitting one quad per pixel edge.
+     */
     private static void bakeSideFaces(
+        final QuadCollection.Builder builder, final ModelBaker.Interner interner, final ModelState modelState, final BakedQuad.MaterialInfo materialInfo
+    ) {
+        net.caffeinemc.mods.sodium.client.render.immediate.model.ImprovedItemModelBuilder.bakeSideQuads(builder, interner, materialInfo, modelState);
+    }
+
+    // MODIFIED for porting: original vanilla body of bakeSideFaces, replaced above
+    @SuppressWarnings("unused")
+    private static void sodium$vanillaBakeSideFaces(
         final QuadCollection.Builder builder, final ModelBaker.Interner interner, final ModelState modelState, final BakedQuad.MaterialInfo materialInfo
     ) {
         SpriteContents sprite = materialInfo.sprite().contents();
@@ -204,7 +219,8 @@ public class ItemModelGenerator implements UnbakedModel {
         }
     }
 
-    private static boolean isTransparent(final SpriteContents sprite, final int frame, final int x, final int y, final int width, final int height) {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public static boolean isTransparent(final SpriteContents sprite, final int frame, final int x, final int y, final int width, final int height) {
         return x >= 0 && y >= 0 && x < width && y < height ? sprite.isTransparent(frame, x, y) : true;
     }
 
@@ -220,7 +236,8 @@ public class ItemModelGenerator implements UnbakedModel {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private enum SideDirection {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public enum SideDirection {
         UP(Direction.UP),
         DOWN(Direction.DOWN),
         LEFT(Direction.EAST),
@@ -236,7 +253,8 @@ public class ItemModelGenerator implements UnbakedModel {
             return this.direction;
         }
 
-        private boolean isHorizontal() {
+        // MODIFIED for porting: sodium-common.accesswidener widened access
+        public boolean isHorizontal() {
             return this == DOWN || this == UP;
         }
     }

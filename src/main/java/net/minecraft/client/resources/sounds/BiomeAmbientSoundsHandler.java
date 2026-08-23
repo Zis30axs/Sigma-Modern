@@ -21,7 +21,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class BiomeAmbientSoundsHandler implements AmbientSoundHandler {
+public class BiomeAmbientSoundsHandler
+    implements AmbientSoundHandler, net.irisshaders.iris.mixinterface.BiomeAmbienceInterface { // MODIFIED for porting: iris MixinBiomeAmbientSoundsHandler
     private static final int LOOP_SOUND_CROSS_FADE_TIME = 40;
     private static final float SKY_MOOD_RECOVERY_RATE = 0.001F;
     private final LocalPlayer player;
@@ -29,6 +30,17 @@ public class BiomeAmbientSoundsHandler implements AmbientSoundHandler {
     private final RandomSource random;
     private final Object2ObjectArrayMap<Holder<SoundEvent>, BiomeAmbientSoundsHandler.LoopSoundInstance> loopSounds = new Object2ObjectArrayMap<>();
     private float moodiness;
+    /**
+     * MODIFIED for porting: iris MixinBiomeAmbientSoundsHandler @Unique field. This tracks the same decay as
+     * {@link #moodiness} but is never reset when the mood sound plays, so shader packs get a continuous "cave darkness"
+     * value.
+     */
+    private float iris$constantMoodiness;
+
+    @Override
+    public float getConstantMood() {
+        return this.iris$constantMoodiness;
+    }
     private @Nullable Holder<SoundEvent> previousLoopSound;
 
     public BiomeAmbientSoundsHandler(final LocalPlayer player, final SoundManager soundManager) {
@@ -79,6 +91,20 @@ public class BiomeAmbientSoundsHandler implements AmbientSoundHandler {
                         this.player.getEyeY() + this.random.nextInt(searchSpan) - mood.blockSearchExtent(),
                         this.player.getZ() + this.random.nextInt(searchSpan) - mood.blockSearchExtent()
                     );
+                    // MODIFIED for porting: was iris's MixinBiomeAmbientSoundsHandler#calculateConstantMoodiness
+                    // (@Inject at the first INVOKE of Level#getBrightness inside this lambda, @Local BlockPos)
+                    if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                        int irisSkyBrightness = this.player.level().getBrightness(LightLayer.SKY, blockSamplingPos);
+                        if (irisSkyBrightness > 0) {
+                            this.iris$constantMoodiness -= (float)irisSkyBrightness / (float)15 * 0.001F;
+                        } else {
+                            this.iris$constantMoodiness -= (float)(this.player.level().getBrightness(LightLayer.BLOCK, blockSamplingPos) - 1)
+                                / (float)mood.tickDelay();
+                        }
+
+                        this.iris$constantMoodiness = Mth.clamp(this.iris$constantMoodiness, 0.0F, 1.0F);
+                    }
+
                     int skyBrightness = level.getBrightness(LightLayer.SKY, blockSamplingPos);
                     if (skyBrightness > 0) {
                         this.moodiness -= skyBrightness / 15.0F * 0.001F;

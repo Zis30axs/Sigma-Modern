@@ -24,18 +24,26 @@ public class GlStateManager {
     private static int numTextures = 0;
     private static final Plot PLOT_BUFFERS = TracyClient.createPlot("GPU Buffers");
     private static int numBuffers = 0;
-    private static final GlStateManager.BlendState[] BLEND = new GlStateManager.BlendState[8];
-    private static final GlStateManager.DepthState DEPTH = new GlStateManager.DepthState();
+    // MODIFIED for porting: widened for iris's GlStateManagerAccessor @Accessor("BLEND")
+    public static final GlStateManager.BlendState[] BLEND = new GlStateManager.BlendState[8];
+    // MODIFIED for porting: widened for iris's GlStateManagerAccessor @Accessor("DEPTH")
+    public static final GlStateManager.DepthState DEPTH = new GlStateManager.DepthState();
     private static final GlStateManager.CullState CULL = new GlStateManager.CullState();
     private static final GlStateManager.PolygonOffsetState POLY_OFFSET = new GlStateManager.PolygonOffsetState();
     private static final GlStateManager.ColorLogicState COLOR_LOGIC = new GlStateManager.ColorLogicState();
     private static final GlStateManager.ScissorState SCISSOR = new GlStateManager.ScissorState();
-    private static int activeTexture;
-    private static final int TEXTURE_COUNT = 12;
-    private static final GlStateManager.TextureState[] TEXTURES = IntStream.range(0, 12)
+    // MODIFIED for porting: widened for iris's GlStateManagerAccessor @Accessor("activeTexture")
+    public static int activeTexture;
+    // MODIFIED for porting: was iris's MixinGlStateManager#iris$increaseMaximumAllowedTextureUnits
+    // (@ModifyConstant on <clinit>, intValue 12 -> 128). Shader packs bind far more samplers than vanilla; OpenGL cannot be
+    // queried for the real limit here because RenderSystem is initialized too late.
+    private static final int TEXTURE_COUNT = 128;
+    // MODIFIED for porting: widened for iris's GlStateManagerAccessor @Accessor("TEXTURES")
+    public static final GlStateManager.TextureState[] TEXTURES = IntStream.range(0, TEXTURE_COUNT)
         .mapToObj(i -> new GlStateManager.TextureState())
         .toArray(GlStateManager.TextureState[]::new);
-    private static final @ColorTargetState.WriteMask int[] COLOR_MASK = new int[8];
+    // MODIFIED for porting: widened for iris's GlStateManagerAccessor @Accessor("COLOR_MASK")
+    public static final @ColorTargetState.WriteMask int[] COLOR_MASK = new int[8];
     private static int readFbo;
     private static int writeFbo;
 
@@ -73,6 +81,12 @@ public class GlStateManager {
     }
 
     public static void _depthMask(final boolean mask) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_DepthColorOverride#iris$depthMaskLock (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.gl.blending.DepthColorStorage.isDepthColorLocked()) {
+            net.irisshaders.iris.gl.blending.DepthColorStorage.deferDepthEnable(mask);
+            return;
+        }
+
         RenderSystem.assertOnRenderThread();
         if (mask != DEPTH.mask) {
             DEPTH.mask = mask;
@@ -80,17 +94,60 @@ public class GlStateManager {
         }
     }
 
+    // MODIFIED for porting: iris statelisteners MixinGlStateManager @Unique field plus its static initializer - iris
+    // registers a notifier so its uniform holders can react to blend function changes.
+    private static Runnable iris$blendFuncListener;
+
+    static {
+        net.irisshaders.iris.gl.state.StateUpdateNotifiers.blendFuncNotifier = listener -> iris$blendFuncListener = listener;
+    }
+
     public static void _disableBlend(int index) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_BlendOverride#iris$blendDisableLock (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.gl.blending.BlendModeStorage.isBlendLocked()) {
+            net.irisshaders.iris.gl.blending.BlendModeStorage.deferBlendModeToggle(false);
+            return;
+        }
+
         RenderSystem.assertOnRenderThread();
         BLEND[index].mode.disable();
     }
 
     public static void _enableBlend(int index) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_BlendOverride#iris$blendEnableLock (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.gl.blending.BlendModeStorage.isBlendLocked()) {
+            net.irisshaders.iris.gl.blending.BlendModeStorage.deferBlendModeToggle(true);
+            return;
+        }
+
         RenderSystem.assertOnRenderThread();
         BLEND[index].mode.enable();
     }
 
     public static void _blendFuncSeparate(final int srcRgb, final int dstRgb, final int srcAlpha, final int dstAlpha) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_BlendOverride#iris$blendFuncSeparateLock
+        // (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (net.irisshaders.iris.gl.blending.BlendModeStorage.isBlendLocked()) {
+                net.irisshaders.iris.gl.blending.BlendModeStorage.deferBlendFunc(srcRgb, dstRgb, srcAlpha, dstAlpha);
+                return;
+            }
+
+            if (net.irisshaders.iris.gl.blending.BlendModeStorage.isBlendUnknown()) {
+                BLEND[0].srcRgb = srcRgb;
+                BLEND[0].dstRgb = dstRgb;
+                BLEND[0].srcAlpha = srcAlpha;
+                BLEND[0].dstAlpha = dstAlpha;
+                glBlendFuncSeparate(srcRgb, dstRgb, srcAlpha, dstAlpha);
+                // MODIFIED for porting: iris statelisteners MixinGlStateManager#iris$onBlendFunc (@Inject RETURN)
+                if (iris$blendFuncListener != null) {
+                    iris$blendFuncListener.run();
+                }
+
+                return;
+            }
+        }
+
         RenderSystem.assertOnRenderThread();
         GlStateManager.BlendState firstBlend = BLEND[0];
         if (srcRgb != firstBlend.srcRgb || dstRgb != firstBlend.dstRgb || srcAlpha != firstBlend.srcAlpha || dstAlpha != firstBlend.dstAlpha) {
@@ -159,9 +216,30 @@ public class GlStateManager {
         return GL33C.glGetShaderi(shader, pname);
     }
 
+    // MODIFIED for porting: iris MixinGlStateManager_FramebufferBinding @Unique field
+    private static int iris$program;
+
     public static void _glUseProgram(final int program) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_FramebufferBinding#iris$avoidRedundantBind2
+        // (@Inject HEAD, cancellable) and MixinGlStateManager_DepthColorOverride#iris$resetTessellation (@Inject TAIL).
+        // Note that upstream's HEAD injection cancels but still runs the two statements after the cancel (mixin callbacks keep
+        // executing after ci.cancel()), so onProgramUse() and the field update happen either way.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            boolean irisRedundant = iris$program == 0 && program == 0;
+            net.irisshaders.iris.gl.IrisRenderSystem.onProgramUse();
+            iris$program = program;
+
+            if (irisRedundant) {
+                return;
+            }
+        }
+
         RenderSystem.assertOnRenderThread();
         GL33C.glUseProgram(program);
+        // MODIFIED for porting: was iris's MixinGlStateManager_DepthColorOverride#iris$resetTessellation (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.vertices.ImmediateState.usingTessellation = false;
+        }
     }
 
     public static int glCreateProgram() {
@@ -179,9 +257,47 @@ public class GlStateManager {
         GL33C.glLinkProgram(program);
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinUniform#iris$glGetUniformLocation (@Inject RETURN, cancellable). It tries to make
+     * texture unit 0 end up as the semantically default texture unit with iris's extended shaders. Upstream this lives in a
+     * mixin named after {@code Uniform} to avoid a conflict with a sodium mixin, but it always targeted this method.
+     */
     public static int _glGetUniformLocation(final int program, final CharSequence name) {
         RenderSystem.assertOnRenderThread();
-        return GL33C.glGetUniformLocation(program, name);
+        int returnValue = GL33C.glGetUniformLocation(program, name);
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return returnValue;
+        }
+
+        int location = returnValue;
+
+        if (location == -1 && (name.equals("Sampler0") || name.equals("u_BlockTex"))) {
+            location = _glGetUniformLocation(program, "tex");
+
+            if (location == -1) {
+                location = _glGetUniformLocation(program, "gtexture");
+
+                if (location == -1) {
+                    location = _glGetUniformLocation(program, "texture");
+
+                    // TODO: If a shader samples from *any* sampler with a name that isn't known, then it should act like sampler 0.
+                }
+            }
+        }
+
+        if (location == -1 && name.equals("Sampler1")) {
+            location = _glGetUniformLocation(program, "iris_overlay");
+        }
+
+        if (location == -1 && (name.equals("Sampler2") || name.equals("u_LightTex"))) {
+            location = _glGetUniformLocation(program, "lightmap");
+        }
+
+        if (returnValue == -1 && location != -1) {
+            return location;
+        }
+
+        return returnValue;
     }
 
     public static void _glUniform1i(final int location, final int v0) {
@@ -383,6 +499,14 @@ public class GlStateManager {
     }
 
     public static void _activeTexture(final int texture) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_FramebufferBinding#iris$checkActiveTexture (@Inject HEAD)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            int irisTex = texture - org.lwjgl.opengl.GL46C.GL_TEXTURE0;
+            if (irisTex < 0 || irisTex > 128) {
+                throw new IllegalArgumentException("Texture " + irisTex + " out of range");
+            }
+        }
+
         RenderSystem.assertOnRenderThread();
         if (activeTexture != texture - 33984) {
             activeTexture = texture - 33984;
@@ -406,7 +530,16 @@ public class GlStateManager {
         return GL33C.glGenTextures();
     }
 
+    /**
+     * MODIFIED for porting: was iris's texture MixinGlStateManager#iris$onDeleteTexture (@Inject TAIL) plus its @Unique helper.
+     */
     public static void _deleteTexture(final int id) {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.TextureTracker.INSTANCE.onDeleteTexture(id);
+            net.irisshaders.iris.pbr.TextureInfoCache.INSTANCE.onDeleteTexture(id);
+            net.irisshaders.iris.pbr.texture.PBRTextureManager.INSTANCE.onDeleteTexture(id);
+        }
+
         RenderSystem.assertOnRenderThread();
         GL33C.glDeleteTextures(id);
 
@@ -441,6 +574,11 @@ public class GlStateManager {
     ) {
         RenderSystem.assertOnRenderThread();
         GL33C.glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+        // MODIFIED for porting: was iris's texture MixinGlStateManager#iris$onTexImage2D (@Inject TAIL) - iris caches the
+        // dimensions/format of every texture so its PBR system can allocate matching normal/specular textures.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.TextureInfoCache.INSTANCE.onTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
+        }
     }
 
     public static void _texSubImage2D(
@@ -473,11 +611,34 @@ public class GlStateManager {
         GL33C.glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
     }
 
+    // MODIFIED for porting: sodium features.render.viewport GlStateManagerMixin @Unique fields
+    private static int sodium$lastViewportX;
+    private static int sodium$lastViewportY;
+    private static int sodium$lastViewportWidth;
+    private static int sodium$lastViewportHeight;
+
     public static void _viewport(final int x, final int y, final int width, final int height) {
+        // MODIFIED for porting: sodium features.render.viewport GlStateManagerMixin#skipRedundantViewport
+        // (@WrapWithCondition) - skip the driver call when the viewport did not change.
+        if (x == sodium$lastViewportX && y == sodium$lastViewportY && width == sodium$lastViewportWidth && height == sodium$lastViewportHeight) {
+            return;
+        }
+
+        sodium$lastViewportX = x;
+        sodium$lastViewportY = y;
+        sodium$lastViewportWidth = width;
+        sodium$lastViewportHeight = height;
         GL33C.glViewport(x, y, width, height);
     }
 
     public static void _colorMask(final @ColorTargetState.WriteMask int writeMask) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_DepthColorOverride#iris$colorMaskLock(int)
+        // (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.gl.blending.DepthColorStorage.isDepthColorLocked()) {
+            net.irisshaders.iris.gl.blending.DepthColorStorage.deferColorMask(writeMask);
+            return;
+        }
+
         RenderSystem.assertOnRenderThread();
 
         for (int i = 0; i < COLOR_MASK.length; i++) {
@@ -489,6 +650,13 @@ public class GlStateManager {
     }
 
     public static void _colorMask(final int index, final @ColorTargetState.WriteMask int writeMask) {
+        // MODIFIED for porting: was iris's MixinGlStateManager_DepthColorOverride#iris$colorMaskLock(int,int)
+        // (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.gl.blending.DepthColorStorage.isDepthColorLocked()) {
+            net.irisshaders.iris.gl.blending.DepthColorStorage.deferColorMask(index, writeMask);
+            return;
+        }
+
         RenderSystem.assertOnRenderThread();
         if (writeMask != COLOR_MASK[index]) {
             COLOR_MASK[index] = writeMask;
@@ -537,7 +705,14 @@ public class GlStateManager {
 
     public static void _drawElements(final int mode, final int count, final int type, final long indices) {
         RenderSystem.assertOnRenderThread();
-        GL33C.glDrawElements(mode, count, type, indices);
+        // MODIFIED for porting: was iris's MixinGlStateManager_DepthColorOverride#iris$modify (@Redirect on
+        // GL33C#glDrawElements) - a shader pack's tessellation shaders need GL_PATCHES instead of GL_TRIANGLES.
+        int effectiveMode = mode;
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && mode == org.lwjgl.opengl.GL43C.GL_TRIANGLES && net.irisshaders.iris.vertices.ImmediateState.usingTessellation) {
+            effectiveMode = org.lwjgl.opengl.GL43C.GL_PATCHES;
+        }
+
+        GL33C.glDrawElements(effectiveMode, count, type, indices);
     }
 
     public static void _drawArrays(final int mode, final int first, final int count) {
@@ -598,7 +773,8 @@ public class GlStateManager {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static class BlendState {
+// MODIFIED for porting: iris.accesswidener makes GlStateManager$BlendState accessible
+    public static class BlendState {
         public final GlStateManager.BooleanState mode = new GlStateManager.BooleanState(3042);
         public int srcRgb = 1;
         public int dstRgb = 0;
@@ -609,9 +785,18 @@ public class GlStateManager {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static class BooleanState {
+    // MODIFIED for porting: iris.accesswidener makes GlStateManager$BooleanState and its `enabled` field accessible, and
+    // iris's statelisteners BooleanStateAccessor reads that field.
+    public static class BooleanState implements net.irisshaders.iris.mixin.statelisteners.BooleanStateAccessor,
+        net.irisshaders.iris.gl.BooleanStateExtended { // MODIFIED for porting: iris MixinBooleanState
         private final int state;
         private boolean enabled;
+
+        // MODIFIED for porting: was iris's statelisteners BooleanStateAccessor @Accessor("enabled")
+        @Override
+        public boolean isEnabled() {
+            return this.enabled;
+        }
 
         public BooleanState(final int state) {
             this.state = state;
@@ -625,7 +810,30 @@ public class GlStateManager {
             this.setEnabled(true);
         }
 
+        // MODIFIED for porting: iris MixinBooleanState @Unique field (its BooleanStateExtended implementation) - set when
+        // iris changed the GL state behind GlStateManager's back, so the next setEnabled has to issue the call even though
+        // the tracked value did not change.
+        private boolean iris$stateUnknown;
+
+        @Override
+        public void setUnknownState() {
+            this.iris$stateUnknown = true;
+        }
+
         public void setEnabled(final boolean enabled) {
+            // MODIFIED for porting: was iris's MixinBooleanState#iris$setUnknownState (@Inject HEAD, cancellable)
+            if (this.iris$stateUnknown) {
+                this.enabled = enabled;
+                this.iris$stateUnknown = false;
+                if (enabled) {
+                    org.lwjgl.opengl.GL11.glEnable(this.state);
+                } else {
+                    org.lwjgl.opengl.GL11.glDisable(this.state);
+                }
+
+                return;
+            }
+
             RenderSystem.assertOnRenderThread();
             if (enabled != this.enabled) {
                 this.enabled = enabled;
@@ -650,7 +858,8 @@ public class GlStateManager {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static class DepthState {
+// MODIFIED for porting: iris.accesswidener makes GlStateManager$DepthState accessible
+    public static class DepthState {
         public final GlStateManager.BooleanState mode = new GlStateManager.BooleanState(2929);
         public boolean mask = true;
         public int func = 513;
@@ -669,7 +878,8 @@ public class GlStateManager {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static class TextureState {
+// MODIFIED for porting: iris.accesswidener makes GlStateManager$TextureState accessible
+    public static class TextureState {
         public int binding;
     }
 }

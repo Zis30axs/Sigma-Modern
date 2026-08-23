@@ -164,7 +164,10 @@ public abstract class Entity
     ItemOwner,
     SlotProvider,
     DebugValueSource,
-    TypedInstance<EntityType<?>> {
+    TypedInstance<EntityType<?>>,
+    net.caffeinemc.mods.lithium.common.world.in_world_tracking.MaybeInLevelObject, // MODIFIED for porting: lithium util.in_world_tracking.entity
+    net.caffeinemc.mods.lithium.mixin.block.hopper.EntityAccessor, // MODIFIED for porting: lithium block.hopper EntityAccessor
+    net.caffeinemc.mods.lithium.common.entity.pushable.FeetBlockCachingEntity { // MODIFIED for porting: lithium entity.collisions.unpushable_cramming
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final String TAG_ID = "id";
     public static final String TAG_UUID = "UUID";
@@ -294,6 +297,39 @@ public abstract class Entity
     private Vec3 lastKnownSpeed = Vec3.ZERO;
     private @Nullable Vec3 lastKnownPosition;
     private @Nullable BlockState inBlockState = null;
+
+    // MODIFIED for porting: was lithium's entity.collisions.unpushable_cramming EntityMixin
+    @Override
+    public @Nullable BlockState lithium$getCachedFeetBlockState() {
+        return this.inBlockState;
+    }
+
+    /**
+     * MODIFIED for porting: was lithium's entity.collisions.unpushable_cramming
+     * {@code Level/AbstractBoat/OldMinecartBehavior}Mixin#getOtherPushableEntities. When the predicate is lithium's own
+     * pushable predicate, the entity lookup can use the per-section cache of maybe-pushable entities instead of visiting
+     * every nearby entity.
+     */
+    public static java.util.List<net.minecraft.world.entity.Entity> lithium$getOtherPushableEntities(
+        final net.minecraft.world.level.Level world,
+        final net.minecraft.world.entity.@org.jspecify.annotations.Nullable Entity except,
+        final net.minecraft.world.phys.AABB box,
+        final java.util.function.Predicate<? super net.minecraft.world.entity.Entity> predicate
+    ) {
+        if (predicate == com.google.common.base.Predicates.<net.minecraft.world.entity.Entity>alwaysFalse()) {
+            return java.util.Collections.emptyList();
+        }
+
+        if (predicate instanceof net.caffeinemc.mods.lithium.common.entity.pushable.EntityPushablePredicate<?> entityPushablePredicate) {
+            net.minecraft.world.level.entity.EntitySectionStorage<net.minecraft.world.entity.Entity> cache = net.caffeinemc.mods.lithium.common.world.WorldHelper.getEntityCacheOrNull(world);
+            if (cache != null) {
+                return net.caffeinemc.mods.lithium.common.world.WorldHelper.getPushableEntities(world, cache, except, box, (net.caffeinemc.mods.lithium.common.entity.pushable.EntityPushablePredicate<? super net.minecraft.world.entity.Entity>)entityPushablePredicate);
+            }
+        }
+
+        return world.getEntities(except, box, predicate);
+    }
+
     public static final int MAX_MOVEMENTS_HANDELED_PER_TICK = 100;
     private final ArrayDeque<Entity.Movement> movementThisTick = new ArrayDeque<>(100);
     private final List<Entity.Movement> finalMovementsThisTick = new ObjectArrayList<>();
@@ -513,6 +549,8 @@ public abstract class Entity
         profiler.push("entityBaseTick");
         this.computeSpeed();
         this.inBlockState = null;
+        // MODIFIED for porting: lithium entity.collisions.unpushable_cramming EntityMixin#onBaseTick
+        this.lithium$OnFeetBlockCacheDeleted();
         if (this.isPassenger() && this.getVehicle().isRemoved()) {
             this.stopRiding();
         }
@@ -522,7 +560,9 @@ public abstract class Entity
         }
 
         this.handlePortal();
-        if (this.canSpawnSprintParticle()) {
+        // MODIFIED for porting: lithium entity.sprinting_particles EntityMixin#skipParticlesOnServerSide - sprint particles
+        // are a purely client-side effect.
+        if (this.level().isClientSide() && this.canSpawnSprintParticle()) {
             this.spawnSprintParticle();
         }
 
@@ -1141,8 +1181,14 @@ public abstract class Entity
 
     private Vec3 collide(final Vec3 movement) {
         AABB aabb = this.getBoundingBox();
-        List<VoxelShape> entityColliders = this.level().getEntityCollisions(this, aabb.expandTowards(movement));
-        Vec3 movementStep = movement.lengthSqr() == 0.0 ? movement : collideBoundingBox(this, movement, aabb, this.level(), entityColliders);
+        // MODIFIED for porting: lithium entity.collisions.movement EntityMixin#postponeGetEntities - the entity collisions are
+        // not gathered up front any more. lithium$collideMovement only collects them once a block collision was actually
+        // found, and the flag below records whether that still has to happen for the step-up path.
+        boolean[] lithium$requireAddEntities = new boolean[]{true};
+        List<VoxelShape> entityColliders = new java.util.ArrayList<>();
+        Vec3 movementStep = movement.lengthSqr() == 0.0
+            ? movement
+            : lithium$collideMovement(this, movement, aabb, this.level(), entityColliders, lithium$requireAddEntities);
         boolean xCollision = movement.x != movementStep.x;
         boolean yCollision = movement.y != movementStep.y;
         boolean zCollision = movement.z != movementStep.z;
@@ -1152,6 +1198,13 @@ public abstract class Entity
             AABB stepUpAABB = groundedAABB.expandTowards(movement.x, this.maxUpStep(), movement.z);
             if (!onGroundAfterCollision) {
                 stepUpAABB = stepUpAABB.expandTowards(0.0, -1.0E-5F, 0.0);
+            }
+
+            // MODIFIED for porting: lithium entity.collisions.movement EntityMixin#collectEntities - the step-up path does
+            // need the entity collisions, so materialize them now if lithium$collideMovement did not already do it.
+            if (lithium$requireAddEntities[0]) {
+                lithium$requireAddEntities[0] = false;
+                net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.appendEntityCollisions(entityColliders, this.level(), this, this.getBoundingBox());
             }
 
             List<VoxelShape> colliders = collectCollidersIgnoringWorldBorder(this, this.level, entityColliders, stepUpAABB);
@@ -1193,11 +1246,145 @@ public abstract class Entity
         return sortedCandidates;
     }
 
+    // MODIFIED for porting: lithium entity.collisions.movement EntityMixin replaces this overload wholesale
     public static Vec3 collideBoundingBox(
         final Entity source, final Vec3 movement, final AABB boundingBox, final Level level, final List<VoxelShape> entityColliders
     ) {
-        List<VoxelShape> colliders = collectCollidersIgnoringWorldBorder(source, level, entityColliders, boundingBox.expandTowards(movement));
-        return collideWithShapes(movement, boundingBox, colliders);
+        return lithium$collideMovement(source, movement, boundingBox, level, entityColliders, null);
+    }
+
+    /**
+     * MODIFIED for porting: was lithium's entity.collisions.movement EntityMixin#lithium$CollideMovement.
+     * <p>
+     * Vanilla resolves collisions in the order entities, world border, blocks. The important constraint is that the last
+     * collision really is last, because its result is not clipped to 0 when it is below 1e-7; any other reordering does not
+     * matter. This implementation therefore starts with the (lazily swept) block collisions and only pulls in the entity and
+     * world border collisions once an axis actually collided, and it special-cases downwards movement by testing the
+     * supporting block first.
+     */
+    private static Vec3 lithium$collideMovement(
+        final @Nullable Entity entity,
+        final Vec3 movement,
+        AABB entityBoundingBox,
+        final Level world,
+        final List<VoxelShape> entityCollisions,
+        final boolean @Nullable [] requireAddEntities
+    ) {
+        double movementX = movement.x;
+        double movementY = movement.y;
+        double movementZ = movement.z;
+        boolean isSingleAxisMovement = (movementX == 0.0 ? 0 : 1) + (movementY == 0.0 ? 0 : 1) + (movementZ == 0.0 ? 0 : 1) == 1;
+        if (movementY < 0.0) {
+            // Downwards / gravity optimization: check the supporting block (or directly below the entity's centre) first
+            VoxelShape voxelShape = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.getSupportingCollisionForEntity(world, entity, entityBoundingBox, movement);
+            if (voxelShape != null) {
+                double v = voxelShape.collide(Direction.Axis.Y, entityBoundingBox, movementY);
+                if (v == 0.0) {
+                    if (isSingleAxisMovement) {
+                        // Y was the only movement axis, so the movement is cancelled completely
+                        return Vec3.ZERO;
+                    }
+
+                    movementY = 0.0;
+                    isSingleAxisMovement = (movementX == 0.0 ? 0 : 1) + (movementZ == 0.0 ? 0 : 1) == 1;
+                }
+            }
+        }
+
+        AABB movementSpace = isSingleAxisMovement
+            ? net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.getSmallerBoxForSingleAxisMovement(movement, entityBoundingBox, movementY, movementX, movementZ)
+            : entityBoundingBox.expandTowards(movement);
+        boolean shouldAddEntities = requireAddEntities != null && requireAddEntities[0];
+        boolean shouldAddWorldBorder = true;
+        // For the 1e-7 margin behaviour to stay correct, the last block collision must be the last of all collisions
+        boolean shouldAddLastBlock = true;
+        net.caffeinemc.mods.lithium.common.entity.movement.ChunkAwareBlockCollisionSweeperVoxelShape blockCollisionSweeper = new net.caffeinemc.mods.lithium.common.entity.movement.ChunkAwareBlockCollisionSweeperVoxelShape(world, entity, movementSpace, true);
+        net.caffeinemc.mods.lithium.common.util.collections.LazyList<VoxelShape> blockCollisions = new net.caffeinemc.mods.lithium.common.util.collections.LazyList<>(new java.util.ArrayList<>(), blockCollisionSweeper);
+        java.util.ArrayList<VoxelShape> worldBorderAndLastBlockCollision = new java.util.ArrayList<>(2);
+        if (movementY != 0.0) {
+            movementY = Shapes.collide(Direction.Axis.Y, entityBoundingBox, blockCollisions, movementY);
+            if (movementY != 0.0) {
+                shouldAddEntities = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addEntityCollisionsIfRequired(shouldAddEntities, entity, world, entityCollisions, movementSpace);
+                shouldAddWorldBorder = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addWorldBorderCollisionIfRequired(shouldAddWorldBorder, entity, worldBorderAndLastBlockCollision, movementSpace);
+                shouldAddLastBlock = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addLastBlockCollisionIfRequired(shouldAddLastBlock, blockCollisionSweeper, worldBorderAndLastBlockCollision);
+                if (!entityCollisions.isEmpty()) {
+                    movementY = Shapes.collide(Direction.Axis.Y, entityBoundingBox, entityCollisions, movementY);
+                }
+
+                if (!worldBorderAndLastBlockCollision.isEmpty()) {
+                    movementY = Shapes.collide(Direction.Axis.Y, entityBoundingBox, worldBorderAndLastBlockCollision, movementY);
+                }
+
+                if (movementY != 0.0) {
+                    entityBoundingBox = entityBoundingBox.move(0.0, movementY, 0.0);
+                }
+            }
+        }
+
+        boolean zMovementBiggerThanXMovement = Math.abs(movementX) < Math.abs(movementZ);
+        if (zMovementBiggerThanXMovement) {
+            movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, blockCollisions, movementZ);
+            if (movementZ != 0.0) {
+                shouldAddEntities = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addEntityCollisionsIfRequired(shouldAddEntities, entity, world, entityCollisions, movementSpace);
+                shouldAddWorldBorder = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addWorldBorderCollisionIfRequired(shouldAddWorldBorder, entity, worldBorderAndLastBlockCollision, movementSpace);
+                shouldAddLastBlock = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addLastBlockCollisionIfRequired(shouldAddLastBlock, blockCollisionSweeper, worldBorderAndLastBlockCollision);
+                if (!entityCollisions.isEmpty()) {
+                    movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, entityCollisions, movementZ);
+                }
+
+                if (!worldBorderAndLastBlockCollision.isEmpty()) {
+                    movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, worldBorderAndLastBlockCollision, movementZ);
+                }
+
+                if (movementZ != 0.0) {
+                    entityBoundingBox = entityBoundingBox.move(0.0, 0.0, movementZ);
+                }
+            }
+        }
+
+        if (movementX != 0.0) {
+            movementX = Shapes.collide(Direction.Axis.X, entityBoundingBox, blockCollisions, movementX);
+            if (movementX != 0.0) {
+                shouldAddEntities = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addEntityCollisionsIfRequired(shouldAddEntities, entity, world, entityCollisions, movementSpace);
+                shouldAddWorldBorder = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addWorldBorderCollisionIfRequired(shouldAddWorldBorder, entity, worldBorderAndLastBlockCollision, movementSpace);
+                shouldAddLastBlock = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addLastBlockCollisionIfRequired(shouldAddLastBlock, blockCollisionSweeper, worldBorderAndLastBlockCollision);
+                if (!entityCollisions.isEmpty()) {
+                    movementX = Shapes.collide(Direction.Axis.X, entityBoundingBox, entityCollisions, movementX);
+                }
+
+                if (!worldBorderAndLastBlockCollision.isEmpty()) {
+                    movementX = Shapes.collide(Direction.Axis.X, entityBoundingBox, worldBorderAndLastBlockCollision, movementX);
+                }
+
+                if (movementX != 0.0) {
+                    entityBoundingBox = entityBoundingBox.move(movementX, 0.0, 0.0);
+                }
+            }
+        }
+
+        if (!zMovementBiggerThanXMovement && movementZ != 0.0) {
+            movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, blockCollisions, movementZ);
+            if (movementZ != 0.0) {
+                shouldAddEntities = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addEntityCollisionsIfRequired(shouldAddEntities, entity, world, entityCollisions, movementSpace);
+                shouldAddWorldBorder = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addWorldBorderCollisionIfRequired(shouldAddWorldBorder, entity, worldBorderAndLastBlockCollision, movementSpace);
+                shouldAddLastBlock = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.addLastBlockCollisionIfRequired(shouldAddLastBlock, blockCollisionSweeper, worldBorderAndLastBlockCollision);
+                if (!entityCollisions.isEmpty()) {
+                    movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, entityCollisions, movementZ);
+                }
+
+                if (!worldBorderAndLastBlockCollision.isEmpty()) {
+                    movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, worldBorderAndLastBlockCollision, movementZ);
+                }
+
+                // No need to offset the box here, as this is the last axis
+            }
+        }
+
+        if (requireAddEntities != null && !shouldAddEntities) {
+            requireAddEntities[0] = false;
+        }
+
+        return new Vec3(movementX, movementY, movementZ);
     }
 
     public static Vec3 collideBoundingBox(
@@ -3535,22 +3722,70 @@ public abstract class Entity
         return false;
     }
 
+    // MODIFIED for porting: the next six methods were lithium's alloc.deep_passengers EntityMixin, which replaces the
+    // recursive Stream#flatMap chains by a plain recursive collect into an ArrayList.
     private Stream<Entity> getIndirectPassengersStream() {
-        return this.passengers.stream().flatMap(Entity::getSelfAndPassengers);
+        if (this.passengers.isEmpty()) {
+            return Stream.empty();
+        }
+
+        java.util.ArrayList<Entity> passengers = new java.util.ArrayList<>();
+        this.lithium$addPassengersDeep(passengers);
+        return passengers.stream();
     }
 
     @Override
     public Stream<Entity> getSelfAndPassengers() {
-        return Stream.concat(Stream.of(this), this.getIndirectPassengersStream());
+        if (this.passengers.isEmpty()) {
+            return Stream.of(this);
+        }
+
+        java.util.ArrayList<Entity> passengers = new java.util.ArrayList<>();
+        passengers.add(this);
+        this.lithium$addPassengersDeep(passengers);
+        return passengers.stream();
     }
 
     @Override
     public Stream<Entity> getPassengersAndSelf() {
-        return Stream.concat(this.passengers.stream().flatMap(Entity::getPassengersAndSelf), Stream.of(this));
+        if (this.passengers.isEmpty()) {
+            return Stream.of(this);
+        }
+
+        java.util.ArrayList<Entity> passengers = new java.util.ArrayList<>();
+        this.lithium$addPassengersDeepFirst(passengers);
+        passengers.add(this);
+        return passengers.stream();
     }
 
     public Iterable<Entity> getIndirectPassengers() {
-        return () -> this.getIndirectPassengersStream().iterator();
+        if (this.passengers.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+
+        java.util.ArrayList<Entity> passengers = new java.util.ArrayList<>();
+        this.lithium$addPassengersDeep(passengers);
+        return passengers;
+    }
+
+    private void lithium$addPassengersDeep(final java.util.ArrayList<Entity> passengers) {
+        ImmutableList<Entity> list = this.passengers;
+
+        for (int i = 0, listSize = list.size(); i < listSize; i++) {
+            Entity passenger = list.get(i);
+            passengers.add(passenger);
+            passenger.lithium$addPassengersDeep(passengers);
+        }
+    }
+
+    private void lithium$addPassengersDeepFirst(final java.util.ArrayList<Entity> passengers) {
+        ImmutableList<Entity> list = this.passengers;
+
+        for (int i = 0, listSize = list.size(); i < listSize; i++) {
+            Entity passenger = list.get(i);
+            passenger.lithium$addPassengersDeep(passengers);
+            passengers.add(passenger);
+        }
     }
 
     public int countPlayerPassengers() {
@@ -3723,6 +3958,8 @@ public abstract class Entity
     public BlockState getInBlockState() {
         if (this.inBlockState == null) {
             this.inBlockState = this.level().getBlockState(this.blockPosition());
+            // MODIFIED for porting: lithium entity.collisions.unpushable_cramming EntityMixin#onBlockCached
+            this.lithium$OnFeetBlockCacheSet(this.inBlockState);
         }
 
         return this.inBlockState;
@@ -3817,6 +4054,8 @@ public abstract class Entity
             if (fx != this.blockPosition.getX() || fy != this.blockPosition.getY() || fz != this.blockPosition.getZ()) {
                 this.blockPosition = new BlockPos(fx, fy, fz);
                 this.inBlockState = null;
+                // MODIFIED for porting: lithium entity.collisions.unpushable_cramming EntityMixin#onPositionChanged
+                this.lithium$OnFeetBlockCacheDeleted();
                 if (SectionPos.blockToSectionCoord(fx) != this.chunkPosition.x() || SectionPos.blockToSectionCoord(fz) != this.chunkPosition.z()) {
                     this.chunkPosition = ChunkPos.containing(this.blockPosition);
                 }
@@ -3952,9 +4191,27 @@ public abstract class Entity
         this.removalReason = null;
     }
 
+    // MODIFIED for porting: was lithium's block.hopper EntityAccessor Mixin
+    @Override
+    public EntityInLevelCallback getChangeListener() {
+        return this.levelCallback;
+    }
+
+    // MODIFIED for porting: lithium util.in_world_tracking.entity EntityMixin#lithium$isInLevel
+    @Override
+    public boolean lithium$isInLevel() {
+        return this.levelCallback != EntityInLevelCallback.NULL;
+    }
+
     @Override
     public void setLevelCallback(final EntityInLevelCallback levelCallback) {
         this.levelCallback = levelCallback;
+        // MODIFIED for porting: lithium util.in_world_tracking.entity EntityMixin#emitMaybeInLevelEvents
+        if (this.levelCallback == EntityInLevelCallback.NULL) {
+            this.lithium$handleRemovedFromLevel(this.level());
+        } else {
+            this.lithium$handleAddedToLevel(this.level());
+        }
     }
 
     @Override

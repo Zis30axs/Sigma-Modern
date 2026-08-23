@@ -23,7 +23,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
-public class PathNavigationRegion implements CollisionGetter {
+// MODIFIED for porting: lithium util.chunk_access PathNavigationRegionMixin
+public class PathNavigationRegion implements CollisionGetter, net.caffeinemc.mods.lithium.common.world.ChunkView {
     protected final int centerX;
     protected final int centerZ;
     protected final ChunkAccess[][] chunks;
@@ -57,6 +58,12 @@ public class PathNavigationRegion implements CollisionGetter {
                 }
             }
         }
+    }
+
+    // MODIFIED for porting: lithium util.chunk_access PathNavigationRegionMixin#lithium$getLoadedChunk
+    @Override
+    public @org.jspecify.annotations.Nullable ChunkAccess lithium$getLoadedChunk(final int chunkX, final int chunkZ) {
+        return this.getChunk(chunkX, chunkZ);
     }
 
     private ChunkAccess getChunk(final BlockPos pos) {

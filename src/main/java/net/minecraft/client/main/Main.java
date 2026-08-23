@@ -269,6 +269,11 @@ public class Main {
         try {
             Thread.currentThread().setName("Render thread");
             RenderSystem.initRenderThread();
+            // MODIFIED for porting: replaces sodium's loader entry points (SodiumPreLaunch / SodiumFabricMod), which the
+            // loader runs before the client is constructed. See SodiumBootstrap for the details.
+            net.caffeinemc.mods.sodium.client.SodiumBootstrap.bootstrap(gameDir.toPath());
+            me.flashyreese.mods.sodiumextra.SodiumExtraBootstrap.bootstrap(gameDir.toPath());
+            net.caffeinemc.mods.sodium.client.SodiumBootstrap.finishConfigRegistration();
             minecraft = new Minecraft(gameConfig);
         } catch (SilentInitException e) {
             Util.shutdownExecutors();

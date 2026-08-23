@@ -38,7 +38,34 @@ import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-public class SculkShriekerBlockEntity extends BlockEntity implements GameEventListener.Provider<VibrationSystem.Listener>, VibrationSystem {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.sculk_sensor_shrieker SculkShriekerBlockEntityMixin
+public class SculkShriekerBlockEntity extends BlockEntity
+    implements GameEventListener.Provider<VibrationSystem.Listener>, VibrationSystem, net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity {
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.sculk_sensor_shrieker SculkShriekerBlockEntityMixin
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
     private static final int WARNING_SOUND_RADIUS = 10;
     private static final int WARDEN_SPAWN_ATTEMPTS = 20;
     private static final int WARDEN_SPAWN_RANGE_XZ = 5;
@@ -56,6 +83,11 @@ public class SculkShriekerBlockEntity extends BlockEntity implements GameEventLi
     private final VibrationSystem.User vibrationUser = new SculkShriekerBlockEntity.VibrationUser();
     private VibrationSystem.Data vibrationData = new VibrationSystem.Data();
     private final VibrationSystem.Listener vibrationListener = new VibrationSystem.Listener(this);
+
+    // MODIFIED for porting: lithium sculk_sensor_shrieker SculkShriekerBlockEntityMixin#setVibrationListenerListener
+    {
+        ((net.caffeinemc.mods.lithium.common.block.entity.sleeping_sculk.GameEventListenerWithCallback)this.vibrationListener).lithium$setGameEventCallback(this::wakeUpNow);
+    }
 
     public SculkShriekerBlockEntity(final BlockPos worldPosition, final BlockState blockState) {
         super(BlockEntityTypes.SCULK_SHRIEKER, worldPosition, blockState);
@@ -76,6 +108,11 @@ public class SculkShriekerBlockEntity extends BlockEntity implements GameEventLi
         super.loadAdditional(input);
         this.warningLevel = input.getIntOr("warning_level", 0);
         this.vibrationData = input.read("listener", VibrationSystem.Data.CODEC).orElseGet(VibrationSystem.Data::new);
+            // MODIFIED for porting: lithium sculk_sensor_shrieker SculkShriekerBlockEntityMixin#wakeupIfLoadedWithData
+        // (RETURN) - detects modification by commands
+        if (this.vibrationData.getSelectionStrategy().chosenCandidate(Long.MAX_VALUE).isPresent()) {
+            this.wakeUpNow();
+        }
     }
 
     @Override

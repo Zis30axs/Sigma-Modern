@@ -108,7 +108,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class LocalPlayer extends AbstractClientPlayer {
+public class LocalPlayer extends AbstractClientPlayer
+    implements net.irisshaders.iris.mixinterface.LocalPlayerInterface { // MODIFIED for porting: iris MixinLocalPlayer
     public static final Logger LOGGER = LogUtils.getLogger();
     private static final int POSITION_REMINDER_INTERVAL = 20;
     private static final int WATER_VISION_MAX_TIME = 600;
@@ -121,6 +122,18 @@ public class LocalPlayer extends AbstractClientPlayer {
     private final ClientRecipeBook recipeBook;
     private final TickThrottler dropSpamThrottler = new TickThrottler(20, 1280);
     private final List<AmbientSoundHandler> ambientSoundHandlers = Lists.newArrayList();
+
+    // MODIFIED for porting: was iris's MixinLocalPlayer (its LocalPlayerInterface implementation)
+    @Override
+    public float getCurrentConstantMood() {
+        for (AmbientSoundHandler ambientSoundHandler : this.ambientSoundHandlers) {
+            if (ambientSoundHandler instanceof net.minecraft.client.resources.sounds.BiomeAmbientSoundsHandler) {
+                return ((net.irisshaders.iris.mixinterface.BiomeAmbienceInterface)ambientSoundHandler).getConstantMood();
+            }
+        }
+
+        return 0.0F;
+    }
     private PermissionSet permissions = PermissionSet.NO_PERMISSIONS;
     private ChatAbilities chatAbilities;
     private double xLast;

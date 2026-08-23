@@ -34,7 +34,7 @@ public class EmptyFluid extends Fluid {
     }
 
     @Override
-    protected boolean isEmpty() {
+    public boolean isEmpty() { // MODIFIED for porting: lithium.accesswidener widened Fluid#isEmpty to public
         return true;
     }
 

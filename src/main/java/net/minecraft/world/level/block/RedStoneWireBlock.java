@@ -283,17 +283,18 @@ public class RedStoneWireBlock extends Block {
     }
 
     public int getBlockSignal(final Level level, final BlockPos pos) {
-        this.shouldSignal = false;
-        int blockSignal = level.getBestNeighborSignal(pos);
-        this.shouldSignal = true;
-        return blockSignal;
+        // MODIFIED for porting: lithium block.redstone_wire RedStoneWireBlockMixin#getBlockSignalFaster (HEAD, cancellable).
+        // The replacement never asks a redstone wire for its signal, so the shouldSignal flag (which vanilla only toggles to
+        // make neighbouring wires report 0) is not needed here.
+        return net.caffeinemc.mods.lithium.common.block.redstone.RedstoneWirePowerCalculations.getNeighborBlockSignal(this, this.evaluator, level, pos);
     }
 
     private void checkCornerChangeAt(final Level level, final BlockPos pos) {
         if (level.getBlockState(pos).is(this)) {
             level.updateNeighborsAt(pos, this);
 
-            for (Direction direction : Direction.values()) {
+            // MODIFIED for porting: lithium alloc.enum_values.redstone_wire RedStoneWireBlockMixin#removeAllocation2
+            for (Direction direction : net.caffeinemc.mods.lithium.common.util.DirectionConstants.ALL) {
                 level.updateNeighborsAt(pos.relative(direction), this);
             }
         }
@@ -315,7 +316,8 @@ public class RedStoneWireBlock extends Block {
     @Override
     protected void affectNeighborsAfterRemoval(final BlockState state, final ServerLevel level, final BlockPos pos, final boolean movedByPiston) {
         if (!movedByPiston) {
-            for (Direction direction : Direction.values()) {
+            // MODIFIED for porting: lithium alloc.enum_values.redstone_wire RedStoneWireBlockMixin#removeAllocation1
+            for (Direction direction : net.caffeinemc.mods.lithium.common.util.DirectionConstants.ALL) {
                 level.updateNeighborsAt(pos.relative(direction), this);
             }
 

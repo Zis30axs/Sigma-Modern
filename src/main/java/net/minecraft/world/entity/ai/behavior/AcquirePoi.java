@@ -9,6 +9,8 @@ import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import net.caffeinemc.mods.lithium.common.util.Distances; // MODIFIED for porting: lithium ai.poi.tasks AcquirePoiMixin
+import net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestStorageExtended; // MODIFIED for porting: lithium ai.poi.tasks AcquirePoiMixin
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.Holder;
@@ -93,17 +95,42 @@ public class AcquirePoi {
                             retryMarker.markAttempt(timestamp);
                             return true;
                         };
-                        Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = poiManager.findAllClosestFirstWithType(
-                                poiType, cacheTest, body.blockPosition(), 48, PoiManager.Occupancy.HAS_SPACE
-                            )
-                            .limit(5L)
+                        // MODIFIED for porting: lithium ai.poi.tasks AcquirePoiMixin#getNull and
+                        // #getNClosestFirstWithType. The closest-first search with limit is replaced by lithium's
+                        // incremental nearest-POI search, which only walks as many POIs as the limit requires. Because
+                        // that search must not run the side effects of the vanilla predicate on the POIs it skips, the
+                        // predicate is split: a side effect-less variant drives the search, and the vanilla predicate's
+                        // side effects are applied afterwards to the whole search volume - which is what vanilla does,
+                        // since its sort happens after the filter.
+                        Predicate<BlockPos> lithium$cacheTestWithoutSideEffects = pos -> {
+                            AcquirePoi.JitteredLinearRetry retryMarker = batchCache.get(pos.asLong());
+                            return retryMarker == null || retryMarker.shouldRetry(timestamp);
+                        };
+                        BlockPos lithium$searchCenter = body.blockPosition();
+                        java.util.Collection<Pair<Holder<PoiType>, BlockPos>> lithium$closestPois = ((PointOfInterestStorageExtended)poiManager)
+                            .lithium$getNClosestFirstWithType(
+                                poiType, lithium$cacheTestWithoutSideEffects, lithium$searchCenter, 48, PoiManager.Occupancy.HAS_SPACE, 5L
+                            );
+                        if (!batchCache.isEmpty()) {
+                            long lithium$radiusSq = 48L * 48L;
+                            batchCache.forEach((longPos, mutableRetryMarker) -> {
+                                BlockPos poiPos = BlockPos.of(longPos);
+                                if (Distances.distanceSq(poiPos, lithium$searchCenter) <= lithium$radiusSq && poiManager.exists(poiPos, poiType)) {
+                                    cacheTest.test(poiPos);
+                                }
+                            });
+                        }
+
+                        Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = lithium$closestPois.stream()
                             .filter(px -> validPoi.test(level, (BlockPos)px.getSecond()))
                             .collect(Collectors.toSet());
                         Path path = findPathToPois(body, poiPositions);
                         if (path != null && path.canReach()) {
                             BlockPos targetPos = path.getTarget();
                             poiManager.getType(targetPos).ifPresent(type -> {
-                                poiManager.take(poiType, (t, poiPos) -> poiPos.equals(targetPos), targetPos, 1);
+                                // MODIFIED for porting: lithium ai.poi.tasks AcquirePoiMixin#takeOptimized (@Redirect) -
+                                // the POI is known to be at targetPos, so only that section has to be looked at.
+                                ((PointOfInterestStorageExtended)poiManager).lithium$takeAt(poiType, (t, poiPos) -> poiPos.equals(targetPos), targetPos);
                                 toAcquire.set(GlobalPos.of(level.dimension(), targetPos));
                                 onPoiAcquisitionEvent.ifPresent(event -> level.broadcastEntityEvent(body, event));
                                 batchCache.clear();
@@ -140,7 +167,7 @@ public class AcquirePoi {
         return body.getNavigation().createPath(targets, maxRange);
     }
 
-    private static class JitteredLinearRetry {
+    public static class JitteredLinearRetry { // MODIFIED for porting: lithium.accesswidener widened access
         private static final int MIN_INTERVAL_INCREASE = 40;
         private static final int MAX_INTERVAL_INCREASE = 80;
         private static final int MAX_RETRY_PATHFINDING_INTERVAL = 400;

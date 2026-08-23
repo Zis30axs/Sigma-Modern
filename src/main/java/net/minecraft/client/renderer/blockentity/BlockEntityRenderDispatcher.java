@@ -99,6 +99,22 @@ public class BlockEntityRenderDispatcher implements ResourceManagerReloadListene
         final S state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera
     ) {
         BlockEntityRenderer<?, S> renderer = this.getRenderer(state);
+            /*
+              MODIFIED for porting: was iris's entity_render_context MixinBlockEntityRenderDispatcher#iris$beginEntityRender
+              (@Inject at the INVOKE of getRenderer, shift AFTER). Upstream's comment: injected after the push since at this
+              point most cancellation checks have already passed. It tells the shader pack which block entity is being drawn.
+              Its "// TODO: Add special types" note is carried over.
+            */
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                it.unimi.dsi.fastutil.objects.Object2IntMap<net.minecraft.world.level.block.state.BlockState> irisBlockStateIds =
+                    net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getBlockStateIds();
+                net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs = net.irisshaders.iris.Iris.isPackInUseQuick();
+                if (irisBlockStateIds != null && net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel) {
+                    // TODO: Add special types
+                    net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(irisBlockStateIds.applyAsInt(state.blockState));
+                }
+            }
+
         if (renderer != null) {
             try {
                 renderer.submit(state, poseStack, submitNodeCollector, camera);
@@ -108,6 +124,13 @@ public class BlockEntityRenderDispatcher implements ResourceManagerReloadListene
                 state.fillCrashReportCategory(category);
                 throw new ReportedException(report);
             }
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context MixinBlockEntityRenderDispatcher#iris$endEntityRender
+        // (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(0);
+            net.irisshaders.iris.vertices.ImmediateState.isRenderingBEs = false;
         }
     }
 

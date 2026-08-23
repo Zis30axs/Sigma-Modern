@@ -13,17 +13,12 @@ public class EntityTickList {
     private Int2ObjectMap<Entity> passive = new Int2ObjectLinkedOpenHashMap<>();
     private @Nullable Int2ObjectMap<Entity> iterated;
 
+    // MODIFIED for porting: lithium collections.entity_ticking EntityTickListMixin - cloning the map is much cheaper
+    // than clearing the other one and re-inserting every entry.
     private void ensureActiveIsNotIterated() {
         if (this.iterated == this.active) {
-            this.passive.clear();
-
-            for (Entry<Entity> entry : Int2ObjectMaps.fastIterable(this.active)) {
-                this.passive.put(entry.getIntKey(), entry.getValue());
-            }
-
-            Int2ObjectMap<Entity> tmp = this.active;
-            this.active = this.passive;
-            this.passive = tmp;
+            this.passive = this.active;
+            this.active = ((Int2ObjectLinkedOpenHashMap<Entity>)this.active).clone();
         }
     }
 

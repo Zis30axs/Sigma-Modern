@@ -13,7 +13,10 @@ import java.util.List;
 import java.util.stream.Stream;
 import net.minecraft.util.RandomSource;
 
-public class ShufflingList<U> implements Iterable<U> {
+// MODIFIED for porting: lithium ai.task.replace_streams ShufflingListMixin makes ShufflingList a WeightedListIterable
+// so that WeightedListIterable#cast works. In 26.2 the class already implements Iterable<U> with an equivalent
+// iterator, so no extra iterator implementation is needed.
+public class ShufflingList<U> implements Iterable<U>, net.caffeinemc.mods.lithium.common.ai.WeightedListIterable<U> {
     protected final List<ShufflingList.WeightedEntry<U>> entries;
     private final RandomSource random = RandomSource.create();
 

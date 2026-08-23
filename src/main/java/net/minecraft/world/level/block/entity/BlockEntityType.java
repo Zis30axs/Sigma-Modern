@@ -9,7 +9,35 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
-public class BlockEntityType<T extends BlockEntity> {
+// MODIFIED for porting: implements sodium's ExtendedBlockEntityType (core.render BlockEntityTypeMixin), which lets the
+// sodium API attach render predicates to a block entity type.
+public class BlockEntityType<T extends BlockEntity> implements net.caffeinemc.mods.sodium.client.render.chunk.ExtendedBlockEntityType<T> {
+    // MODIFIED for porting: sodium core.render BlockEntityTypeMixin @Unique field
+    @SuppressWarnings("unchecked")
+    private net.caffeinemc.mods.sodium.api.blockentity.BlockEntityRenderPredicate<T>[] sodium$renderPredicates =
+        new net.caffeinemc.mods.sodium.api.blockentity.BlockEntityRenderPredicate[0];
+
+    @Override
+    public net.caffeinemc.mods.sodium.api.blockentity.BlockEntityRenderPredicate<T>[] sodium$getRenderPredicates() {
+        return this.sodium$renderPredicates;
+    }
+
+    @Override
+    public void sodium$addRenderPredicate(final net.caffeinemc.mods.sodium.api.blockentity.BlockEntityRenderPredicate<T> predicate) {
+        this.sodium$renderPredicates = org.apache.commons.lang3.ArrayUtils.add(this.sodium$renderPredicates, predicate);
+    }
+
+    @Override
+    public boolean sodium$removeRenderPredicate(final net.caffeinemc.mods.sodium.api.blockentity.BlockEntityRenderPredicate<T> predicate) {
+        int index = org.apache.commons.lang3.ArrayUtils.indexOf(this.sodium$renderPredicates, predicate);
+        if (index == org.apache.commons.lang3.ArrayUtils.INDEX_NOT_FOUND) {
+            return false;
+        }
+
+        this.sodium$renderPredicates = org.apache.commons.lang3.ArrayUtils.remove(this.sodium$renderPredicates, index);
+        return true;
+    }
+
     private final BlockEntityType.BlockEntitySupplier<? extends T> factory;
     private final Set<Block> validBlocks;
     private final Holder.Reference<BlockEntityType<?>> builtInRegistryHolder = BuiltInRegistries.BLOCK_ENTITY_TYPE.createIntrusiveHolder(this);

@@ -21,7 +21,26 @@ import org.joml.Matrix4fc;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class BlockModelRenderState {
+public class BlockModelRenderState
+    implements net.irisshaders.iris.mixinterface.BlockModelRenderStateExtension { // MODIFIED for porting: iris entity_render_context BlockModelRenderStateMixin
+    // MODIFIED for porting: iris entity_render_context BlockModelRenderStateMixin @Unique field
+    private net.minecraft.world.level.block.state.BlockState iris$block;
+
+    @Override
+    public void setBlock(final net.minecraft.world.level.block.state.BlockState block) {
+        this.iris$block = block;
+    }
+
+    // MODIFIED for porting: was iris's entity_render_context BlockModelRenderStateMixin#iris$setupId (@Unique)
+    private void iris$setupId() {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getBlockStateIds() == null) {
+            return;
+        }
+
+        net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(1);
+        net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getBlockStateIds().getOrDefault(this.iris$block, 0));
+    }
+
     public static final int[] EMPTY_TINTS = new int[0];
     private @Nullable List<BlockStateModelPart> modelParts;
     private @Nullable Matrix4fc transformation;
@@ -76,6 +95,10 @@ public class BlockModelRenderState {
         final int overlayCoords,
         final int outlineColor
     ) {
+        // MODIFIED for porting: was iris's entity_render_context BlockModelRenderStateMixin#onRender (@Inject HEAD) and
+        // #onRenderEnd (@Inject TAIL); the @Share("lastBState") LocalIntRef is a local here.
+        int iris$lastBState = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() ? net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.getCurrentRenderedBlockEntity() : 0;
+        this.iris$setupId();
         this.submitModel(this.renderType, poseStack, submitNodeCollector, externalLightCoords, overlayCoords, outlineColor);
         if (this.specialRenderer != null) {
             int lightCoords = LightCoordsUtil.max(externalLightCoords, this.blockLightCoords);
@@ -87,6 +110,12 @@ public class BlockModelRenderState {
             } else {
                 submitSpecialRenderer(this.specialRenderer, poseStack, submitNodeCollector, lightCoords, overlayCoords, outlineColor);
             }
+        }
+
+        // MODIFIED for porting: iris entity_render_context BlockModelRenderStateMixin#onRenderEnd (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentBlockEntity(iris$lastBState);
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
         }
     }
 

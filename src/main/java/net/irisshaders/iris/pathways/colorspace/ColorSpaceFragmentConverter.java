@@ -1,0 +1,124 @@
+package net.irisshaders.iris.pathways.colorspace;
+
+import com.google.common.collect.ImmutableSet;
+import com.mojang.blaze3d.PrimitiveTopology;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.opengl.GlStateManager;
+import com.mojang.blaze3d.opengl.GlTexture;
+import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import net.irisshaders.iris.gl.IrisRenderSystem;
+import net.irisshaders.iris.gl.framebuffer.GlFramebuffer;
+import net.irisshaders.iris.gl.program.Program;
+import net.irisshaders.iris.gl.program.ProgramBuilder;
+import net.irisshaders.iris.gl.sampler.GlSampler;
+import net.irisshaders.iris.gl.uniform.UniformUpdateFrequency;
+import net.irisshaders.iris.helpers.StringPair;
+import net.irisshaders.iris.mixinterface.CustomPass;
+import net.irisshaders.iris.pathways.FullScreenQuadRenderer;
+import net.irisshaders.iris.shaderpack.preprocessor.JcppProcessor;
+import net.minecraft.client.Minecraft;
+import org.apache.commons.io.IOUtils;
+import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL30C;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalInt;
+
+import static net.irisshaders.iris.pipeline.CompositeRenderer.COMPOSITE_PIPELINE;
+
+public class ColorSpaceFragmentConverter implements ColorSpaceConverter {
+	private static final CustomPass EMPTY = new CustomPass() {
+		@Override
+		public void setupState() {
+
+		}
+	};
+	private int width;
+	private int height;
+	private ColorSpace colorSpace;
+	private Program program;
+	private GlFramebuffer framebuffer;
+	private int swapTexture;
+
+	private GlTexture target;
+
+	public ColorSpaceFragmentConverter(int width, int height, ColorSpace colorSpace) {
+		rebuildProgram(width, height, colorSpace);
+	}
+
+	public void rebuildProgram(int width, int height, ColorSpace colorSpace) {
+		if (program != null) {
+			program.destroy();
+			program = null;
+			framebuffer.destroy();
+			framebuffer = null;
+			GlStateManager._deleteTexture(swapTexture);
+			swapTexture = 0;
+		}
+
+		this.width = width;
+		this.height = height;
+		this.colorSpace = colorSpace;
+
+		String vertexSource;
+		String source;
+		try {
+			vertexSource = new String(IOUtils.toByteArray(Objects.requireNonNull(getClass().getResourceAsStream("/colorSpace.vsh"))), StandardCharsets.UTF_8);
+			source = new String(IOUtils.toByteArray(Objects.requireNonNull(getClass().getResourceAsStream("/colorSpace.csh"))), StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+
+		List<StringPair> defineList = new ArrayList<>();
+		defineList.add(new StringPair("CURRENT_COLOR_SPACE", String.valueOf(colorSpace.ordinal())));
+
+		for (ColorSpace space : ColorSpace.values()) {
+			defineList.add(new StringPair(space.name(), String.valueOf(space.ordinal())));
+		}
+		source = JcppProcessor.glslPreprocessSource(source, defineList);
+
+		ProgramBuilder builder = ProgramBuilder.begin("colorSpaceFragment", vertexSource, null, source, ImmutableSet.of());
+
+		builder.uniformMatrix(UniformUpdateFrequency.ONCE, "projection", () -> new Matrix4f(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, -1, -1, 0, 1));
+		builder.addDynamicSampler(() -> target.glId(), GlSampler.NEAREST,  "readImage");
+
+		swapTexture = GlStateManager._genTexture();
+		IrisRenderSystem.texImage2D(swapTexture, GL30C.GL_TEXTURE_2D, 0, GL30C.GL_RGBA8, width, height, 0, GL30C.GL_RGBA, GL30C.GL_UNSIGNED_BYTE, null);
+
+		this.framebuffer = new GlFramebuffer();
+		framebuffer.addColorAttachment(0, swapTexture);
+		this.program = builder.build();
+	}
+
+	public void process(GlTexture targetImage) {
+		if (colorSpace == ColorSpace.SRGB) return;
+
+		this.target = targetImage;
+		GpuBuffer indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS).getBuffer(6);
+		var type = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS).type();
+
+		try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "Color space", Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTextureView(), Optional.empty())) {
+			pass.setPipeline(COMPOSITE_PIPELINE);
+			pass.iris$setCustomPass(EMPTY);
+
+			program.use();
+			framebuffer.bind();
+
+			pass.setIndexBuffer(indices, type);
+			pass.setVertexBuffer(0, FullScreenQuadRenderer.INSTANCE.getQuad().slice());
+
+			pass.drawIndexed(6, 1, 0, 0, 0);
+		}
+		Program.unbind();
+		framebuffer.bindAsReadBuffer();
+		IrisRenderSystem.copyTexSubImage2D(targetImage.glId(), GL11C.GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+	}
+}

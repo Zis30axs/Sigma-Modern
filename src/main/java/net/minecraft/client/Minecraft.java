@@ -258,8 +258,11 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements WindowEventHandler {
+public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+    implements WindowEventHandler, me.flashyreese.mods.sodiumextra.mixin.fog.AccessorMinecraft { // MODIFIED for porting: sodium-extra AccessorMinecraft
     private static Minecraft instance;
+    // MODIFIED for porting: iris MixinOptions_Entrypoint / VKOnly_InitKeys @Unique field
+    private static boolean iris$initialized;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_TICKS_PER_UPDATE = 10;
     public static final Identifier DEFAULT_FONT = Identifier.withDefaultNamespace("default");
@@ -335,6 +338,12 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     public @Nullable ClientLevel level;
     public @Nullable LocalPlayer player;
     private @Nullable IntegratedServer singleplayerServer;
+
+    // MODIFIED for porting: was sodium-extra's fog AccessorMinecraft @Accessor("singleplayerServer")
+    @Override
+    public @Nullable IntegratedServer sodiumExtra$getSingleplayerServer() {
+        return this.singleplayerServer;
+    }
     private @Nullable Connection pendingConnection;
     private boolean isLocalServer;
     public @Nullable Entity crosshairPickEntity;
@@ -418,7 +427,30 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
         KeybindResolver.setKeyResolver(KeyMapping::createNameSupplier);
         this.fixerUpper = DataFixers.getDataFixer();
         this.gameThread = Thread.currentThread();
+        /*
+          MODIFIED for porting: was iris's MixinOptions_Entrypoint#iris$beforeLoadOptions and VKOnly_InitKeys
+          #iris$beforeLoadOptions (both @Inject into <init> at the INVOKE of Options#<init>). This is iris's real entry point -
+          upstream's comment calls it "roughly equivalent to Fabric Loader's ClientModInitializer#onInitializeClient, except
+          it's entirely cross platform & we get to decide its exact semantics", and it has to run right before the options are
+          loaded so iris can add its key bindings (which Options#keyMappings then picks up).
+
+          The two mixins are mutually exclusive: IrisMixinPlugin only applies the VKOnly one when the Vulkan backend is
+          selected, and everything else only when it is not.
+        */
+        if (!iris$initialized) {
+            iris$initialized = true;
+
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isVulkanOnlyEnabled()) {
+                net.irisshaders.iris.IrisVKOnly.run();
+            } else {
+                new net.irisshaders.iris.Iris().onEarlyInitialize();
+            }
+        }
+
         this.options = new Options(this, this.gameDirectory);
+        // MODIFIED for porting: sodium core MinecraftMixin#setFullscreen (INVOKE DebugScreenEntryList.<init>) - pick a
+        // sensible default for the exclusive fullscreen option once, based on whether the user likely needs IME support.
+        sodium$chooseExclusiveFullscreenDefault();
         this.debugEntries = new DebugScreenEntryList(this.gameDirectory, this.fixerUpper);
         boolean lastStartWasClean = this.options.startedCleanly;
         this.options.startedCleanly = false;
@@ -700,6 +732,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
         this.narrator.checkStatus(this.options.narrator().get() != NarratorStatus.OFF);
         this.reportingContext = ReportingContext.create(ReportEnvironment.local(), this.userApiService);
         TitleScreen.registerTextures(this.textureManager);
+        // MODIFIED for porting: sodium core MinecraftMixin#registerSodiumIcon (@WrapOperation)
+        net.caffeinemc.mods.sodium.client.gui.SodiumConfigBuilder.registerIcon(this.textureManager);
+        // MODIFIED for porting: register sodium-extra / iris config icons directly (see SodiumConfigBuilder)
+        net.caffeinemc.mods.sodium.client.gui.SodiumConfigBuilder.registerPortedModIcons(this.textureManager);
         LoadingOverlay.registerTextures(this.textureManager);
         this.gameRenderer.registerPanoramaTextures(this.textureManager);
         this.timerQuery = new TimerQuery();
@@ -747,6 +783,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
                     }
                 }
             );
+        // MODIFIED for porting: was iris's MixinMinecraft_Images#iris$setupImages (@Inject into <init> at TAIL)
+        this.iris$setupImages();
     }
 
     public boolean hasShiftDown() {
@@ -772,6 +810,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     }
 
     private void onGameLoadFinished(final @Nullable GameLoadCookie cookie) {
+        // MODIFIED for porting: sodium core MinecraftMixin#postInit (HEAD) - check for problematic core shader resource
+        // packs after the initial game launch.
+        net.caffeinemc.mods.sodium.client.checks.ResourcePackScanner.checkIfCoreShaderLoaded(this.resourceManager);
+        net.caffeinemc.mods.sodium.client.config.ConfigManager.registerConfigsLate();
         Runnable showScreen = this.gui.buildInitialScreens(cookie);
         GameLoadTimesEvent.INSTANCE.endStep(TelemetryProperty.LOAD_TIME_LOADING_OVERLAY_MS);
         GameLoadTimesEvent.INSTANCE.endStep(TelemetryProperty.LOAD_TIME_TOTAL_TIME_MS);
@@ -1013,7 +1055,46 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     }
 
     public CompletableFuture<Void> reloadResourcePacks() {
-        return this.reloadResourcePacks(false, null);
+        CompletableFuture<Void> reload = this.reloadResourcePacks(false, null);
+        // MODIFIED for porting: sodium core MinecraftMixin#postResourceReload (TAIL) - check for problematic core shader
+        // resource packs after every resource reload.
+        net.caffeinemc.mods.sodium.client.checks.ResourcePackScanner.checkIfCoreShaderLoaded(this.resourceManager);
+        return reload;
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's core MinecraftMixin#setFullscreen.
+     */
+    private static void sodium$chooseExclusiveFullscreenDefault() {
+        if (net.caffeinemc.mods.sodium.client.SodiumClientMod.options().notifications.hasEditedFullscreenOption) {
+            return;
+        }
+
+        net.caffeinemc.mods.sodium.client.SodiumClientMod.options().notifications.hasEditedFullscreenOption = true;
+
+        try {
+            net.caffeinemc.mods.sodium.client.gui.SodiumOptions.writeToDisk(net.caffeinemc.mods.sodium.client.SodiumClientMod.options());
+        } catch (IOException e) {
+            net.caffeinemc.mods.sodium.client.SodiumClientMod.logger().error("Failed to update config file", e);
+            // Do not get stuck in a loop of setting exclusive fullscreen! That'd be very annoying.
+            return;
+        }
+
+        boolean hasIME = net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils.getOs()
+                == net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils.OperatingSystem.WIN
+            && net.caffeinemc.mods.sodium.client.platform.windows.api.Imm32.CheckIMEStatus();
+        Minecraft.getInstance().options.exclusiveFullscreen().set(!hasIME);
+        if (hasIME) {
+            net.caffeinemc.mods.sodium.client.SodiumClientMod.logger()
+                .info("Setting exclusive fullscreen to false by default, as the user is using Japanese/Chinese/Korean and likely needs IME support.");
+        } else if (net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils.getOs()
+            != net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils.OperatingSystem.WIN) {
+            net.caffeinemc.mods.sodium.client.SodiumClientMod.logger()
+                .info("Setting exclusive fullscreen to true by default, as the user is not on Windows and the language cannot be guessed.");
+        } else {
+            net.caffeinemc.mods.sodium.client.SodiumClientMod.logger()
+                .info("Setting exclusive fullscreen to true by default, as the user is using a language that likely does not need an IME.");
+        }
     }
 
     private CompletableFuture<Void> reloadResourcePacks(final boolean isRecovery, final @Nullable GameLoadCookie loadCookie) {
@@ -1151,7 +1232,39 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
         }
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinMinecraft_Images#iris$setupImages (@Inject into <init> at TAIL). It registers the
+     * "widgets" texture used by iris's GUIs; Fabric API would normally do this automatically, but iris does not use it.
+     */
+    private void iris$setupImages() {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return;
+        }
+
+        if (!net.irisshaders.iris.platform.IrisPlatformHelpers.getInstance().isModLoaded("fabric-resource-loader-v0")) {
+            try {
+                Minecraft.getInstance()
+                    .getTextureManager()
+                    .register(
+                        Identifier.fromNamespaceAndPath("iris", "textures/gui/widgets.png"),
+                        new net.irisshaders.iris.targets.backed.NativeImageBackedCustomTexture(
+                            new net.irisshaders.iris.shaderpack.texture.CustomTextureData.PngData(
+                                new net.irisshaders.iris.shaderpack.texture.TextureFilteringData(false, false),
+                                org.apache.commons.io.IOUtils.toByteArray(
+                                    net.irisshaders.iris.Iris.class.getResourceAsStream("/assets/iris/textures/gui/widgets.png")
+                                )
+                            )
+                        )
+                    );
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
     private void runTick(final boolean advanceGameTime) {
+        // MODIFIED for porting: was sodium-extra's gui MixinMinecraftClient#onRunTick (@Inject HEAD)
+        me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.onTick(this);
         this.window.setErrorSection("Pre render");
         if (this.window.shouldClose()) {
             this.stop();
@@ -1355,6 +1468,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
 
             for (this.gpuUtilization = this.timerQuery.get() * 100.0 / this.savedCpuDuration; Util.getMillis() >= this.lastTime + 1000L; this.frames = 0) {
                 fps = this.frames;
+                // MODIFIED for porting: sodium features.gui.hooks.debug MinecraftRenderFrameMixin#sodium$updatePercentileCache
+                // (FIELD PUTSTATIC fps, shift AFTER) - hook the vanilla fps update so the percentile display refreshes at the
+                // same rate, once a second.
+                net.caffeinemc.mods.sodium.client.util.FrameTimeStatistics.INSTANCE.invalidate();
                 this.lastTime += 1000L;
             }
 
@@ -1853,6 +1970,17 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
 
         profiler.popPush("keyboard");
         this.keyboardHandler.tick();
+        // MODIFIED for porting: was iris's MixinMinecraft_Keybinds#iris$onTick and VKOnly_InitKeys#iris$handleKe (both
+        // @Inject into tick() at RETURN). Upstream's comment notes this is equivalent to Fabric API's END_CLIENT_TICK event,
+        // implemented by hand to keep the jar small.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isVulkanOnlyEnabled()) {
+            net.irisshaders.iris.IrisVKOnly.handleKeybinds();
+        } else {
+            Profiler.get().push("iris_keybinds");
+            net.irisshaders.iris.Iris.handleKeybinds(this);
+            Profiler.get().pop();
+        }
+
         profiler.pop();
     }
 
@@ -2059,6 +2187,12 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     }
 
     public void setLevel(final ClientLevel level) {
+        // MODIFIED for porting: was iris's MixinMinecraft_PipelineManagement#iris$trackLastDimensionOnLevelChange
+        // (@Inject HEAD) - must run before the Minecraft.level field is updated.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.lastDimension = net.irisshaders.iris.Iris.getCurrentDimension();
+        }
+
         this.level = level;
         this.updateLevelInEngines(level);
     }
@@ -2158,6 +2292,12 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     }
 
     public void clearClientLevel(final Screen screen) {
+        // MODIFIED for porting: was iris's MixinMinecraft_PipelineManagement#iris$trackLastDimensionOnLeave (@Inject HEAD) -
+        // must run before the Minecraft.level field is updated.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.Iris.lastDimension = net.irisshaders.iris.Iris.getCurrentDimension();
+        }
+
         ClientPacketListener connection = this.getConnection();
         if (connection != null) {
             connection.clearLevel();
@@ -2195,6 +2335,23 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable> implements 
     }
 
     private void updateLevelInEngines(final @Nullable ClientLevel level, final boolean stopSound) {
+        /*
+          MODIFIED for porting: was iris's MixinMinecraft_PipelineManagement#iris$resetPipeline (@Inject HEAD).
+
+          Injects before LevelRenderer receives the new level, or is notified of the level unload. Pipelines are destroyed here
+          to guard against leaking pipelines for dimensions that are never unloaded, and the new one is created immediately so
+          that it is ready by the time sodium starts reloading its world renderer - otherwise sodium could initialize with the
+          non-extended vertex format while iris then switches its pipeline on. See IrisShaders/Iris#1330.
+        */
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.getCurrentDimension() != net.irisshaders.iris.Iris.lastDimension) {
+            net.irisshaders.iris.Iris.logger.info("Reloading pipeline on dimension change: " + net.irisshaders.iris.Iris.lastDimension + " => " + net.irisshaders.iris.Iris.getCurrentDimension());
+            net.irisshaders.iris.Iris.getPipelineManager().destroyPipeline();
+
+            if (level != null) {
+                net.irisshaders.iris.Iris.getPipelineManager().preparePipeline(net.irisshaders.iris.Iris.getCurrentDimension());
+            }
+        }
+
         if (stopSound) {
             this.soundManager.stop();
         }

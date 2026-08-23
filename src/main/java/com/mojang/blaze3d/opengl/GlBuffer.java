@@ -13,7 +13,7 @@ import org.lwjgl.system.MemoryUtil;
 @OnlyIn(Dist.CLIENT)
 public abstract class GlBuffer extends GpuBuffer {
     protected static final MemoryPool MEMORY_POOL = TracyClient.createMemoryPool("GPU Buffers");
-    private final int handle;
+    public final int handle;
     protected final boolean canPersistentMap;
     protected int mappingRefCount = 0;
 

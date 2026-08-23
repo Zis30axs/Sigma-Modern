@@ -13,6 +13,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
+import malte0811.ferritecore.ducks.BlockStateCacheAccess; // MODIFIED for porting
+import malte0811.ferritecore.impl.BlockStateCacheImpl; // MODIFIED for porting
+import malte0811.ferritecore.mixin.config.FerriteConfig; // MODIFIED for porting
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -82,7 +85,8 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
-public abstract class BlockBehaviour implements FeatureElement {
+// MODIFIED for porting: implements lithium's ShapeUpdateHandlingBlockBehaviour (block.hopper BlockBehaviourMixin)
+public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.mods.lithium.common.block.entity.ShapeUpdateHandlingBlockBehaviour {
     protected static final Direction[] UPDATE_SHAPE_ORDER = new Direction[]{
         Direction.WEST, Direction.EAST, Direction.NORTH, Direction.SOUTH, Direction.DOWN, Direction.UP
     };
@@ -154,6 +158,10 @@ public abstract class BlockBehaviour implements FeatureElement {
         final BlockState neighbourState,
         final RandomSource random
     ) {
+        // MODIFIED for porting: lithium block.hopper BlockBehaviourMixin#notifyOnShapeUpdate (HEAD). Triggers when a shape
+        // update (= an update that observers can detect) is sent. Subclasses that override this method run their own
+        // super call, which reaches this hook as well.
+        this.lithium$handleShapeUpdate(level, state, pos, neighbourPos, neighbourState);
         return state;
     }
 
@@ -427,7 +435,10 @@ public abstract class BlockBehaviour implements FeatureElement {
         return this.properties.destroyTime;
     }
 
-    public abstract static class BlockStateBase extends StateHolder<Block, BlockState> implements TypedInstance<Block> {
+    // MODIFIED for porting: lithium util.block_tracking BlockStateBaseMixin makes every block state carry a bitset of
+    // the tracked block-state predicates (see BlockStateFlags) so chunk sections can count them.
+    public abstract static class BlockStateBase extends StateHolder<Block, BlockState>
+        implements TypedInstance<Block>, net.caffeinemc.mods.lithium.common.block.BlockStateFlagHolder {
         private static final Direction[] DIRECTIONS = Direction.values();
         private static final VoxelShape[] EMPTY_OCCLUSION_SHAPES = Util.make(new VoxelShape[DIRECTIONS.length], s -> Arrays.fill(s, Shapes.empty()));
         private static final VoxelShape[] FULL_BLOCK_OCCLUSION_SHAPES = Util.make(new VoxelShape[DIRECTIONS.length], s -> Arrays.fill(s, Shapes.block()));
@@ -458,6 +469,8 @@ public abstract class BlockBehaviour implements FeatureElement {
         private boolean isRandomlyTicking;
         private boolean solidRender;
         private VoxelShape occlusionShape;
+        // MODIFIED for porting: lithium util.block_tracking BlockStateBaseMixin @Unique field
+        private int lithium$flags = -1;
         private VoxelShape[] occlusionShapesByFace;
         private boolean propagatesSkylightDown;
         private int lightDampening;
@@ -509,6 +522,13 @@ public abstract class BlockBehaviour implements FeatureElement {
         }
 
         public void initCache() {
+            // MODIFIED for porting: FerriteCore's BlockStateBaseMixin injects at HEAD and TAIL of this method to
+            // deduplicate the collision shape and face-sturdiness array of the cache that is (re-)built here.
+            final boolean ferritecore_dedup = FerriteConfig.DEDUP_BLOCKSTATE_CACHE.isEnabled();
+            if (ferritecore_dedup) {
+                BlockStateCacheImpl.deduplicateCachePre(this);
+            }
+
             this.fluidState = this.owner.getFluidState(this.asState());
             this.isRandomlyTicking = this.owner.isRandomlyTicking(this.asState());
             if (!this.getBlock().hasDynamicShape()) {
@@ -532,6 +552,55 @@ public abstract class BlockBehaviour implements FeatureElement {
 
             this.propagatesSkylightDown = this.owner.propagatesSkylightDown(this.asState());
             this.lightDampening = this.owner.getLightDampening(this.asState());
+
+            // MODIFIED for porting: FerriteCore's BlockStateBaseMixin TAIL injection
+            if (ferritecore_dedup) {
+                BlockStateCacheImpl.deduplicateCachePost(this);
+            }
+        }
+
+        // MODIFIED for porting: the next three methods were lithium's util.block_tracking BlockStateBaseMixin
+        @Override
+        public void lithium$initializeFlags() {
+            net.caffeinemc.mods.lithium.common.block.TrackedBlockStatePredicate.FULLY_INITIALIZED.set(true);
+            int flags = 0;
+
+            for (int i = 0; i < net.caffeinemc.mods.lithium.common.block.BlockStateFlags.FLAGS.length; i++) {
+                if (net.caffeinemc.mods.lithium.common.block.BlockStateFlags.FLAGS[i].test(this.asState())) {
+                    flags |= 1 << i;
+                }
+            }
+
+            this.lithium$flags = flags;
+        }
+
+        @Override
+        public int lithium$getAllFlags() {
+            int blockStateFlags = this.lithium$flags;
+            if (blockStateFlags == -1) {
+                blockStateFlags = this.lithium$handleUninitializedBlockStateFlags();
+            }
+
+            return blockStateFlags;
+        }
+
+        private int lithium$handleUninitializedBlockStateFlags() {
+            if (!net.caffeinemc.mods.lithium.common.block.BlockStateFlags.ENABLED) {
+                throw new IllegalStateException("Tried to access block state flags even though the feature is disabled!");
+            }
+
+            net.caffeinemc.mods.lithium.common.initialization.BlockInfoInitializer.initializeBlockInfo();
+            if (this.lithium$flags == -1) {
+                throw new IllegalStateException("Could not initialize block state flags for " + this);
+            }
+
+            return this.lithium$flags;
+        }
+
+        // MODIFIED for porting: FerriteCore reached this private field of a private inner class through a MethodHandle
+        // because Mixin cannot generate accessors for it. In a source-level port it is simply exposed here.
+        public BlockStateCacheAccess ferritecore_getCache() {
+            return this.cache;
         }
 
         public Block getBlock() {
@@ -619,8 +688,19 @@ public abstract class BlockBehaviour implements FeatureElement {
             return this.emissiveRendering.test(this.asState());
         }
 
+        /**
+         * MODIFIED for porting: was iris's MixinBlockStateBehavior#getShadeBrightness (@Inject RETURN, cancellable) - this is
+         * how iris implements a shader pack's ambientOcclusionLevel. The injection point was chosen because every renderer
+         * (vanilla, sodium, FRAPI, ...) goes through this method while almost nothing overrides it.
+         */
         public float getShadeBrightness(final BlockGetter level, final BlockPos pos) {
-            return this.getBlock().getShadeBrightness(this.asState(), level, pos);
+            float originalValue = this.getBlock().getShadeBrightness(this.asState(), level, pos);
+            if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                return originalValue;
+            }
+
+            float aoLightValue = net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getAmbientOcclusionLevel();
+            return 1.0F - aoLightValue * (1.0F - originalValue);
         }
 
         public boolean isRedstoneConductor(final BlockGetter level, final BlockPos pos) {
@@ -919,12 +999,13 @@ public abstract class BlockBehaviour implements FeatureElement {
             return this.instrument;
         }
 
-        private static final class Cache {
+        private static final class Cache implements BlockStateCacheAccess { // MODIFIED for porting
             private static final Direction[] DIRECTIONS = Direction.values();
             private static final int SUPPORT_TYPE_COUNT = SupportType.values().length;
-            public final VoxelShape collisionShape;
+            // MODIFIED for porting: no longer final so FerriteCore can swap in a deduplicated shape/array
+            public VoxelShape collisionShape;
             public final boolean largeCollisionShape;
-            private final boolean[] faceSturdy;
+            private boolean[] faceSturdy;
             public final boolean isCollisionShapeFullBlock;
 
             private Cache(final BlockState state) {
@@ -959,6 +1040,28 @@ public abstract class BlockBehaviour implements FeatureElement {
 
             private static int getFaceSupportIndex(final Direction direction, final SupportType supportType) {
                 return direction.ordinal() * SUPPORT_TYPE_COUNT + supportType.ordinal();
+            }
+
+            // MODIFIED for porting: the following four methods were FerriteCore's BlockStateCacheMixin, which
+            // implemented BlockStateCacheAccess on this class through @Shadow @Mutable fields
+            @Override
+            public VoxelShape getCollisionShape() {
+                return this.collisionShape;
+            }
+
+            @Override
+            public void setCollisionShape(final VoxelShape newShape) {
+                this.collisionShape = newShape;
+            }
+
+            @Override
+            public boolean[] getFaceSturdy() {
+                return this.faceSturdy;
+            }
+
+            @Override
+            public void setFaceSturdy(final boolean[] newFaceSturdyArray) {
+                this.faceSturdy = newFaceSturdyArray;
             }
         }
     }

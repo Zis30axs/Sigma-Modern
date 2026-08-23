@@ -134,10 +134,57 @@ public class BakedSheetGlyph implements EffectGlyph, BakedGlyph {
         float shearY0 = italic ? this.shearTop() : 0.0F;
         float shearY1 = italic ? this.shearBottom() : 0.0F;
         float extraThickness = extraThickness(bold);
+        // MODIFIED for porting: sodium features.render.gui.font BakedGlyphMixin#drawFast (HEAD, cancellable) - writes the
+        // four glyph vertices straight into the target buffer when it supports sodium's bulk writer.
+        net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter sodium$writer = net.caffeinemc.mods.sodium.client.render.vertex.VertexConsumerUtils.convertOrLog(builder);
+        if (sodium$writer != null) {
+            int sodium$color = net.caffeinemc.mods.sodium.api.util.ColorARGB.toABGR(color);
+
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                long buffer = stack.nmalloc(4 * net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE);
+                long ptr = buffer;
+                sodium$writeGlyphVertex(ptr, pose, x0 + shearY0 - extraThickness, y0 - extraThickness, z, sodium$color, this.u0, this.v0, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, x0 + shearY1 - extraThickness, y1 + extraThickness, z, sodium$color, this.u0, this.v1, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, x1 + shearY1 + extraThickness, y1 + extraThickness, z, sodium$color, this.u1, this.v1, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, x1 + shearY0 + extraThickness, y0 - extraThickness, z, sodium$color, this.u1, this.v0, packedLightCoords);
+                sodium$writer.push(stack, buffer, 4, net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.FORMAT);
+            }
+
+            return;
+        }
+
         builder.addVertex(pose, x0 + shearY0 - extraThickness, y0 - extraThickness, z).setColor(color).setUv(this.u0, this.v0).setLight(packedLightCoords);
         builder.addVertex(pose, x0 + shearY1 - extraThickness, y1 + extraThickness, z).setColor(color).setUv(this.u0, this.v1).setLight(packedLightCoords);
         builder.addVertex(pose, x1 + shearY1 + extraThickness, y1 + extraThickness, z).setColor(color).setUv(this.u1, this.v1).setLight(packedLightCoords);
         builder.addVertex(pose, x1 + shearY0 + extraThickness, y0 - extraThickness, z).setColor(color).setUv(this.u1, this.v0).setLight(packedLightCoords);
+    }
+
+    // MODIFIED for porting: was sodium's features.render.gui.font BakedGlyphMixin#write
+    private static void sodium$writeGlyphVertex(
+        final long buffer,
+        final Matrix4fc matrix,
+        final float x,
+        final float y,
+        final float z,
+        final int color,
+        final float u,
+        final float v,
+        final int light
+    ) {
+        net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex
+            .put(
+                buffer,
+                net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionX(matrix, x, y, z),
+                net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionY(matrix, x, y, z),
+                net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionZ(matrix, x, y, z),
+                color,
+                u,
+                v,
+                light
+            );
     }
 
     private static float extraThickness(final boolean bold) {
@@ -173,6 +220,28 @@ public class BakedSheetGlyph implements EffectGlyph, BakedGlyph {
         final int packedLightCoords,
         final Matrix4fc pose
     ) {
+        // MODIFIED for porting: sodium features.render.gui.font BakedGlyphMixin#drawEffectFast (HEAD, cancellable). Note the
+        // y1/y0 order: it matches upstream's comment that the two were swapped in 1.21.6+, and the vanilla calls below.
+        net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter sodium$writer = net.caffeinemc.mods.sodium.client.render.vertex.VertexConsumerUtils.convertOrLog(buffer);
+        if (sodium$writer != null) {
+            int sodium$color = net.caffeinemc.mods.sodium.api.util.ColorARGB.toABGR(color);
+
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                long vertices = stack.nmalloc(4 * net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE);
+                long ptr = vertices;
+                sodium$writeGlyphVertex(ptr, pose, effect.x0 + offset, effect.y1 + offset, z, sodium$color, this.u0, this.v0, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, effect.x1 + offset, effect.y1 + offset, z, sodium$color, this.u0, this.v1, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, effect.x1 + offset, effect.y0 + offset, z, sodium$color, this.u1, this.v1, packedLightCoords);
+                ptr += net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.STRIDE;
+                sodium$writeGlyphVertex(ptr, pose, effect.x0 + offset, effect.y0 + offset, z, sodium$color, this.u1, this.v0, packedLightCoords);
+                sodium$writer.push(stack, vertices, 4, net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex.FORMAT);
+            }
+
+            return;
+        }
+
         buffer.addVertex(pose, effect.x0 + offset, effect.y1 + offset, z).setColor(color).setUv(this.u0, this.v0).setLight(packedLightCoords);
         buffer.addVertex(pose, effect.x1 + offset, effect.y1 + offset, z).setColor(color).setUv(this.u0, this.v1).setLight(packedLightCoords);
         buffer.addVertex(pose, effect.x1 + offset, effect.y0 + offset, z).setColor(color).setUv(this.u1, this.v1).setLight(packedLightCoords);
@@ -199,7 +268,8 @@ public class BakedSheetGlyph implements EffectGlyph, BakedGlyph {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record EffectInstance(BakedSheetGlyph glyph, float x0, float y0, float x1, float y1, float depth, int color, int shadowColor, float shadowOffset)
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public record EffectInstance(BakedSheetGlyph glyph, float x0, float y0, float x1, float y1, float depth, int color, int shadowColor, float shadowOffset)
         implements TextRenderable {
         @Override
         public float left() {

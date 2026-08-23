@@ -34,7 +34,16 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryStack;
 
 @OnlyIn(Dist.CLIENT)
-public class FogRenderer implements AutoCloseable {
+// MODIFIED for porting: implements sodium's FogStorage (core.render.world FogRendererMixin)
+public class FogRenderer implements AutoCloseable, net.caffeinemc.mods.sodium.client.util.FogStorage {
+    // MODIFIED for porting: sodium core.render.world FogRendererMixin @Unique field
+    private net.caffeinemc.mods.sodium.client.util.FogParameters sodium$parameters = net.caffeinemc.mods.sodium.client.util.FogParameters.NONE;
+
+    @Override
+    public net.caffeinemc.mods.sodium.client.util.FogParameters sodium$getFogParameters() {
+        return this.sodium$parameters;
+    }
+
     public static final int FOG_UBO_SIZE = new Std140SizeCalculator().putVec4().putFloat().putFloat().putFloat().putFloat().putFloat().putFloat().get();
     private static final List<FogEnvironment> FOG_ENVIRONMENTS = Lists.newArrayList(
         new LavaFogEnvironment(),
@@ -169,15 +178,39 @@ public class FogRenderer implements AutoCloseable {
     public FogData setupFog(
         final Camera camera, final int renderDistanceInChunks, final DeltaTracker deltaTracker, final float darkenWorldAmount, final ClientLevel level
     ) {
+        // MODIFIED for porting: was iris's MixinFogRenderer#iris$setupLegacyWaterFog (@Inject HEAD) - shader packs read the
+        // legacy OptiFine-style water fog density uniform.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (camera.getFluidInCamera() == net.minecraft.world.level.material.FogType.WATER) {
+                float irisDensity = 0.05F;
+
+                if (camera.entity() instanceof net.minecraft.client.player.LocalPlayer localPlayer) {
+                    irisDensity -= localPlayer.getWaterVision() * localPlayer.getWaterVision() * 0.03F;
+                    // TODO PORT: upstream additionally adds 0.005F when the biome is in BiomeTags.HAS_CLOSER_WATER_FOG. That
+                    // branch is already commented out upstream with the note "not supported (1.21.11+)", so it is not ported.
+                }
+
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setFogDensity(irisDensity);
+            } else {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setFogDensity(-1.0F);
+            }
+        }
+
         float partialTickTime = deltaTracker.getGameTimeDeltaPartialTick(false);
         float renderDistanceInBlocks = renderDistanceInChunks * 16;
         FogType fogType = this.getFogType(camera);
         Entity entity = camera.entity();
         FogData fog = new FogData();
+        // MODIFIED for porting: was sodium-extra's fog MixinFogRenderer#resetFogEnvironment (@Inject HEAD) plus its @Unique
+        // field - the flag is only written and read inside this one call, so it is a local here.
+        boolean sodiumExtra$usingAtmosphericFog = false;
         this.computeFogColor(camera, partialTickTime, level, renderDistanceInChunks, darkenWorldAmount, fog.color);
 
         for (FogEnvironment fogEnvironment : FOG_ENVIRONMENTS) {
             if (fogEnvironment.isApplicable(fogType, entity)) {
+                // MODIFIED for porting: was sodium-extra's fog MixinFogRenderer#captureFogEnvironment
+                // (@Redirect on FogEnvironment#setupFog)
+                sodiumExtra$usingAtmosphericFog = fogEnvironment instanceof AtmosphericFogEnvironment;
                 fogEnvironment.setupFog(fog, camera, level, renderDistanceInBlocks, deltaTracker);
                 break;
             }
@@ -186,7 +219,46 @@ public class FogRenderer implements AutoCloseable {
         float renderDistanceFogSpan = Mth.clamp(renderDistanceInBlocks / 10.0F, 4.0F, 64.0F);
         fog.renderDistanceStart = renderDistanceInBlocks - renderDistanceFogSpan;
         fog.renderDistanceEnd = renderDistanceInBlocks;
+        // MODIFIED for porting: was sodium-extra's fog MixinFogRenderer#postFogSetup
+        // (@Inject at FIELD FogData.renderDistanceEnd PUTFIELD ordinal 0, shift AFTER)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.FOG && sodiumExtra$usingAtmosphericFog) {
+            sodiumExtra$postFogSetup(fog, level);
+        }
+        // MODIFIED for porting: sodium core.render.world FogRendererMixin#sodium$storeFogParameters (RETURN)
+        this.sodium$parameters = new net.caffeinemc.mods.sodium.client.util.FogParameters(
+            fog.color.x, fog.color.y, fog.color.z, fog.color.w, fog.environmentalStart, fog.environmentalEnd, fog.renderDistanceStart, fog.renderDistanceEnd
+        );
+        // MODIFIED for porting: was iris's MixinFogRenderer#render (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setFogColor(fog.color.x, fog.color.y, fog.color.z);
+        }
+
         return fog;
+    }
+
+    // MODIFIED for porting: was the body of sodium-extra's fog MixinFogRenderer#postFogSetup
+    private static void sodiumExtra$postFogSetup(final FogData fogData, final ClientLevel level) {
+        me.flashyreese.mods.sodiumextra.client.config.SodiumExtraGameOptions.AtmosphericFogSettings settings = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getAtmosphericSettings(level);
+        int fogDistance = settings.distanceChunks;
+        if (me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.isBossFogActive()) {
+            return;
+        }
+
+        if (fogDistance == me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.FOG_DISTANCE_VANILLA) {
+            fogData.renderDistanceStart = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyStartMultiplier(fogData.renderDistanceStart, settings);
+            me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyRenderDistanceShape(fogData, settings);
+            return;
+        }
+
+        if (me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.disablesFog(fogDistance)) {
+            fogData.renderDistanceStart = Float.MAX_VALUE;
+            fogData.renderDistanceEnd = Float.MAX_VALUE;
+            return;
+        }
+
+        fogData.renderDistanceStart = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getStart(settings);
+        fogData.renderDistanceEnd = me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.getEnd(fogDistance);
+        me.flashyreese.mods.sodiumextra.client.fog.FogDistanceHelper.applyRenderDistanceShape(fogData, settings);
     }
 
     public void updateBuffer(final FogData fog) {

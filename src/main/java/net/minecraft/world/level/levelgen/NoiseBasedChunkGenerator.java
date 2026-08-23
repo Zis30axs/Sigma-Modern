@@ -481,9 +481,18 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
         return this.settings.value().noiseSettings().height();
     }
 
+    // MODIFIED for porting: lithium gen.cached_generator_settings NoiseBasedChunkGeneratorMixin caches the sea level
+    // instead of resolving it from the registry for every block of the chunk. The initialization is lazy to avoid an
+    // unbound-registry-value crash.
+    private int lithium$cachedSeaLevel = Integer.MIN_VALUE;
+
     @Override
     public int getSeaLevel() {
-        return this.settings.value().seaLevel();
+        if (this.lithium$cachedSeaLevel == Integer.MIN_VALUE) {
+            this.lithium$cachedSeaLevel = this.settings.value().seaLevel();
+        }
+
+        return this.lithium$cachedSeaLevel;
     }
 
     @Override

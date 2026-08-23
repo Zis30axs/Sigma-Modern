@@ -29,10 +29,11 @@ public final class EntitySelector {
     public static Predicate<Entity> pushableBy(final Entity entity) {
         Team ownTeam = entity.getTeam();
         Team.CollisionRule ownCollisionRule = ownTeam == null ? Team.CollisionRule.ALWAYS : ownTeam.getCollisionRule();
-        return ownCollisionRule == Team.CollisionRule.NEVER
-            ? Predicates.alwaysFalse()
-            : NO_SPECTATORS.and(
-                input -> {
+        if (ownCollisionRule == Team.CollisionRule.NEVER) {
+            return Predicates.alwaysFalse();
+        }
+
+        Predicate<Entity> teamAndPushableCheck = input -> {
                     if (!input.isPushable()) {
                         return false;
                     }
@@ -51,8 +52,11 @@ public final class EntitySelector {
                     } else {
                         return false;
                     }
-                }
-            );
+                };
+        // MODIFIED for porting: lithium entity.collisions.unpushable_cramming EntitySelectorMixin#getEntityPushablePredicate -
+        // the combined predicate is wrapped in lithium's own type so the entity lookups can recognise it and use the
+        // per-section cache of maybe-pushable entities.
+        return net.caffeinemc.mods.lithium.common.entity.pushable.EntityPushablePredicate.and(NO_SPECTATORS, teamAndPushableCheck);
     }
 
     public static Predicate<Entity> notRiding(final Entity entity) {

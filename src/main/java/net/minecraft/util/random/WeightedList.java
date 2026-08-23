@@ -23,7 +23,12 @@ public final class WeightedList<E> {
     private final WeightedList.@Nullable Selector<E> selector;
 
     private WeightedList(final List<? extends Weighted<E>> items) {
-        this.items = List.copyOf(items);
+        // MODIFIED for porting: lithium collections.mob_spawning WeightedListMixin#init - contains() on a plain list is linear; for longer lists use a
+        // hashed reference list. Reference equality is used because every vanilla Weighted implementation does.
+        List<Weighted<E>> lithium$items = (List<Weighted<E>>)items;
+        this.items = items.size() > 4
+            ? new net.caffeinemc.mods.lithium.common.util.collections.HashedReferenceList<>(lithium$items)
+            : new it.unimi.dsi.fastutil.objects.ReferenceArrayList<>(lithium$items);
         this.totalWeight = WeightedRandom.getTotalWeight(items, Weighted::weight);
         if (this.totalWeight == 0) {
             this.selector = null;

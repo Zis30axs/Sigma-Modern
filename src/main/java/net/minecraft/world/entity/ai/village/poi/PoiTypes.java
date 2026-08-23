@@ -56,7 +56,9 @@ public class PoiTypes {
         .stream()
         .flatMap(block -> block.getStateDefinition().getPossibleStates().stream())
         .collect(ImmutableSet.toImmutableSet());
-    private static final Map<BlockState, Holder<PoiType>> TYPE_BY_STATE = Maps.newHashMap();
+    // MODIFIED for porting: lithium (fabric) collections.poi_types PoiTypesMixin - a faster collection type that uses
+    // reference equality (block states are interned).
+    private static final Map<BlockState, Holder<PoiType>> TYPE_BY_STATE = new it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap<>();
 
     private static Set<BlockState> getBlockStates(final Block block) {
         return ImmutableSet.copyOf(block.getStateDefinition().getPossibleStates());

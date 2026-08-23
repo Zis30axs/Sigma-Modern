@@ -54,7 +54,8 @@ public class GolemRandomStrollInVillageGoal extends RandomStrollGoal {
 
     private @Nullable Vec3 getPositionTowardsVillagerWhoWantsGolem() {
         ServerLevel level = (ServerLevel)this.mob.level();
-        List<Villager> villagers = level.getEntities(EntityTypes.VILLAGER, this.mob.getBoundingBox().inflate(32.0), this::doesVillagerWantGolem);
+        // MODIFIED for porting: lithium entity.replace_entitytype_predicates GolemRandomStrollInVillageGoalMixin#getEntities
+        List<Villager> villagers = level.getEntitiesOfClass(Villager.class, this.mob.getBoundingBox().inflate(32.0), this::doesVillagerWantGolem);
         if (villagers.isEmpty()) {
             return null;
         }

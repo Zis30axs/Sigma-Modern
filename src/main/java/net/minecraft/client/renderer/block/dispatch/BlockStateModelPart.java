@@ -11,7 +11,9 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public interface BlockStateModelPart {
+// MODIFIED for porting: was iris's MixinBlockState and MixinBlockModelPart - both only make this interface extend
+// IrisModelPart (which supplies a default getBlockAppearance()).
+public interface BlockStateModelPart extends net.irisshaders.iris.compat.general.IrisModelPart {
     List<BakedQuad> getQuads(@Nullable Direction direction);
 
     boolean useAmbientOcclusion();

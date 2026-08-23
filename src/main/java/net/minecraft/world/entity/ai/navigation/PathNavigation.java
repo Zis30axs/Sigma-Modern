@@ -104,6 +104,9 @@ public abstract class PathNavigation {
         } else if (this.targetPos != null) {
             this.path = null;
             this.path = this.createPath(this.targetPos, this.reachRange);
+            // MODIFIED for porting: lithium entity.inactive_navigations PathNavigationMixin#updateListeningState
+            // (INVOKE_ASSIGN createPath, shift AFTER)
+            this.lithium$updateNavigationActiveState();
             this.timeLastRecompute = this.level.getGameTime();
             this.hasDelayedRecomputation = false;
         }
@@ -186,6 +189,15 @@ public abstract class PathNavigation {
     }
 
     public boolean moveTo(final @Nullable Path newPath, final double speedModifier) {
+        // MODIFIED for porting: lithium entity.inactive_navigations PathNavigationMixin#updateListeningState2 (RETURN).
+        // The original method body was moved into lithium$moveTo so that every return path runs the hook below.
+        boolean lithium$result = this.lithium$moveTo(newPath, speedModifier);
+        this.lithium$updateNavigationActiveState();
+        return lithium$result;
+    }
+
+    // MODIFIED for porting: original vanilla body of moveTo(Path, double), see above
+    private boolean lithium$moveTo(final @Nullable Path newPath, final double speedModifier) {
         if (newPath == null) {
             this.path = null;
             return false;
@@ -347,6 +359,25 @@ public abstract class PathNavigation {
 
     public void stop() {
         this.path = null;
+        // MODIFIED for porting: lithium entity.inactive_navigations PathNavigationMixin#stopListening (RETURN)
+        if (((net.caffeinemc.mods.lithium.common.entity.NavigatingEntity)this.mob).lithium$isRegisteredToWorld()) {
+            ((net.caffeinemc.mods.lithium.common.world.ServerWorldExtended)this.level).lithium$setNavigationInactive(this.mob);
+        }
+    }
+
+    /**
+     * MODIFIED for porting: was lithium's entity.inactive_navigations PathNavigationMixin#updateListeningState /
+     * #updateListeningState2. Keeps the level's set of navigations that actually have a path up to date. Only navigations in
+     * that set need to be notified about collision shape changes.
+     */
+    private void lithium$updateNavigationActiveState() {
+        if (((net.caffeinemc.mods.lithium.common.entity.NavigatingEntity)this.mob).lithium$isRegisteredToWorld()) {
+            if (this.path == null) {
+                ((net.caffeinemc.mods.lithium.common.world.ServerWorldExtended)this.level).lithium$setNavigationInactive(this.mob);
+            } else {
+                ((net.caffeinemc.mods.lithium.common.world.ServerWorldExtended)this.level).lithium$setNavigationActive(this.mob);
+            }
+        }
     }
 
     protected abstract Vec3 getTempMobPos();

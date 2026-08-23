@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
-public class NonNullList<E> extends AbstractList<E> {
+public class NonNullList<E> extends AbstractList<E> implements net.caffeinemc.mods.lithium.mixin.block.hopper.NonNullListAccessor<E> { // MODIFIED for porting: lithium block.hopper NonNullListAccessor
     private final List<E> list;
     private final @Nullable E defaultValue;
 
@@ -29,6 +29,12 @@ public class NonNullList<E> extends AbstractList<E> {
     @SafeVarargs
     public static <E> NonNullList<E> of(final E defaultValue, final E... values) {
         return new NonNullList<>(Arrays.asList(values), defaultValue);
+    }
+
+    // MODIFIED for porting: was lithium's block.hopper NonNullListAccessor Mixin
+    @Override
+    public List<E> getDelegate() {
+        return this.list;
     }
 
     protected NonNullList(final List<E> list, final @Nullable E defaultValue) {

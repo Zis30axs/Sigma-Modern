@@ -22,6 +22,10 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 public class CapeLayer extends RenderLayer<AvatarRenderState, PlayerModel> {
+    // MODIFIED for porting: iris entity_render_context MixinCapeLayer @Unique constant
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_CAPE_LOCATION =
+        new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "player_cape");
+
     private final HumanoidModel<AvatarRenderState> model;
     private final EquipmentAssetManager equipmentAssets;
 
@@ -55,6 +59,13 @@ public class CapeLayer extends RenderLayer<AvatarRenderState, PlayerModel> {
             PlayerSkin skin = state.skin;
             if (skin.cape() != null) {
                 if (!this.hasLayer(state.chestEquipment, EquipmentClientInfo.LayerType.WINGS)) {
+                    // MODIFIED for porting: was iris's entity_render_context MixinCapeLayer#changeId (@Inject at the INVOKE of
+                    // PoseStack#pushPose) - the cape gets its own item id for the pack.
+                    if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                        net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                            .setCurrentRenderedItem(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(IRIS_CAPE_LOCATION));
+                    }
+
                     poseStack.pushPose();
                     if (this.hasLayer(state.chestEquipment, EquipmentClientInfo.LayerType.HUMANOID)) {
                         poseStack.translate(0.0F, -0.053125F, 0.06875F);
@@ -73,6 +84,11 @@ public class CapeLayer extends RenderLayer<AvatarRenderState, PlayerModel> {
                     poseStack.popPose();
                 }
             }
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context MixinCapeLayer#changeId2 (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
         }
     }
 }

@@ -96,7 +96,9 @@ import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public class Item implements ItemLike, FeatureElement {
+// MODIFIED for porting: was iris's MixinItem - it only makes Item implement IrisItemLightProvider, whose methods all have
+// defaults (a mod can override them to give an item a light value for shader packs).
+public class Item implements ItemLike, FeatureElement, net.irisshaders.iris.api.v0.item.IrisItemLightProvider {
     public static final Codec<Holder<Item>> CODEC = BuiltInRegistries.ITEM
         .holderByNameCodec()
         .validate(item -> item.is(Items.AIR.builtInRegistryHolder()) ? DataResult.error(() -> "Item must not be minecraft:air") : DataResult.success(item));

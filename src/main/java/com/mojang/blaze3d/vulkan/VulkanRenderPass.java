@@ -43,7 +43,19 @@ import org.lwjgl.vulkan.VkWriteDescriptorSet;
 import org.lwjgl.vulkan.VkViewport.Buffer;
 
 @OnlyIn(Dist.CLIENT)
-public class VulkanRenderPass implements RenderPassBackend {
+// MODIFIED for porting: implements sodium's VulkanRenderPassAccessor (mixin.core.VulkanRenderPassAccessor)
+public class VulkanRenderPass implements RenderPassBackend, net.caffeinemc.mods.sodium.mixin.core.VulkanRenderPassAccessor {
+    // MODIFIED for porting: was sodium's VulkanRenderPassAccessor @Accessor("pipeline") / @Invoker("commandBuffer")
+    @Override
+    public VulkanRenderPipeline sodium$getPipeline() {
+        return this.pipeline;
+    }
+
+    @Override
+    public org.lwjgl.vulkan.VkCommandBuffer sodium$getCommandBuffer() {
+        return this.commandBuffer();
+    }
+
     public static final boolean VALIDATION = SharedConstants.IS_RUNNING_IN_IDE;
     private final VulkanDevice device;
     private final VulkanCommandEncoder encoder;

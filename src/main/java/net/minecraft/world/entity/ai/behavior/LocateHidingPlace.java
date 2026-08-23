@@ -23,13 +23,28 @@ public class LocateHidingPlace {
                 .apply(
                     i,
                     (walkTarget, home, hidingPlace, path, lookTarget, breedTarget, interactionTarget) -> (level, body, timestamp) -> {
+                        // MODIFIED for porting: lithium ai.poi.tasks LocateHidingPlaceMixin#useFasterPOILookup (@Redirect) -
+                        // passing lithium's single-type filter lets PoiSection look the type up in its map instead of
+                        // testing the predicate against every registered type.
                         level.getPoiManager()
-                            .find(p -> p.is(PoiTypes.HOME), blockPos -> true, body.blockPosition(), closeEnoughDist + 1, PoiManager.Occupancy.ANY)
+                            .find(
+                                new net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter(net.caffeinemc.mods.lithium.common.util.POIRegistryEntries.HOME_ENTRY),
+                                blockPos -> true,
+                                body.blockPosition(),
+                                closeEnoughDist + 1,
+                                PoiManager.Occupancy.ANY
+                            )
                             .filter(p -> p.closerToCenterThan(body.position(), closeEnoughDist))
                             .or(
+                                // MODIFIED for porting: lithium ai.poi.tasks LocateHidingPlaceMixin#useFasterPOILookup
                                 () -> level.getPoiManager()
                                     .getRandom(
-                                        p -> p.is(PoiTypes.HOME), blockPos -> true, PoiManager.Occupancy.ANY, body.blockPosition(), radius, body.getRandom()
+                                        new net.caffeinemc.mods.lithium.common.world.interests.iterator.SinglePointOfInterestTypeFilter(net.caffeinemc.mods.lithium.common.util.POIRegistryEntries.HOME_ENTRY),
+                                        blockPos -> true,
+                                        PoiManager.Occupancy.ANY,
+                                        body.blockPosition(),
+                                        radius,
+                                        body.getRandom()
                                     )
                             )
                             .or(() -> i.<GlobalPos>tryGet(home).map(GlobalPos::pos))

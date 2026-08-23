@@ -25,6 +25,8 @@ public abstract class SingleQuadParticle extends Particle {
     protected float roll;
     protected float oRoll;
     protected TextureAtlasSprite sprite;
+    // MODIFIED for porting: sodium features.textures.animations.tracking TextureSheetParticleMixin @Unique field
+    private boolean sodium$shouldTickSprite;
 
     protected SingleQuadParticle(final ClientLevel level, final double x, final double y, final double z, final TextureAtlasSprite sprite) {
         super(level, x, y, z);
@@ -79,6 +81,12 @@ public abstract class SingleQuadParticle extends Particle {
         final float z,
         final float partialTickTime
     ) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking TextureSheetParticleMixin#sodium$tickSprite
+        // (HEAD)
+        if (this.sodium$shouldTickSprite) {
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(this.sprite);
+        }
+
         particleTypeRenderState.add(
             this.getLayer(),
             x,
@@ -121,6 +129,8 @@ public abstract class SingleQuadParticle extends Particle {
 
     protected void setSprite(final TextureAtlasSprite icon) {
         this.sprite = icon;
+        // MODIFIED for porting: sodium features.textures.animations.tracking TextureSheetParticleMixin#afterSetSprite (RETURN)
+        this.sodium$shouldTickSprite = icon != null && net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.hasAnimation(icon);
     }
 
     protected float getU0() {

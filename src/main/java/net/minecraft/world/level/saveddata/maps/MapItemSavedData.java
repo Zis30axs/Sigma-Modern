@@ -180,8 +180,13 @@ public class MapItemSavedData extends SavedData {
             this.removeDecoration(tickingPlayer.getPlainTextName());
         }
 
-        for (int i = 0; i < this.carriedBy.size(); i++) {
-            MapItemSavedData.HoldingPlayer otherHoldingPlayer = this.carriedBy.get(i);
+        // MODIFIED for porting: lithium entity.framed_maps MapItemSavedDataMixin (#sizeOrOne / #getOrGetThePlayer). A map
+        // inside an item frame does not need to walk every player holding this map - only the ticking player matters, so the
+        // loop runs exactly once with that player's holder.
+        for (int i = 0, lithium$size = placedInFrame != null ? 1 : this.carriedBy.size(); i < lithium$size; i++) {
+            MapItemSavedData.HoldingPlayer otherHoldingPlayer = placedInFrame != null
+                ? java.util.Objects.requireNonNull(this.carriedByPlayers.get(tickingPlayer))
+                : this.carriedBy.get(i);
             Player otherPlayer = otherHoldingPlayer.player;
             String otherPlayerName = otherPlayer.getPlainTextName();
             if (!otherPlayer.isRemoved() && (placedInFrame != null || otherPlayer.getInventory().contains(mapMatcher))) {

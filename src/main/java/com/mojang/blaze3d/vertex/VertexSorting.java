@@ -10,17 +10,32 @@ import org.joml.Vector3fc;
 @OnlyIn(Dist.CLIENT)
 public interface VertexSorting {
     VertexSorting DISTANCE_TO_ORIGIN = byDistance(0.0F, 0.0F, 0.0F);
-    VertexSorting ORTHOGRAPHIC_Z = byDistance(point -> -point.z());
+    // MODIFIED for porting: sodium features.render.immediate.buffer_builder.sorting VertexSortingMixin#modifyVertexSorting
+    // (@ModifyExpressionValue on the PUTSTATIC of this constant)
+    VertexSorting ORTHOGRAPHIC_Z = net.caffeinemc.mods.sodium.client.util.sorting.VertexSorters.orthographicZ();
 
+    /**
+     * MODIFIED for porting: sodium features.render.immediate.buffer_builder.sorting VertexSortingMixin (@Overwrite) -
+     * optimized vertex sorting.
+     */
     static VertexSorting byDistance(final float x, final float y, final float z) {
-        return byDistance(new Vector3f(x, y, z));
+        return net.caffeinemc.mods.sodium.client.util.sorting.VertexSorters.distance(x, y, z);
     }
 
     static VertexSorting byDistance(final Vector3fc origin) {
-        return byDistance(origin::distanceSquared);
+        return byDistance(origin.x(), origin.y(), origin.z());
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.immediate.buffer_builder.sorting VertexSortingMixin (@Overwrite) -
+     * optimized vertex sorting.
+     */
     static VertexSorting byDistance(final VertexSorting.DistanceFunction function) {
+        return net.caffeinemc.mods.sodium.client.util.sorting.VertexSorters.fallback(function);
+    }
+
+    // MODIFIED for porting: original vanilla body of byDistance(DistanceFunction), replaced above
+    static VertexSorting sodium$vanillaByDistance(final VertexSorting.DistanceFunction function) {
         return values -> {
             Vector3f scratch = new Vector3f();
             float[] keys = new float[values.size()];

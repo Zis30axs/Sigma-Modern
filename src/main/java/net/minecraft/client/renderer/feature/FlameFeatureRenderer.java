@@ -29,7 +29,34 @@ public class FlameFeatureRenderer extends RenderTypeFeatureRenderer<FlameFeature
         }
     }
 
+    // MODIFIED for porting: iris entity_render_context MixinFlameFeatureRenderer @Unique constant
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_FLAME_ID =
+        new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "entity_flame");
+
+    /**
+     * MODIFIED for porting: was iris's entity_render_context MixinFlameFeatureRenderer#iris$setFlame (@Inject HEAD) and
+     * #iris$setFlame2 (@Inject RETURN) - the flame overlay gets its own entity id for the pack.
+     */
     private void prepare(final FlameFeatureRenderer.Submit submit, final VertexConsumer buffer, final TextureAtlasSprite fire1, final TextureAtlasSprite fire2) {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getEntityIds() != null) {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getEntityIds().applyAsInt(IRIS_FLAME_ID));
+            }
+
+            try {
+                this.iris$prepare(submit, buffer, fire1, fire2);
+            } finally {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(0);
+            }
+
+            return;
+        }
+
+        this.iris$prepare(submit, buffer, fire1, fire2);
+    }
+
+    // MODIFIED for porting: original vanilla body of prepare
+    private void iris$prepare(final FlameFeatureRenderer.Submit submit, final VertexConsumer buffer, final TextureAtlasSprite fire1, final TextureAtlasSprite fire2) {
         PoseStack.Pose pose = submit.pose();
         EntityRenderState state = submit.entityRenderState();
         float s = state.boundingBoxWidth * 1.4F;

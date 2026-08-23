@@ -102,6 +102,36 @@ public class OldMinecartBehavior extends MinecartBehavior {
 
     @Override
     public void moveAlongTrack(final ServerLevel level) {
+        // MODIFIED for porting: lithium block.hopper OldMinecartBehaviorMixin#avoidNotifyingMovementListeners (HEAD) and
+        // #notifyMovementListeners (RETURN). A container minecart moving along a rail would otherwise notify the movement
+        // listeners of every intermediate position; they are muted here and notified once at the end.
+        // Deviation from upstream: upstream tests `this instanceof Container`, but `this` is the behavior object, not the
+        // minecart, so upstream's hook never runs (and its cast to the entity accessor would fail if it did). The check is
+        // done on the minecart here, which is what the hook is named after and what AbstractChestBoat does as well.
+        net.minecraft.world.phys.Vec3 lithium$beforeMoveOnRailPos = null;
+        int lithium$beforeMoveOnRailNotificationMask = 0;
+        net.caffeinemc.mods.lithium.common.tracking.entity.ToggleableMovementTracker lithium$movementTracker = null;
+        if (this.minecart instanceof net.minecraft.world.Container
+            && this.minecart.getChangeListener() instanceof net.caffeinemc.mods.lithium.common.tracking.entity.ToggleableMovementTracker toggleableMovementTracker) {
+            lithium$movementTracker = toggleableMovementTracker;
+            lithium$beforeMoveOnRailPos = this.position();
+            lithium$beforeMoveOnRailNotificationMask = toggleableMovementTracker.lithium$setNotificationMask(0);
+        }
+
+        try {
+            this.lithium$moveAlongTrack(level);
+        } finally {
+            if (lithium$movementTracker != null) {
+                lithium$movementTracker.lithium$setNotificationMask(lithium$beforeMoveOnRailNotificationMask);
+                if (!lithium$beforeMoveOnRailPos.equals(this.position())) {
+                    this.minecart.getChangeListener().onMove();
+                }
+            }
+        }
+    }
+
+    // MODIFIED for porting: original vanilla body of moveAlongTrack, see above
+    private void lithium$moveAlongTrack(final ServerLevel level) {
         BlockPos pos = this.minecart.getCurrentBlockPosOrRailBelow();
         BlockState state = this.level().getBlockState(pos);
         this.minecart.resetFallDistance();
@@ -367,7 +397,8 @@ public class OldMinecartBehavior extends MinecartBehavior {
     public boolean pushAndPickupEntities() {
         AABB hitbox = this.minecart.getBoundingBox().inflate(0.2F, 0.0, 0.2F);
         if (this.minecart.isRideable() && this.getDeltaMovement().horizontalDistanceSqr() >= 0.01) {
-            List<Entity> entities = this.level().getEntities(this.minecart, hitbox, EntitySelector.pushableBy(this.minecart));
+            // MODIFIED for porting: lithium entity.collisions.unpushable_cramming OldMinecartBehaviorMixin#getOtherPushableEntities
+            List<Entity> entities = Entity.lithium$getOtherPushableEntities(this.level(), this.minecart, hitbox, EntitySelector.pushableBy(this.minecart));
             if (!entities.isEmpty()) {
                 for (Entity entity : entities) {
                     if (!(entity instanceof Player)
@@ -382,7 +413,8 @@ public class OldMinecartBehavior extends MinecartBehavior {
                 }
             }
         } else {
-            for (Entity entity : this.level().getEntities(this.minecart, hitbox)) {
+            // MODIFIED for porting: lithium entity.replace_entitytype_predicates OldMinecartBehaviorMixin#getOtherAbstractMinecarts
+            for (AbstractMinecart entity : this.level().getEntitiesOfClass(AbstractMinecart.class, hitbox, e -> e != this.minecart)) {
                 if (!this.minecart.hasPassenger(entity) && entity.isPushable() && entity instanceof AbstractMinecart) {
                     entity.push(this.minecart);
                 }

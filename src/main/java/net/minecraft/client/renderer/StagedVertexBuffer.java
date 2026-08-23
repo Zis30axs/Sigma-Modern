@@ -62,7 +62,27 @@ public class StagedVertexBuffer implements AutoCloseable {
         return draw;
     }
 
+    /**
+     * MODIFIED for porting: was iris's vertices.immediate MixinBufferSource#iris$redirectBegin (@WrapMethod) plus its @Unique
+     * {@code iris$notRenderingLevel}. Upstream's comment: a quick optimization to disable the extended vertex format outside of
+     * level rendering when a BufferSource is used - a heuristic that should hold almost always, given how BufferSource is used.
+     */
     public VertexConsumer getVertexBuilder(final StagedVertexBuffer.Draw draw) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return this.iris$getVertexBuilder(draw);
+        }
+
+        net.irisshaders.iris.vertices.ImmediateState.skipExtension.set(!net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel);
+
+        try {
+            return this.iris$getVertexBuilder(draw);
+        } finally {
+            net.irisshaders.iris.vertices.ImmediateState.skipExtension.set(false);
+        }
+    }
+
+    // MODIFIED for porting: original vanilla body of getVertexBuilder, wrapped above
+    private VertexConsumer iris$getVertexBuilder(final StagedVertexBuffer.Draw draw) {
         if (this.currentVertexBuffer != null) {
             throw new IllegalStateException("Cannot append draw after upload");
         }
@@ -89,7 +109,27 @@ public class StagedVertexBuffer implements AutoCloseable {
         }
     }
 
+    /**
+     * MODIFIED for porting: was iris's vertices.immediate MixinBufferSource#iris$beforeFlushBuffer (@Inject HEAD) and
+     * #iris$afterFlushBuffer (@Inject RETURN).
+     */
     public void upload() {
+        boolean irisNotRenderingLevel = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && !net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel;
+        if (irisNotRenderingLevel) {
+            net.irisshaders.iris.vertices.ImmediateState.renderWithExtendedVertexFormat = false;
+        }
+
+        try {
+            this.iris$upload();
+        } finally {
+            if (irisNotRenderingLevel) {
+                net.irisshaders.iris.vertices.ImmediateState.renderWithExtendedVertexFormat = true;
+            }
+        }
+    }
+
+    // MODIFIED for porting: original vanilla body of upload
+    private void iris$upload() {
         if (this.currentVertexBuffer != null) {
             throw new IllegalStateException("Already uploaded");
         }
@@ -176,11 +216,63 @@ public class StagedVertexBuffer implements AutoCloseable {
 
         for (ByteBufferBuilder.Result vertexBuffer : draw.vertexBufferSlices) {
             int vertexCount = vertexBuffer.size() / format.getVertexSize();
-            MeshData.decodeQuadCentroids(vertexBuffer.byteBuffer(), vertexCount, format, points, offset);
+            // MODIFIED for porting: sodium features.render.immediate.buffer_builder.sorting
+            // StagedVertexBufferMixin#sodium$selectClosestSortingPoints (@WrapOperation around decodeQuadCentroids)
+            sodium$decodeSortingPoints(vertexBuffer.byteBuffer(), vertexCount, format, points, offset, draw);
             offset += vertexCount / 4;
         }
 
         return points;
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's features.render.immediate.buffer_builder.sorting
+     * StagedVertexBufferMixin#sodium$selectClosestSortingPoints. When the draw sorts by distance to the view-space origin,
+     * the closest point on each (flat, rectangular) quad is a better sorting key than its centroid.
+     */
+    private static void sodium$decodeSortingPoints(
+        final java.nio.ByteBuffer vertexBuffer,
+        final int vertexCount,
+        final VertexFormat format,
+        final CompactVectorArray output,
+        final int outputIndex,
+        final StagedVertexBuffer.Draw draw
+    ) {
+        if (!net.caffeinemc.mods.sodium.client.SodiumClientMod.options().quality.useClosestPointEntitySort
+            || draw.getQuadSorting() != VertexSorting.DISTANCE_TO_ORIGIN) {
+            MeshData.decodeQuadCentroids(vertexBuffer, vertexCount, format, output, outputIndex);
+            return;
+        }
+
+        com.mojang.blaze3d.vertex.VertexFormatElement positionElement = format.getElement("Position");
+        if (positionElement == null) {
+            throw new IllegalArgumentException("Cannot identify quad points with no position element");
+        }
+
+        int positionOffset = vertexBuffer.position() + positionElement.offset();
+        int vertexStride = format.getVertexSize();
+        int quadStride = vertexStride * 4;
+        int quadCount = vertexCount / 4;
+        org.joml.Vector3f scratch = new org.joml.Vector3f();
+
+        for (int i = 0; i < quadCount; i++) {
+            int offset0 = i * quadStride + positionOffset;
+            int offset1 = offset0 + vertexStride;
+            int offset2 = offset0 + vertexStride * 2;
+            float v0x = vertexBuffer.getFloat(offset0 + 0);
+            float v0y = vertexBuffer.getFloat(offset0 + 4);
+            float v0z = vertexBuffer.getFloat(offset0 + 8);
+            float v1x = vertexBuffer.getFloat(offset1 + 0);
+            float v1y = vertexBuffer.getFloat(offset1 + 4);
+            float v1z = vertexBuffer.getFloat(offset1 + 8);
+            float v2x = vertexBuffer.getFloat(offset2 + 0);
+            float v2y = vertexBuffer.getFloat(offset2 + 4);
+            float v2z = vertexBuffer.getFloat(offset2 + 8);
+            // Closest point on the quad (assuming it's flat and rectangular) to the camera at the view-space origin, which
+            // may not be the centroid. The first point must be the corner shared by the other two edges of the rectangle.
+            org.joml.Intersectionf.findClosestPointOnRectangle(v1x, v1y, v1z, v0x, v0y, v0z, v2x, v2y, v2z, 0.0F, 0.0F, 0.0F, scratch);
+            output.set(outputIndex + i, scratch.x, scratch.y, scratch.z);
+        }
     }
 
     public StagedVertexBuffer.@Nullable ExecuteInfo getExecuteInfo(final StagedVertexBuffer.Draw draw) {
@@ -225,7 +317,15 @@ public class StagedVertexBuffer implements AutoCloseable {
     }
 
     @OnlyIn(Dist.CLIENT)
-    public static class Draw {
+    // MODIFIED for porting: implements sodium's DrawAccessor
+    // (features.render.immediate.buffer_builder.sorting DrawAccessor)
+    public static class Draw implements net.caffeinemc.mods.sodium.mixin.features.render.immediate.buffer_builder.sorting.DrawAccessor {
+        // MODIFIED for porting: was sodium's DrawAccessor @Accessor
+        @Override
+        public @Nullable VertexSorting getQuadSorting() {
+            return this.quadSorting;
+        }
+
         private final VertexFormat format;
         private final PrimitiveTopology primitiveTopology;
         private final @Nullable VertexSorting quadSorting;

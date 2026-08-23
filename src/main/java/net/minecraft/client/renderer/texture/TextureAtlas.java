@@ -36,7 +36,12 @@ import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class TextureAtlas extends AbstractTexture implements TickableTexture, Dumpable {
+// MODIFIED for porting: implements sodium's TextureAtlasAccessor (mixin.core.render.texture.TextureAtlasAccessor)
+public class TextureAtlas extends AbstractTexture implements TickableTexture, Dumpable,
+    net.caffeinemc.mods.sodium.mixin.core.render.texture.TextureAtlasAccessor,
+    net.caffeinemc.mods.sodium.client.render.texture.ExtendedTextureAtlas,
+    net.irisshaders.iris.mixin.texture.TextureAtlasAccessor,
+    net.irisshaders.iris.pbr.texture.TextureAtlasExtension { // MODIFIED for porting: sodium core.render TextureAtlasMixin, iris texture TextureAtlasAccessor + pbr TextureAtlasExtension
     private static final Logger LOGGER = LogUtils.getLogger();
     @Deprecated
     public static final Identifier LOCATION_BLOCKS = Identifier.withDefaultNamespace("textures/atlas/blocks.png");
@@ -47,6 +52,44 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
     private List<TextureAtlasSprite> sprites = List.of();
     private List<SpriteContents.AnimationState> animatedTexturesStates = List.of();
     private Map<Identifier, TextureAtlasSprite> texturesByName = Map.of();
+    // MODIFIED for porting: iris texture pbr MixinTextureAtlas @Unique field (its pbr TextureAtlasExtension implementation)
+    private net.irisshaders.iris.pbr.texture.PBRAtlasHolder iris$pbrHolder;
+
+    @Override
+    public net.irisshaders.iris.pbr.texture.PBRAtlasHolder getPBRHolder() {
+        return this.iris$pbrHolder;
+    }
+
+    @Override
+    public net.irisshaders.iris.pbr.texture.PBRAtlasHolder getOrCreatePBRHolder() {
+        if (this.iris$pbrHolder == null) {
+            this.iris$pbrHolder = new net.irisshaders.iris.pbr.texture.PBRAtlasHolder();
+        }
+
+        return this.iris$pbrHolder;
+    }
+
+    // MODIFIED for porting: was iris's texture TextureAtlasAccessor (@Accessor("texturesByName"),
+    // @Accessor("maxMipLevel"), @Invoker("getWidth"), @Invoker("getHeight"))
+    @Override
+    public Map<Identifier, TextureAtlasSprite> getTexturesByName() {
+        return this.texturesByName;
+    }
+
+    @Override
+    public int getMaxLevel() {
+        return this.maxMipLevel;
+    }
+
+    @Override
+    public int callGetWidth() {
+        return this.getWidth();
+    }
+
+    @Override
+    public int callGetHeight() {
+        return this.getHeight();
+    }
     private @Nullable TextureAtlasSprite missingSprite;
     private final Identifier location;
     private final int maxSupportedTextureSize;
@@ -122,6 +165,12 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
                     SpriteContents.AnimationState animationState = sprite.createAnimationState(
                         spriteUbos.slice(animationIndex * uboBlockSize, uboBlockSize), spriteUboSize
                     );
+                    // MODIFIED for porting: was sodium-extra's animation MixinTextureAtlas#upload
+                    // (@Redirect on TextureAtlasSprite#createAnimationState) - remember which sprite the state belongs to.
+                    if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.ANIMATION && animationState instanceof me.flashyreese.mods.sodiumextra.common.util.AnimationStateExtended extended) {
+                        extended.sodium_extra$setSprite(sprite);
+                    }
+
                     animationIndex++;
                     if (animationState != null) {
                         animationStates.add(animationState);
@@ -135,6 +184,10 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
         }
 
         this.uploadInitialContents();
+        // MODIFIED for porting: was iris's texture pbr MixinTextureAtlas#iris$onUpload (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.TextureTracker.INSTANCE.trackTexture(this.texture.iris$getGlId(), this);
+        }
         if (SharedConstants.DEBUG_DUMP_TEXTURE_ATLAS) {
             Path dumpDir = TextureUtil.getDebugTexturePath();
 
@@ -145,6 +198,31 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
                 LOGGER.warn("Failed to dump atlas contents to {}", dumpDir);
             }
         }
+
+        // MODIFIED for porting: sodium core.render TextureAtlasMixin#sodium$deleteSpriteFinder (RETURN) - the sprite lookup
+        // built from this atlas has to be discarded when the atlas is re-uploaded.
+        if (this.location.equals(TextureAtlas.LOCATION_BLOCKS)) {
+            net.caffeinemc.mods.sodium.client.render.texture.SpriteFinderCache.resetSpriteFinder();
+            this.sodium$isBlocks = true;
+        } else if (this.location.equals(TextureAtlas.LOCATION_ITEMS)) {
+            net.caffeinemc.mods.sodium.client.render.texture.SpriteFinderCache.resetItemSpriteFinder();
+            this.sodium$isBlocks = false;
+        }
+    }
+
+    // MODIFIED for porting: sodium core.render TextureAtlasMixin @Unique field
+    private boolean sodium$isBlocks = false;
+
+    // MODIFIED for porting: was sodium's core.render TextureAtlasMixin#sodium$getSpriteFinder
+    @Override
+    public net.caffeinemc.mods.sodium.client.render.texture.SodiumSpriteFinder sodium$getSpriteFinder() {
+        return new net.caffeinemc.mods.sodium.client.render.texture.SodiumSpriteFinderImpl(
+            this.texturesByName,
+            this.missingSprite,
+            this.sodium$isBlocks
+                ? net.caffeinemc.mods.sodium.client.render.model.SodiumQuadAtlas.BLOCK
+                : net.caffeinemc.mods.sodium.client.render.model.SodiumQuadAtlas.ITEM
+        );
     }
 
     private void uploadInitialContents() {
@@ -239,10 +317,25 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
     public void cycleAnimationFrames() {
         if (this.texture != null) {
             for (SpriteContents.AnimationState animationState : this.animatedTexturesStates) {
-                animationState.tick();
+                // MODIFIED for porting: was sodium-extra's animation MixinTextureAtlas#cycleAnimationFrames
+                // (@Redirect on SpriteContents$AnimationState#tick)
+                if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.ANIMATION) {
+                    if (animationState instanceof me.flashyreese.mods.sodiumextra.common.util.AnimationStateExtended extended
+                        && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().animationSettings.animation
+                        && me.flashyreese.mods.sodiumextra.common.util.AnimatedSpriteFilter.shouldAnimate(extended.sodium_extra$getSprite().contents().name())) {
+                        animationState.tick();
+                    }
+                } else {
+                    animationState.tick();
+                }
             }
 
             this.uploadAnimationFrames();
+        }
+
+        // MODIFIED for porting: was iris's texture pbr MixinTextureAtlas#iris$onTailCycleAnimationFrames (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this.iris$pbrHolder != null) {
+            this.iris$pbrHolder.cycleAnimationFrames();
         }
     }
 
@@ -274,6 +367,8 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
         if (result == null) {
             throw new IllegalStateException("Tried to lookup sprite, but atlas is not initialized");
         } else {
+            // MODIFIED for porting: sodium features.textures.animations.tracking TextureAtlasMixin#preReturnSprite (RETURN)
+            net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(result);
             return result;
         }
     }
@@ -316,6 +411,18 @@ public class TextureAtlas extends AbstractTexture implements TickableTexture, Du
 
     public int maxSupportedTextureSize() {
         return this.maxSupportedTextureSize;
+    }
+
+    // MODIFIED for porting: was sodium's TextureAtlasAccessor @Invoker("getWidth")
+    @Override
+    public int sodium$getWidth() {
+        return this.getWidth();
+    }
+
+    // MODIFIED for porting: was sodium's TextureAtlasAccessor @Invoker("getHeight")
+    @Override
+    public int sodium$getHeight() {
+        return this.getHeight();
     }
 
     int getWidth() {

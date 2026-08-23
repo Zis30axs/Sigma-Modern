@@ -51,7 +51,11 @@ public class MobSpawnSettings {
         final Map<EntityType<?>, MobSpawnSettings.MobSpawnCost> mobSpawnCosts
     ) {
         this.creatureGenerationProbability = creatureGenerationProbability;
-        this.spawners = ImmutableMap.copyOf(spawners);
+        // MODIFIED for porting: lithium collections.mob_spawning MobSpawnSettingsMixin#reinit - an EnumMap is much faster for the hot
+        // MobSpawnSettings#getMobs(MobCategory) lookup than a general purpose map.
+        Map<MobCategory, WeightedList<MobSpawnSettings.SpawnerData>> lithium$spawns = Maps.newEnumMap(MobCategory.class);
+        lithium$spawns.putAll(spawners);
+        this.spawners = lithium$spawns;
         this.mobSpawnCosts = ImmutableMap.copyOf(mobSpawnCosts);
     }
 

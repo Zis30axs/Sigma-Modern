@@ -111,6 +111,9 @@ public class Raid {
     private BlockPos center;
     private boolean started;
     private float totalHealth;
+    // MODIFIED for porting: lithium ai.raid RaidMixin @Unique field - boss bar progress updates are delayed to the
+    // next tick instead of being recomputed and sent for every single change.
+    private boolean isBarDirty;
     private int raidOmenLevel;
     private boolean active;
     private int groupsSpawned;
@@ -267,6 +270,13 @@ public class Raid {
     }
 
     public void tick(final ServerLevel level) {
+        // MODIFIED for porting: lithium ai.raid RaidMixin#onTick (HEAD) - check if an update was queued for the bar, and if
+        // so, perform it now.
+        if (this.isBarDirty) {
+            this.raidEvent.setProgress(Mth.clamp(this.getHealthOfLivingRaiders() / this.totalHealth, 0.0F, 1.0F));
+            this.isBarDirty = false;
+        }
+
         if (!this.isStopped()) {
             if (this.status == Raid.RaidStatus.ONGOING) {
                 boolean oldActive = this.active;
@@ -589,7 +599,9 @@ public class Raid {
     }
 
     public void updateBossbar() {
-        this.raidEvent.setProgress(Mth.clamp(this.getHealthOfLivingRaiders() / this.totalHealth, 0.0F, 1.0F));
+        // MODIFIED for porting: lithium ai.raid RaidMixin#updateBossbar (@Overwrite) - delay re-calculating and sending
+        // progress bar updates until the next tick to avoid excessive updates.
+        this.isBarDirty = true;
     }
 
     public float getHealthOfLivingRaiders() {

@@ -8,7 +8,16 @@ public record CardinalLighting(float down, float up, float north, float south, f
     public static final CardinalLighting DEFAULT = new CardinalLighting(0.5F, 1.0F, 0.8F, 0.8F, 0.6F, 0.6F);
     public static final CardinalLighting NETHER = new CardinalLighting(0.9F, 0.9F, 0.8F, 0.8F, 0.6F, 0.6F);
 
-    public float byFace(final Direction direction) {
+    /**
+     * MODIFIED for porting: was iris's vertices.block_rendering MixinClientLevel#iris$maybeDisableDirectionalShading
+     * (@ModifyVariable HEAD, argsOnly) - lets a shader pack turn vanilla's directional shading off completely, since many packs
+     * implement their own lighting that clashes with it.
+     */
+    public float byFace(Direction direction) {
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.shouldDisableDirectionalShading()) {
+            direction = Direction.UP;
+        }
+
         return switch (direction) {
             case DOWN -> this.down;
             case UP -> this.up;

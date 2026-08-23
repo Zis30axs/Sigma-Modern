@@ -42,6 +42,9 @@ public class PistonMovingBlockEntity extends BlockEntity {
     private boolean extending = false;
     private boolean isSourcePiston = false;
     private static final ThreadLocal<Direction> NOCLIP = ThreadLocal.withInitial(() -> null);
+    // MODIFIED for porting: lithium block.moving_block_shapes PistonMovingBlockEntityMixin
+    // #PISTON_BASE_WITH_MOVING_HEAD_SHAPES - all 18 merged piston base + moving head collision shapes
+    private static final VoxelShape[] LITHIUM_PISTON_BASE_WITH_MOVING_HEAD_SHAPES = lithium$precomputePistonBaseWithMovingHeadShapes();
     private float progress = 0.0F;
     private float progressO = 0.0F;
     private long lastTicked;
@@ -387,10 +390,103 @@ public class PistonMovingBlockEntity extends BlockEntity {
         }
 
         float extendedProgress = this.getExtendedProgress(this.progress);
+        // MODIFIED for porting: lithium block.moving_block_shapes PistonMovingBlockEntityMixin#skipVoxelShapeUnion, injected
+        // right before the first Direction#getStepX call. Avoid Shapes#or (and the simplify() inside it) whenever possible:
+        // use precomputed merged piston head + base shapes and cache the results of all union calls where the piston head
+        // shape is empty - which is every other case.
+        float lithium$absOffset = Math.abs(extendedProgress);
+        if (lithium$absOffset == 0.0F || lithium$absOffset == 0.5F || lithium$absOffset == 1.0F) {
+            // Offsets other than these do not happen in vanilla; for those we fall through to the vanilla code below.
+            if (this.extending || !this.isSourcePiston || !(this.movedState.getBlock() instanceof PistonBaseBlock)) {
+                // here pistonHeadShape.isEmpty() is guaranteed, vanilla code would call or() which calls optimize()
+                VoxelShape lithium$blockShape = blockState.getCollisionShape(level, pos);
+                // we cache the simplified shapes, as optimize() costs a lot of CPU time and allocates several objects
+                return lithium$getOffsetAndSimplified(
+                    lithium$blockShape, lithium$absOffset, extendedProgress < 0.0F ? this.direction.getOpposite() : this.direction
+                );
+            } else {
+                // retracting piston heads have to act like their base as well, as the base block is replaced with the
+                // moving block. extendedProgress >= 0 is guaranteed here (assuming no other mod interferes).
+                return LITHIUM_PISTON_BASE_WITH_MOVING_HEAD_SHAPES[lithium$getIndexForMergedShape(extendedProgress, this.direction)];
+            }
+        }
+
         double dx = this.direction.getStepX() * extendedProgress;
         double dy = this.direction.getStepY() * extendedProgress;
         double dz = this.direction.getStepZ() * extendedProgress;
         return Shapes.or(pistonHeadShape, blockState.getCollisionShape(level, pos).move(dx, dy, dz));
+    }
+
+    /**
+     * MODIFIED for porting: lithium block.moving_block_shapes PistonMovingBlockEntityMixin#getOffsetAndSimplified.
+     * We cache the offset and simplified VoxelShapes that are otherwise constructed on every call of getCollisionShape.
+     * For each offset direction and distance (6 directions, 2 distances each, and no direction with 0 distance) we store the
+     * offset and simplified VoxelShapes in the original VoxelShape when they are accessed the first time.
+     *
+     * @param blockShape the original shape, must not be modified after passing it as an argument to this method
+     * @param offset the offset distance
+     * @param direction the offset direction
+     * @return blockShape offset and simplified
+     */
+    private static VoxelShape lithium$getOffsetAndSimplified(final VoxelShape blockShape, final float offset, final Direction direction) {
+        VoxelShape offsetSimplifiedShape = ((net.caffeinemc.mods.lithium.common.shapes.OffsetVoxelShapeCache)blockShape)
+            .lithium$getOffsetSimplifiedShape(offset, direction);
+        if (offsetSimplifiedShape == null) {
+            // create the offset shape and store it for later use
+            offsetSimplifiedShape = blockShape.move(direction.getStepX() * offset, direction.getStepY() * offset, direction.getStepZ() * offset)
+                .optimize();
+            ((net.caffeinemc.mods.lithium.common.shapes.OffsetVoxelShapeCache)blockShape).lithium$setShape(offset, direction, offsetSimplifiedShape);
+        }
+
+        return offsetSimplifiedShape;
+    }
+
+    /**
+     * MODIFIED for porting: lithium block.moving_block_shapes PistonMovingBlockEntityMixin
+     * #precomputePistonBaseWithMovingHeadShapes. Precompute all 18 possible configurations for the merged piston base and
+     * head shape, indexed by {@link #lithium$getIndexForMergedShape(float, Direction)}.
+     */
+    private static VoxelShape[] lithium$precomputePistonBaseWithMovingHeadShapes() {
+        float[] offsets = {0.0F, 0.5F, 1.0F};
+        Direction[] directions = Direction.values();
+        VoxelShape[] mergedShapes = new VoxelShape[offsets.length * directions.length];
+
+        for (Direction facing : directions) {
+            VoxelShape baseShape = Blocks.PISTON
+                .defaultBlockState()
+                .setValue(PistonBaseBlock.EXTENDED, true)
+                .setValue(PistonBaseBlock.FACING, facing)
+                .getCollisionShape(null, null);
+
+            for (float offset : offsets) {
+                // This cache is only required for the merged piston head + base shape, which is only used when
+                // !this.extending. There:
+                //   isShort = this.extending != 1.0F - this.progress < 0.25F
+                // can be simplified to isShort = offset < 0.25F, because
+                //   offset = getExtendedProgress(this.progress)
+                // can be simplified to offset == 1.0F - this.progress. So isShort only depends on the offset:
+                boolean isShort = offset < 0.25F;
+                VoxelShape headShape = Blocks.PISTON_HEAD
+                    .defaultBlockState()
+                    .setValue(PistonHeadBlock.FACING, facing)
+                    .setValue(PistonHeadBlock.SHORT, isShort)
+                    .getCollisionShape(null, null);
+                VoxelShape offsetHead = headShape.move(facing.getStepX() * offset, facing.getStepY() * offset, facing.getStepZ() * offset);
+                mergedShapes[lithium$getIndexForMergedShape(offset, facing)] = Shapes.or(baseShape, offsetHead);
+            }
+        }
+
+        return mergedShapes;
+    }
+
+    // MODIFIED for porting: lithium block.moving_block_shapes PistonMovingBlockEntityMixin#getIndexForMergedShape
+    private static int lithium$getIndexForMergedShape(final float offset, final Direction direction) {
+        if (offset != 0.0F && offset != 0.5F && offset != 1.0F) {
+            return -1;
+        }
+
+        // the shape of offset 0 is still dependent on the direction, due to piston head and base being directional blocks
+        return (int)(2.0F * offset) + 3 * direction.get3DDataValue();
     }
 
     public long getLastTicked() {

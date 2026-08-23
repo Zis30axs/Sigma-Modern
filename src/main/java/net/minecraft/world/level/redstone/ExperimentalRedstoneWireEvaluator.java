@@ -222,7 +222,7 @@ public class ExperimentalRedstoneWireEvaluator extends RedstoneWireEvaluator {
     }
 
     @Override
-    protected int getWireSignal(final BlockPos pos, final BlockState state) {
+    public int getWireSignal(final BlockPos pos, final BlockState state) { // MODIFIED for porting: lithium.accesswidener widened access
         int packed = this.updatedWires.getOrDefault(pos, -1);
         return packed != -1 ? unpackPower(packed) : super.getWireSignal(pos, state);
     }

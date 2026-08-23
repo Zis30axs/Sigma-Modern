@@ -72,7 +72,9 @@ public class OptionsScreen extends Screen implements HasGamemasterPermissionReac
         GridLayout.RowHelper helper = gridLayout.createRowHelper(2);
         helper.addChild(this.openScreenButton(SKIN_CUSTOMIZATION, () -> new SkinCustomizationScreen(this, this.options)));
         helper.addChild(this.openScreenButton(SOUNDS, () -> new SoundOptionsScreen(this, this.options)));
-        helper.addChild(this.openScreenButton(VIDEO, () -> new VideoSettingsScreen(this, this.minecraft, this.options)));
+        // MODIFIED for porting: sodium features.gui.hooks.settings OptionsScreenMixin#open (HEAD of the video-button
+        // supplier lambda, cancellable) - the video settings button opens sodium's own screen.
+        helper.addChild(this.openScreenButton(VIDEO, () -> net.caffeinemc.mods.sodium.client.gui.VideoSettingsScreen.createScreen(this)));
         helper.addChild(this.openScreenButton(CONTROLS, () -> new ControlsScreen(this, this.options)));
         helper.addChild(this.openScreenButton(LANGUAGE, () -> new LanguageSelectScreen(this, this.options, this.minecraft.getLanguageManager())));
         helper.addChild(this.openScreenButton(CHAT, () -> new ChatOptionsScreen(this, this.options)));

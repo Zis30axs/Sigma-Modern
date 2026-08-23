@@ -98,12 +98,70 @@ public class RenderPipeline {
         return this.location;
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinRenderPipeline#iris$change2 (@Inject RETURN, cancellable) - while a shader pack is
+     * rendering the level, the vanilla vertex formats are swapped for iris's extended ones.
+     */
     public @Nullable VertexFormat[] getVertexFormatBindings() {
+        if (iris$shouldSwapFormats()) {
+            VertexFormat swapped = this.iris$swapFormat(this.vertexFormatPerBuffer[0]);
+            if (swapped != null) {
+                return new VertexFormat[]{swapped};
+            }
+        }
+
         return this.vertexFormatPerBuffer;
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinRenderPipeline#iris$change (@Inject RETURN, cancellable) - see above.
+     */
     public @Nullable VertexFormat getVertexFormatBinding(final int bindingIndex) {
-        return this.vertexFormatPerBuffer[bindingIndex];
+        VertexFormat format = this.vertexFormatPerBuffer[bindingIndex];
+        if (iris$shouldSwapFormats()) {
+            VertexFormat swapped = this.iris$swapFormat(format);
+            if (swapped != null) {
+                return swapped;
+            }
+        }
+
+        return format;
+    }
+
+    // MODIFIED for porting: the shared condition of the two injections above
+    private static boolean iris$shouldSwapFormats() {
+        return net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.isPackInUseQuick() && net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel;
+    }
+
+    /**
+     * MODIFIED for porting: the body of iris's MixinRenderPipeline injections - returns iris's replacement for a vanilla
+     * vertex format, or null when the format is not one iris extends.
+     */
+    private @Nullable VertexFormat iris$swapFormat(final @Nullable VertexFormat format) {
+        if (java.util.Objects.equals(format, com.mojang.blaze3d.vertex.DefaultVertexFormat.BLOCK)) {
+            return net.irisshaders.iris.vertices.IrisVertexFormats.TERRAIN;
+        }
+
+        if (java.util.Objects.equals(format, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR)) {
+            return net.irisshaders.iris.vertices.IrisVertexFormats.GLYPH;
+        }
+
+        if (java.util.Objects.equals(format, com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_TEX_COLOR)
+            && this.equals(net.minecraft.client.renderer.RenderPipelines.TEXT_SEE_THROUGH)) {
+            return net.irisshaders.iris.vertices.IrisVertexFormats.GLYPH;
+        }
+
+        if (java.util.Objects.equals(format, com.mojang.blaze3d.vertex.DefaultVertexFormat.ENTITY)) {
+            return net.irisshaders.iris.vertices.IrisVertexFormats.ENTITY;
+        }
+
+        if (java.util.Objects.equals(
+            format, net.caffeinemc.mods.sodium.client.render.chunk.vertex.format.ChunkMeshFormats.COMPACT.getVertexFormat()
+        )) {
+            return net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getVertexFormat().getVertexFormat();
+        }
+
+        return null;
     }
 
     public PrimitiveTopology getPrimitiveTopology() {

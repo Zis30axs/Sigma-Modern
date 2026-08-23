@@ -476,6 +476,8 @@ public class GuiGraphicsExtractor {
     public void blitSprite(
         final RenderPipeline renderPipeline, final TextureAtlasSprite sprite, final int x, final int y, final int width, final int height, final int color
     ) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking GuiGraphicsMixin#preDrawSprite (HEAD)
+        net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(sprite);
         if (width != 0 && height != 0) {
             this.innerBlit(
                 renderPipeline, sprite.atlasLocation(), x, x + width, y, y + height, sprite.getU0(), sprite.getU1(), sprite.getV0(), sprite.getV1(), color
@@ -496,6 +498,8 @@ public class GuiGraphicsExtractor {
         final int height,
         final int color
     ) {
+        // MODIFIED for porting: sodium features.textures.animations.tracking GuiGraphicsMixin#preDrawSprite (HEAD)
+        net.caffeinemc.mods.sodium.api.texture.SpriteUtil.INSTANCE.markSpriteActive(sprite);
         if (width != 0 && height != 0) {
             this.innerBlit(
                 renderPipeline,

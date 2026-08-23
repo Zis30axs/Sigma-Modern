@@ -15,8 +15,10 @@ import org.jspecify.annotations.Nullable;
 
 public class AttributeMap {
     private final Map<Holder<Attribute>, AttributeInstance> attributes = new Object2ObjectOpenHashMap<>();
-    private final Set<AttributeInstance> attributesToSync = new ObjectOpenHashSet<>();
-    private final Set<AttributeInstance> attributesToUpdate = new ObjectOpenHashSet<>();
+    // MODIFIED for porting: lithium collections.attributes AttributeMapMixin#initCollections - most attribute maps never
+    // get a dirty attribute, so start at capacity 0, and compare by reference (AttributeInstance has no custom equals).
+    private final Set<AttributeInstance> attributesToSync = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(0);
+    private final Set<AttributeInstance> attributesToUpdate = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(0);
     private final AttributeSupplier supplier;
 
     public AttributeMap(final AttributeSupplier supplier) {

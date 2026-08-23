@@ -33,7 +33,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class CloudRenderer extends SimplePreparableReloadListener<Optional<CloudRenderer.TextureData>> implements AutoCloseable {
+public class CloudRenderer extends SimplePreparableReloadListener<Optional<CloudRenderer.TextureData>>
+    implements AutoCloseable, net.irisshaders.iris.mixin.CloudRendererAccessor { // MODIFIED for porting: iris CloudRendererAccessor
     private static final int FLAG_INSIDE_FACE = 16;
     private static final int FLAG_USE_TOP_COLOR = 32;
     private static final float CELL_SIZE_IN_BLOCKS = 12.0F;
@@ -54,6 +55,12 @@ public class CloudRenderer extends SimplePreparableReloadListener<Optional<Cloud
     private CloudRenderer.RelativeCameraPos prevRelativeCameraPos = CloudRenderer.RelativeCameraPos.INSIDE_CLOUDS;
     private @Nullable CloudStatus prevCloudStatus;
     private CloudRenderer.@Nullable TextureData texture;
+
+    // MODIFIED for porting: was iris's CloudRendererAccessor @Accessor("texture")
+    @Override
+    public CloudRenderer.TextureData getTexture() {
+        return this.texture;
+    }
     private int quadCount = 0;
     private final MappableRingBuffer ubo = new MappableRingBuffer(() -> "Cloud UBO", 130, UBO_SIZE);
     private @Nullable MappableRingBuffer utb;
@@ -226,6 +233,10 @@ public class CloudRenderer extends SimplePreparableReloadListener<Optional<Cloud
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin (@Overwrite of buildMesh plus the @Unique
+     * helpers below), by IMS. The cloud mesh is written through raw pointers instead of the ByteBuffer API.
+     */
     private void buildMesh(
         final CloudRenderer.RelativeCameraPos relativePos,
         final ByteBuffer faceBuffer,
@@ -235,29 +246,131 @@ public class CloudRenderer extends SimplePreparableReloadListener<Optional<Cloud
         final int radiusCells
     ) {
         if (this.texture != null) {
-            long[] cells = this.texture.cells;
-            int textureWidth = this.texture.width;
-            int textureHeight = this.texture.height;
+            long[] cells = this.texture.cells();
+            int width = this.texture.width();
+            int height = this.texture.height();
+            long ptr = org.lwjgl.system.MemoryUtil.memAddress(faceBuffer);
+            int cellIndex = faceBuffer.position() / 3;
 
             for (int ring = 0; ring <= 2 * radiusCells; ring++) {
-                for (int relativeCellX = -ring; relativeCellX <= ring; relativeCellX++) {
-                    int relativeCellZ = ring - Math.abs(relativeCellX);
-                    if (relativeCellZ >= 0
-                        && relativeCellZ <= radiusCells
-                        && relativeCellX * relativeCellX + relativeCellZ * relativeCellZ <= radiusCells * radiusCells) {
-                        if (relativeCellZ != 0) {
-                            this.tryBuildCell(
-                                relativePos, faceBuffer, centerCellX, centerCellZ, extrude, relativeCellX, textureWidth, -relativeCellZ, textureHeight, cells
+                for (int dx = -ring; dx <= ring; dx++) {
+                    int dz = ring - Math.abs(dx);
+                    if (dz >= 0 && dz <= radiusCells && dx * dx + dz * dz <= radiusCells * radiusCells) {
+                        if (dz != 0) {
+                            cellIndex = sodium$addCellGeometryToBuffer(
+                                ptr, cellIndex, dx, -dz, relativePos, extrude, centerCellX, centerCellZ, cells, width, height
                             );
                         }
 
-                        this.tryBuildCell(
-                            relativePos, faceBuffer, centerCellX, centerCellZ, extrude, relativeCellX, textureWidth, relativeCellZ, textureHeight, cells
+                        cellIndex = sodium$addCellGeometryToBuffer(
+                            ptr, cellIndex, dx, dz, relativePos, extrude, centerCellX, centerCellZ, cells, width, height
                         );
                     }
                 }
             }
+
+            faceBuffer.position(cellIndex * 3);
         }
+    }
+
+    // MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin#sodium$calculateTaxicabDistance
+    private static int sodium$calculateTaxicabDistance(final int x, final int z) {
+        return Math.abs(x) + Math.abs(z);
+    }
+
+    // MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin#sodium$addCellGeometryToBuffer
+    private static int sodium$addCellGeometryToBuffer(
+        final long ptr,
+        final int index,
+        final int x,
+        final int z,
+        final CloudRenderer.@Nullable RelativeCameraPos orientation,
+        final boolean fancy,
+        final int camX,
+        final int camZ,
+        final long[] cells,
+        final int texWidth,
+        final int texHeight
+    ) {
+        int o = Math.floorMod(camX + x, texWidth);
+        int p = Math.floorMod(camZ + z, texHeight);
+        long faces = cells[o + p * texWidth];
+        if (faces == 0L) {
+            return index;
+        }
+
+        int newIndex = index;
+        if (fancy) {
+            newIndex = sodium$emitCellGeometryExterior(ptr, newIndex, faces, orientation, x, z);
+            if (sodium$calculateTaxicabDistance(x, z) <= 1) {
+                newIndex = sodium$emitCellGeometryInterior(ptr, newIndex, x, z);
+            }
+        } else {
+            sodium$encodeCellFace(ptr, newIndex, x, z, Direction.DOWN, FLAG_USE_TOP_COLOR);
+            newIndex++;
+        }
+
+        return newIndex;
+    }
+
+    // MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin#sodium$emitCellGeometryInterior
+    private static int sodium$emitCellGeometryInterior(final long ptr, final int index, final int x, final int z) {
+        sodium$encodeCellFace(ptr, index, x, z, Direction.DOWN, FLAG_INSIDE_FACE);
+        sodium$encodeCellFace(ptr, index + 1, x, z, Direction.UP, FLAG_INSIDE_FACE);
+        sodium$encodeCellFace(ptr, index + 2, x, z, Direction.NORTH, FLAG_INSIDE_FACE);
+        sodium$encodeCellFace(ptr, index + 3, x, z, Direction.SOUTH, FLAG_INSIDE_FACE);
+        sodium$encodeCellFace(ptr, index + 4, x, z, Direction.WEST, FLAG_INSIDE_FACE);
+        sodium$encodeCellFace(ptr, index + 5, x, z, Direction.EAST, FLAG_INSIDE_FACE);
+        return index + 6;
+    }
+
+    // MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin#sodium$encodeCellFace
+    private static void sodium$encodeCellFace(final long ptr, final long index, final int x, final int z, final Direction direction, final int extraData) {
+        int flags = direction.get3DDataValue() | extraData;
+        flags |= (x & 1) << 7;
+        flags |= (z & 1) << 6;
+        long ptrIndex = ptr + index * 3L;
+        net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics.putByte(ptrIndex, (byte)(x >> 1));
+        net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics.putByte(ptrIndex + 1, (byte)(z >> 1));
+        net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics.putByte(ptrIndex + 2, (byte)flags);
+    }
+
+    // MODIFIED for porting: sodium features.render.world.clouds CloudRendererMixin#sodium$emitCellGeometryExterior
+    private static int sodium$emitCellGeometryExterior(
+        final long ptr, final int index, final long faces, final CloudRenderer.@Nullable RelativeCameraPos orientation, final int x, final int z
+    ) {
+        int faceCount = index;
+        if (orientation != CloudRenderer.RelativeCameraPos.BELOW_CLOUDS) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.UP, 0);
+            faceCount++;
+        }
+
+        if (orientation != CloudRenderer.RelativeCameraPos.ABOVE_CLOUDS) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.DOWN, 0);
+            faceCount++;
+        }
+
+        if (isNorthEmpty(faces) && z > 0) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.NORTH, 0);
+            faceCount++;
+        }
+
+        if (isSouthEmpty(faces) && z < 0) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.SOUTH, 0);
+            faceCount++;
+        }
+
+        if (isWestEmpty(faces) && x > 0) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.WEST, 0);
+            faceCount++;
+        }
+
+        if (isEastEmpty(faces) && x < 0) {
+            sodium$encodeCellFace(ptr, faceCount, x, z, Direction.EAST, 0);
+            faceCount++;
+        }
+
+        return faceCount;
     }
 
     private void tryBuildCell(
@@ -347,7 +460,8 @@ public class CloudRenderer extends SimplePreparableReloadListener<Optional<Cloud
     }
 
     @OnlyIn(Dist.CLIENT)
-    private enum RelativeCameraPos {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public enum RelativeCameraPos {
         ABOVE_CLOUDS,
         INSIDE_CLOUDS,
         BELOW_CLOUDS;

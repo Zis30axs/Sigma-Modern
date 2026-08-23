@@ -126,6 +126,13 @@ public class LongJumpToRandomPos<E extends Mob> extends Behavior<E> {
         int mobX = mobPos.getX();
         int mobY = mobPos.getY();
         int mobZ = mobPos.getZ();
+        // MODIFIED for porting: lithium ai.task.run.long_jump_weighted_choice LongJumpToRandomPosMixin#setTargets
+        // (INVOKE betweenClosedStream, cancellable) - a specialized collection replaces the eagerly built candidate list.
+        if (this.maxLongJumpWidth < 128 && this.maxLongJumpHeight < 128) {
+            this.jumpCandidates = net.caffeinemc.mods.lithium.common.util.collections.LongJumpChoiceList.forCenter(mobPos, (byte)this.maxLongJumpWidth, (byte)this.maxLongJumpHeight);
+            return;
+        }
+
         this.jumpCandidates = BlockPos.betweenClosedStream(
                 mobX - this.maxLongJumpWidth,
                 mobY - this.maxLongJumpHeight,
@@ -181,6 +188,13 @@ public class LongJumpToRandomPos<E extends Mob> extends Behavior<E> {
     }
 
     protected Optional<LongJumpToRandomPos.PossibleJump> getJumpCandidate(final ServerLevel level) {
+        // MODIFIED for porting: lithium ai.task.run.long_jump_weighted_choice LongJumpToRandomPosMixin#getRandomFast
+        // (@WrapOperation) and #skipRemoveIfAlreadyRemoved (@Redirect) - the specialized list picks and removes a weighted
+        // random element in one step.
+        if (this.jumpCandidates instanceof net.caffeinemc.mods.lithium.common.util.collections.LongJumpChoiceList lithium$choiceList) {
+            return Optional.ofNullable(lithium$choiceList.removeRandomWeightedByDistanceSq(level.getRandom()));
+        }
+
         Optional<LongJumpToRandomPos.PossibleJump> randomItem = WeightedRandom.getRandomItem(
             level.getRandom(), this.jumpCandidates, LongJumpToRandomPos.PossibleJump::weight
         );

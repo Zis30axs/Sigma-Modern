@@ -44,6 +44,73 @@ import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
 public class EntityRenderDispatcher implements ResourceManagerReloadListener {
+    /**
+     * MODIFIED for porting: iris entity_render_context MixinEntityRenderDispatcher @Unique constants and the body of its
+     * #iris$beginEntityRender - it tells the shader pack which entity is being drawn.
+     */
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_CURRENT_PLAYER = new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "current_player");
+
+    private static final net.irisshaders.iris.shaderpack.materialmap.NamespacedId IRIS_CONVERTING_VILLAGER = new net.irisshaders.iris.shaderpack.materialmap.NamespacedId("minecraft", "zombie_villager_converting");
+
+    private static final it.unimi.dsi.fastutil.objects.Object2ObjectMap<net.minecraft.world.entity.EntityType<?>, net.irisshaders.iris.shaderpack.materialmap.NamespacedId> IRIS_ENTITY_IDS =
+        new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
+
+    private static <S extends net.minecraft.client.renderer.entity.state.EntityRenderState> void iris$beginEntityRender(final S entity) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return;
+        }
+
+        it.unimi.dsi.fastutil.objects.Object2IntFunction<net.irisshaders.iris.shaderpack.materialmap.NamespacedId> entityIds = net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getEntityIds();
+
+        if (entityIds == null || !net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel) {
+            return;
+        }
+
+        int intId;
+
+        // TODO: Add special types
+
+        if (entity instanceof net.minecraft.client.renderer.entity.state.ZombieVillagerRenderState zombie
+            && zombie.isConverting
+            && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.hasVillagerConversionId()) {
+            intId = entityIds.applyAsInt(IRIS_CONVERTING_VILLAGER);
+        } else if (entity instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState ars
+            && net.minecraft.client.Minecraft.getInstance().getCameraEntity() instanceof net.minecraft.client.player.AbstractClientPlayer acs
+            && acs.getId() == ars.id) {
+            if (entityIds.containsKey(IRIS_CURRENT_PLAYER)) {
+                intId = entityIds.getInt(IRIS_CURRENT_PLAYER);
+            } else {
+                intId = entityIds.applyAsInt(iris$entityId(entity));
+            }
+        } else {
+            intId = entityIds.applyAsInt(iris$entityId(entity));
+        }
+
+        net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(intId);
+    }
+
+    private static net.irisshaders.iris.shaderpack.materialmap.NamespacedId iris$entityId(final net.minecraft.client.renderer.entity.state.EntityRenderState entity) {
+        return IRIS_ENTITY_IDS
+            .computeIfAbsent(
+                entity.entityType,
+                k -> {
+                    net.minecraft.resources.Identifier entityId = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
+                        .getKey(entity.entityType);
+                    return new net.irisshaders.iris.shaderpack.materialmap.NamespacedId(entityId.getNamespace(), entityId.getPath());
+                }
+            );
+    }
+
+    // MODIFIED for porting: was iris's MixinEntityRenderDispatcher#iris$maybeSuppressShadow (@Unique)
+    private static boolean iris$shouldSuppressVanillaEntityShadow() {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return false;
+        }
+
+        net.irisshaders.iris.pipeline.WorldRenderingPipeline pipeline = net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable();
+        return pipeline != null && pipeline.shouldDisableVanillaEntityShadows();
+    }
+
     private Map<EntityType<?>, EntityRenderer<?, ?>> renderers = ImmutableMap.of();
     private Map<PlayerModelType, AvatarRenderer<AbstractClientPlayer>> playerRenderers = Map.of();
     private Map<PlayerModelType, AvatarRenderer<ClientMannequin>> mannequinRenderers = Map.of();
@@ -161,6 +228,10 @@ public class EntityRenderDispatcher implements ResourceManagerReloadListener {
             double relativeY = y + pos.y();
             double relativeZ = z + pos.z();
             poseStack.pushPose();
+            // MODIFIED for porting: was iris's entity_render_context MixinEntityRenderDispatcher#iris$beginEntityRender
+            // (@Inject at the INVOKE of PoseStack#pushPose, shift AFTER). Upstream's comment: injected after the push since at
+            // this point most cancellation checks have already passed. Its "// TODO: Add special types" note is carried over.
+            iris$beginEntityRender(renderState);
             poseStack.translate(relativeX, relativeY, relativeZ);
             renderer.submit(renderState, poseStack, submitNodeCollector, camera);
             if (renderState.displayFireAnimation) {
@@ -172,11 +243,25 @@ public class EntityRenderDispatcher implements ResourceManagerReloadListener {
             }
 
             if (!renderState.shadowPieces.isEmpty()) {
-                submitNodeCollector.submitShadow(poseStack, renderState.shadowRadius, renderState.shadowPieces);
+                // MODIFIED for porting: was iris's MixinEntityRenderDispatcher#iris$maybeSuppressEntityShadow
+                // (@WrapWithCondition on SubmitNodeCollector#submitShadow) plus its @Unique #iris$maybeSuppressShadow - a
+                // shader pack that casts real shadows does not want vanilla's blob shadow on top. The mixin's other @Unique
+                // constants (RENDER_SHADOW, RENDER_BLOCK_SHADOW, shadowId, flameId, cachedId) are unused there and are not
+                // ported.
+                if (!iris$shouldSuppressVanillaEntityShadow()) {
+                    submitNodeCollector.submitShadow(poseStack, renderState.shadowRadius, renderState.shadowPieces);
+                }
             }
 
             if (!(renderState instanceof AvatarRenderState)) {
                 poseStack.translate(-pos.x(), -pos.y(), -pos.z());
+            }
+
+            // MODIFIED for porting: was iris's entity_render_context MixinEntityRenderDispatcher#iris$endEntityRender
+            // (@Inject at the INVOKE of PoseStack#popPose)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentEntity(0);
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
             }
 
             poseStack.popPose();

@@ -36,6 +36,9 @@ public class WorldBorder extends SavedData {
     private double centerZ;
     private int absoluteMaxSize = 29999984;
     private WorldBorder.BorderExtent extent = new WorldBorder.StaticBorderExtent(5.999997E7F);
+    // MODIFIED for porting: lithium util.world_border_listener WorldBorderMixin @Unique field
+    private final net.caffeinemc.mods.lithium.common.world.listeners.WorldBorderPositionListenerMulti lithium$worldBorderPositionListenerMulti =
+        new net.caffeinemc.mods.lithium.common.world.listeners.WorldBorderPositionListenerMulti();
 
     public WorldBorder() {
         this(WorldBorder.Settings.DEFAULT);
@@ -43,6 +46,8 @@ public class WorldBorder extends SavedData {
 
     public WorldBorder(final WorldBorder.Settings settings) {
         this.settings = settings;
+        // MODIFIED for porting: lithium util.world_border_listener WorldBorderMixin#registerSimpleWorldBorderListenerMulti
+        this.addListener(this.lithium$worldBorderPositionListenerMulti);
     }
 
     public boolean isWithinBounds(final BlockPos pos) {
@@ -206,6 +211,12 @@ public class WorldBorder extends SavedData {
     }
 
     public void addListener(final BorderChangeListener listener) {
+        // MODIFIED for porting: lithium util.world_border_listener WorldBorderMixin#addSimpleListenerOnce
+        if (listener instanceof net.caffeinemc.mods.lithium.common.world.listeners.WorldBorderListenerOnce lithium$simpleListener) {
+            this.lithium$worldBorderPositionListenerMulti.add(lithium$simpleListener);
+            return;
+        }
+
         this.listeners.add(listener);
     }
 
@@ -279,7 +290,13 @@ public class WorldBorder extends SavedData {
     }
 
     public void tick() {
+        // MODIFIED for porting: lithium util.world_border_listener WorldBorderMixin#getUpdatedArea notifies the
+        // WorldBorderListenerOnce listeners whenever WorldBorder.BorderExtent#update returns a different extent.
+        WorldBorder.BorderExtent lithium$prevExtent = this.extent;
         this.extent = this.extent.update();
+        if (this.extent != lithium$prevExtent) {
+            this.lithium$worldBorderPositionListenerMulti.onAreaReplaced(this);
+        }
     }
 
     public void applyInitialSettings(final long gameTime) {
@@ -299,7 +316,7 @@ public class WorldBorder extends SavedData {
         }
     }
 
-    private interface BorderExtent {
+    public interface BorderExtent { // MODIFIED for porting: lithium.accesswidener made this class accessible
         double getMinX(final float deltaPartialTick);
 
         double getMaxX(final float deltaPartialTick);

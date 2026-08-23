@@ -163,10 +163,17 @@ public final class ModelPart {
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.entity ModelPartMixin (@Overwrite) - applies the transform in place
+     * instead of allocating a quaternion, and skips the translation when there is none.
+     */
     public void translateAndRotate(final PoseStack poseStack) {
-        poseStack.translate(this.x / 16.0F, this.y / 16.0F, this.z / 16.0F);
+        if (this.x != 0.0F || this.y != 0.0F || this.z != 0.0F) {
+            poseStack.translate(this.x * (1.0F / 16.0F), this.y * (1.0F / 16.0F), this.z * (1.0F / 16.0F));
+        }
+
         if (this.xRot != 0.0F || this.yRot != 0.0F || this.zRot != 0.0F) {
-            poseStack.mulPose(new Quaternionf().rotationZYX(this.zRot, this.yRot, this.xRot));
+            net.caffeinemc.mods.sodium.api.math.MatrixHelper.rotateZYX(poseStack.last(), this.zRot, this.yRot, this.xRot);
         }
 
         if (this.xScale != 1.0F || this.yScale != 1.0F || this.zScale != 1.0F) {
@@ -232,6 +239,10 @@ public final class ModelPart {
 
     @OnlyIn(Dist.CLIENT)
     public static class Cube {
+        // MODIFIED for porting: sodium features.render.entity CubeMixin @Unique field - sodium's own cuboid description,
+        // built from the same constructor arguments, which its entity renderer can write in one pass.
+        private final net.caffeinemc.mods.sodium.client.render.immediate.model.ModelCuboid sodium$cuboid;
+
         public final ModelPart.Polygon[] polygons;
         public final float minX;
         public final float minY;
@@ -257,6 +268,11 @@ public final class ModelPart {
             final float yTexSize,
             final Set<Direction> visibleFaces
         ) {
+            // MODIFIED for porting: sodium features.render.entity CubeMixin#onInit (@Redirect of the first PUTFIELD of
+            // minX, chosen so the unmodified constructor arguments are captured).
+            this.sodium$cuboid = new net.caffeinemc.mods.sodium.client.render.immediate.model.ModelCuboid(
+                xTexOffs, yTexOffs, minX, minY, minZ, width, height, depth, growX, growY, growZ, mirror, xTexSize, yTexSize, visibleFaces
+            );
             this.minX = minX;
             this.minY = minY;
             this.minZ = minZ;
@@ -325,6 +341,18 @@ public final class ModelPart {
         }
 
         public void compile(final PoseStack.Pose pose, final VertexConsumer builder, final int lightCoords, final int overlayCoords, final int color) {
+            // MODIFIED for porting: sodium features.render.entity CubeMixin#onCompile (injected before the PoseStack.Pose#pose
+            // call, cancellable) - write the whole cuboid at once when the target buffer supports sodium's bulk writer.
+            net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter sodium$writer =
+                net.caffeinemc.mods.sodium.client.render.vertex.VertexConsumerUtils.convertOrLog(builder);
+            if (sodium$writer != null) {
+                net.caffeinemc.mods.sodium.client.render.immediate.model.EntityRenderer
+                    .renderCuboid(
+                        pose, sodium$writer, this.sodium$cuboid, lightCoords, overlayCoords, net.caffeinemc.mods.sodium.api.util.ColorARGB.toABGR(color)
+                    );
+                return;
+            }
+
             Matrix4f matrix = pose.pose();
             Vector3f scratchVector = new Vector3f();
 

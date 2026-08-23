@@ -67,6 +67,16 @@ public class ServerChunkCache extends ChunkSource {
     private long lastInhabitedUpdate;
     private boolean spawnEnemies = true;
     private static final int CACHE_SIZE = 4;
+    /**
+     * MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin. Its own recent-lookup cache encodes the chunk
+     * position and the requested status into a single long, so scanning it is a single linear integer scan instead of
+     * comparing two arrays side by side. {@code lithium$time} counts ticks; chunk tickets are only re-created when one has
+     * not already been submitted for that chunk in the current tick.
+     */
+    private final long[] lithium$cacheKeys = new long[4];
+    private final @Nullable ChunkAccess[] lithium$cacheChunks = new ChunkAccess[4];
+    private long lithium$time;
+
     private final long[] lastChunkPos = new long[4];
     private final @Nullable ChunkStatus[] lastChunkStatus = new ChunkStatus[4];
     private final @Nullable ChunkAccess[] lastChunk = new ChunkAccess[4];
@@ -142,36 +152,144 @@ public class ServerChunkCache extends ChunkSource {
         this.lastChunk[0] = chunk;
     }
 
+    /**
+     * MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin (@Overwrite of getChunk plus the @Unique
+     * helpers below). The optimizations are:
+     * <ul>
+     *   <li>the recent-request cache is scanned with a single linear integer comparison (see {@code lithium$cacheKeys});</li>
+     *   <li>chunk tickets are only created on a cache miss if none was created for that chunk in this tick;</li>
+     *   <li>lambdas are replaced by plain if-else logic, avoiding allocations and captures;</li>
+     *   <li>the chunk future is unwrapped directly when it is already complete, and other pending chunk tasks are only
+     *       executed while blocked if the future is not done yet.</li>
+     * </ul>
+     * Note that upstream's @Overwrite also drops the two {@code Profiler#incrementCounter} calls and the vanilla
+     * {@code storeInCache} bookkeeping (vanilla's arrays stay in use for {@link #getChunkNow}); this is kept as-is.
+     */
     @Override
     public @Nullable ChunkAccess getChunk(final int x, final int z, final ChunkStatus targetStatus, final boolean loadOrGenerate) {
         if (Thread.currentThread() != this.mainThread) {
-            return CompletableFuture.<ChunkAccess>supplyAsync(() -> this.getChunk(x, z, targetStatus, loadOrGenerate), this.mainThreadProcessor).join();
+            return this.lithium$getChunkOffThread(x, z, targetStatus, loadOrGenerate);
         }
 
-        ProfilerFiller profiler = Profiler.get();
-        profiler.incrementCounter("getChunk");
-        long pos = ChunkPos.pack(x, z);
+        // Store a local reference to the cached keys array in order to prevent bounds checks later
+        long[] cacheKeys = this.lithium$cacheKeys;
+        // Create a key which will identify this request in the cache
+        long key = lithium$createCacheKey(x, z, targetStatus);
 
         for (int i = 0; i < 4; i++) {
-            if (pos == this.lastChunkPos[i] && targetStatus == this.lastChunkStatus[i]) {
-                ChunkAccess chunkAccess = this.lastChunk[i];
-                if (chunkAccess != null || !loadOrGenerate) {
-                    return chunkAccess;
+            // Consolidate the scan into one comparison, allowing the JVM to better optimize the function.
+            // This is considerably faster than scanning two arrays side-by-side.
+            if (key == cacheKeys[i]) {
+                ChunkAccess chunk = this.lithium$cacheChunks[i];
+                // If the chunk exists for the key, or we didn't need to create one, return the result
+                if (chunk != null || !loadOrGenerate) {
+                    return chunk;
                 }
             }
         }
 
-        profiler.incrementCounter("getChunkCacheMiss");
-        CompletableFuture<ChunkResult<ChunkAccess>> serverFuture = this.getChunkFutureMainThread(x, z, targetStatus, loadOrGenerate);
-        this.mainThreadProcessor.managedBlock(serverFuture::isDone);
-        ChunkResult<ChunkAccess> chunkResult = serverFuture.join();
-        ChunkAccess chunk = chunkResult.orElse(null);
-        if (chunk == null && loadOrGenerate) {
-            throw (IllegalStateException)Util.pauseInIde(new IllegalStateException("Chunk not there when requested: " + chunkResult.getError()));
+        // We couldn't find the chunk in the cache, so perform a blocking retrieval of the chunk from storage
+        ChunkAccess chunk = this.lithium$getChunkBlocking(x, z, targetStatus, loadOrGenerate);
+        if (chunk != null) {
+            this.lithium$addToCache(key, chunk);
+        } else if (loadOrGenerate) {
+            throw new IllegalStateException("Chunk not there when requested");
         }
 
-        this.storeInCache(pos, chunk, targetStatus);
         return chunk;
+    }
+
+    // MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#getChunkOffThread
+    private @Nullable ChunkAccess lithium$getChunkOffThread(final int x, final int z, final ChunkStatus status, final boolean create) {
+        return CompletableFuture.<ChunkAccess>supplyAsync(() -> this.getChunk(x, z, status, create), this.mainThreadProcessor).join();
+    }
+
+    /**
+     * MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#getChunkBlocking. Retrieves a chunk from the
+     * storages, blocking to work on other tasks if the requested chunk needs to be loaded from disk or generated in
+     * real-time.
+     */
+    private @Nullable ChunkAccess lithium$getChunkBlocking(final int x, final int z, final ChunkStatus leastStatus, final boolean create) {
+        long key = ChunkPos.pack(x, z);
+        int level = ChunkLevel.byStatus(leastStatus);
+        ChunkHolder holder = this.getVisibleChunkIfPresent(key);
+        // Recreate NeoForge chunk loading tricks. Without NeoForge this always returns null, exactly as in an upstream
+        // Fabric installation, where only the NeoForge-only ChunkLoadTricksMixin overwrites the method.
+        ChunkAccess chunkAccess = net.caffeinemc.mods.lithium.common.world.ChunkLoadTricks.tryRetrieveCurrentlyLoading(holder);
+        if (chunkAccess != null) {
+            return chunkAccess;
+        }
+
+        // Vanilla: Check if the holder is present and is at least of the level we need
+        if (this.chunkAbsent(holder, level)) {
+            if (create) {
+                // Vanilla: The chunk holder is missing, so we need to create a ticket in order to load it
+                this.lithium$createChunkLoadTicket(x, z, level);
+                // Vanilla: Tick the chunk manager to have our new ticket processed
+                this.runDistanceManagerUpdates();
+                // Vanilla: Try to fetch the holder again now that we have requested a load
+                holder = this.getVisibleChunkIfPresent(key);
+                // Vanilla: If the holder is still not available, we need to fail now... something is wrong.
+                if (this.chunkAbsent(holder, level)) {
+                    throw Util.pauseInIde(new IllegalStateException("No chunk holder after ticket has been added"));
+                }
+            } else {
+                // Vanilla: Use UNLOADED_FUTURE. Lithium: Just return null immediately.
+                // The holder is absent, and we weren't asked to create anything, so return null
+                return null;
+            }
+        } else if (create && holder.lithium$updateLastAccessTime(this.lithium$time)) {
+            // Vanilla: Always create the ticket.
+            // Lithium: Only create a new chunk ticket if one hasn't already been submitted this tick.
+            // This maintains vanilla behavior (preventing chunks from being immediately unloaded) while also
+            // eliminating the cost of submitting a ticket for most chunk fetches.
+            this.lithium$createChunkLoadTicket(x, z, level);
+        }
+
+        // Lithium: Attempt to directly get the chunk from the finished future. In 26.2 vanilla already exposes exactly
+        // this operation - GenerationChunkHolder#getChunkIfPresent skips disallowed statuses and unwraps the future with
+        // getNow - so upstream's futures/isStatusDisallowed accessors are not needed here.
+        ChunkAccess presentChunk = holder.getChunkIfPresent(leastStatus);
+        if (presentChunk != null) {
+            return presentChunk;
+        }
+
+        // Vanilla: Always call holder.load(). Lithium: Fall back to vanilla in case the fast-path did not work.
+        CompletableFuture<ChunkResult<ChunkAccess>> loadFuture = holder.scheduleChunkGenerationTask(leastStatus, this.chunkMap);
+        // Vanilla: Always call runTasks(). Lithium: Only call runTasks() if it will perform work.
+        if (!loadFuture.isDone()) {
+            // Perform other chunk tasks while waiting for this future to complete.
+            // This returns when either the future is done or there are no other tasks remaining.
+            this.mainThreadProcessor.managedBlock(loadFuture::isDone);
+        }
+
+        // Wait for the result of the future and unwrap it, returning null if the chunk is absent
+        return loadFuture.join().orElse(null);
+    }
+
+    // MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#createChunkLoadTicket
+    private void lithium$createChunkLoadTicket(final int x, final int z, final int level) {
+        this.addTicket(new Ticket(TicketType.UNKNOWN, level), new ChunkPos(x, z));
+    }
+
+    /**
+     * MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#createCacheKey. Encodes a chunk position and
+     * status into a long. Uses 28 bits for each coordinate value, and 8 bits for the status.
+     */
+    private static long lithium$createCacheKey(final int chunkX, final int chunkZ, final ChunkStatus status) {
+        return (long)chunkX & 0xFFFFFFFL | ((long)chunkZ & 0xFFFFFFFL) << 28 | (long)status.getIndex() << 56;
+    }
+
+    // MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#addToCache - prepends the chunk with the given
+    // key to the recent lookup cache
+    private void lithium$addToCache(final long key, final ChunkAccess chunk) {
+        for (int i = 3; i > 0; i--) {
+            this.lithium$cacheKeys[i] = this.lithium$cacheKeys[i - 1];
+            this.lithium$cacheChunks[i] = this.lithium$cacheChunks[i - 1];
+        }
+
+        this.lithium$cacheKeys[0] = key;
+        this.lithium$cacheChunks[0] = chunk;
     }
 
     @Override
@@ -206,6 +324,10 @@ public class ServerChunkCache extends ChunkSource {
     }
 
     private void clearCache() {
+        // MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#onCachesCleared (HEAD) - reset lithium's
+        // own caches whenever vanilla does the same
+        Arrays.fill(this.lithium$cacheKeys, Long.MAX_VALUE);
+        Arrays.fill(this.lithium$cacheChunks, null);
         Arrays.fill(this.lastChunkPos, ChunkPos.INVALID_CHUNK_POS);
         Arrays.fill(this.lastChunkStatus, null);
         Arrays.fill(this.lastChunk, null);
@@ -315,6 +437,8 @@ public class ServerChunkCache extends ChunkSource {
 
     @Override
     public void tick(final BooleanSupplier haveTime, final boolean tickChunks) {
+        // MODIFIED for porting: lithium world.chunk_access ServerChunkCacheMixin#preTick (HEAD)
+        this.lithium$time++;
         ProfilerFiller profiler = Profiler.get();
         profiler.push("purge");
         if (this.level.tickRateManager().runsNormally() || !tickChunks) {
@@ -370,7 +494,13 @@ public class ServerChunkCache extends ChunkSource {
         profiler.push("naturalSpawnCount");
         int chunkCount = this.distanceManager.getNaturalSpawnChunkCount();
         NaturalSpawner.SpawnState spawnCookie = NaturalSpawner.createState(
-            chunkCount, this.level.getAllEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap)
+            chunkCount,
+            // MODIFIED for porting: lithium minimal_nonvanilla.spawning ServerChunkCacheMixin#iterateEntitiesChunkAware
+            ((net.caffeinemc.mods.lithium.common.world.ChunkAwareEntityIterable<net.minecraft.world.entity.Entity>)((net.caffeinemc.mods.lithium.mixin.util.accessors.ServerLevelAccessor)this.level)
+                .getEntityManager()
+                .getCache()).lithium$IterateEntitiesInTrackedSections(),
+            this::getFullChunk,
+            new LocalMobCapCalculator(this.chunkMap)
         );
         this.lastSpawnState = spawnCookie;
         boolean doMobSpawning = this.level.getGameRules().get(GameRules.SPAWN_MOBS);
@@ -593,7 +723,7 @@ public class ServerChunkCache extends ChunkSource {
         }
     }
 
-    private final class MainThreadExecutor extends BlockableEventLoop<Runnable> {
+    public final class MainThreadExecutor extends BlockableEventLoop<Runnable> { // MODIFIED for porting: lithium.accesswidener made this class accessible
         private MainThreadExecutor(final Level level) {
             super("Chunk source main thread executor for " + level.dimension().identifier(), false);
         }

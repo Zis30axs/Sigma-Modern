@@ -88,6 +88,18 @@ public class QuickPlay {
     }
 
     private static void joinSingleplayerWorld(final Minecraft minecraft, final @Nullable String identifier) {
+        // MODIFIED for porting: was iris's MixinQuickPlayDev#iris$createWorldIfDev (@Inject HEAD, cancellable). Only active in
+        // a development environment, which this build never is (see VanillaIrisPlatformHelpers#isDevelopmentEnvironment), so
+        // this branch is never taken here - it is kept so the behaviour is not silently dropped.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.platform.IrisPlatformHelpers.getInstance().isDevelopmentEnvironment()) {
+            if (minecraft.getLevelSource().levelExists(identifier)) {
+                minecraft.createWorldOpenFlows()
+                    .openWorld(identifier, () -> minecraft.gui.setScreen(new net.minecraft.client.gui.screens.TitleScreen()));
+            }
+
+            return;
+        }
+
         if (!StringUtil.isBlank(identifier) && minecraft.getLevelSource().levelExists(identifier)) {
             minecraft.createWorldOpenFlows().openWorld(identifier, () -> minecraft.gui.setScreen(new TitleScreen()));
         } else {

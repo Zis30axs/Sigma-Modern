@@ -15,7 +15,8 @@ public class SectionBufferBuilderPool implements AutoCloseable {
     private static final Logger LOGGER = LogUtils.getLogger();
     private final ArrayBlockingQueue<SectionBufferBuilderPack> freeBuffers;
 
-    private SectionBufferBuilderPool(final List<SectionBufferBuilderPack> buffers) {
+    // MODIFIED for porting: sodium-common.accesswidener widened access
+    public SectionBufferBuilderPool(final List<SectionBufferBuilderPack> buffers) {
         this.freeBuffers = Queues.newArrayBlockingQueue(buffers.size());
         this.freeBuffers.addAll(buffers);
     }

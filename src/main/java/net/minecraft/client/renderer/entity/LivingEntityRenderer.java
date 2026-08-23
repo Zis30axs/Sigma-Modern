@@ -73,6 +73,17 @@ public abstract class LivingEntityRenderer<T extends LivingEntity, S extends Liv
     }
 
     public void submit(final S state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera) {
+        // MODIFIED for porting: was sodium-extra's render.entity MixinLivingEntityRenderer#onRender (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_ENTITY
+            && state instanceof net.minecraft.client.renderer.entity.state.ArmorStandRenderState
+            && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.armorStand) {
+            if (state.nameTag != null) {
+                this.submitNameDisplay(state, poseStack, submitNodeCollector, camera);
+            }
+
+            return;
+        }
+
         poseStack.pushPose();
         if (state.hasPose(Pose.SLEEPING)) {
             Direction bedOrientation = state.bedOrientation;
@@ -199,6 +210,14 @@ public abstract class LivingEntityRenderer<T extends LivingEntity, S extends Liv
     }
 
     protected boolean shouldShowName(final T entity, final double distanceToCameraSq) {
+        // MODIFIED for porting: was sodium-extra's render.entity MixinLivingEntityRenderer#shouldShowName
+        // (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_ENTITY
+            && entity instanceof net.minecraft.client.player.AbstractClientPlayer
+            && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.playerNameTag) {
+            return false;
+        }
+
         if (entity.isDiscrete()) {
             float maxDist = 32.0F;
             if (distanceToCameraSq >= 1024.0) {

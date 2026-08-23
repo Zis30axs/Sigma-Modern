@@ -28,7 +28,7 @@ public class GlProgram implements AutoCloseable {
     private final int programId;
     private final String debugLabel;
 
-    private GlProgram(final int programId, final String debugLabel) {
+    public GlProgram(final int programId, final String debugLabel) {
         this.programId = programId;
         this.debugLabel = debugLabel;
     }

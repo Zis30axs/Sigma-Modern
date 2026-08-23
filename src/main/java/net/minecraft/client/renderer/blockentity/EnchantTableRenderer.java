@@ -61,6 +61,12 @@ public class EnchantTableRenderer implements BlockEntityRenderer<EnchantingTable
     public void submit(
         final EnchantTableRenderState state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera
     ) {
+        // MODIFIED for porting: was sodium-extra's render.block.entity MixinEnchantingTableBlockEntityRenderer#render
+        // (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_BLOCK_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.enchantingTableBook) {
+            return;
+        }
+
         poseStack.pushPose();
         poseStack.translate(0.5F, 0.75F, 0.5F);
         poseStack.translate(0.0F, 0.1F + Mth.sin(state.time * 0.1F) * 0.01F, 0.0F);

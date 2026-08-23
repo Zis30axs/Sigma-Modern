@@ -40,11 +40,18 @@ import net.minecraft.world.level.LevelHeightAccessor;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public class SectionStorage<R, P> implements AutoCloseable {
+// MODIFIED for porting: implements lithium's RegionBasedStorageSectionExtended (ai.poi SectionStorageMixin), which
+// tracks per chunk column which of its sections hold an entry, so POI lookups do not have to probe every section.
+public class SectionStorage<R, P> implements AutoCloseable, net.caffeinemc.mods.lithium.common.world.interests.RegionBasedStorageSectionExtended<R> {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String SECTIONS_TAG = "Sections";
     private final SimpleRegionStorage simpleRegionStorage;
-    private final Long2ObjectMap<Optional<R>> storage = new Long2ObjectOpenHashMap<>();
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin replaces this map with a listening one
+    // (@Mutable @Shadow @Final), so it lost its `final`.
+    private Long2ObjectMap<Optional<R>> storage = new Long2ObjectOpenHashMap<>();
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin @Unique field - for each chunk column, the set of
+    // section indices that currently hold a present entry.
+    private Long2ObjectOpenHashMap<java.util.BitSet> lithium$columns;
     private final LongLinkedOpenHashSet dirtyChunks = new LongLinkedOpenHashSet();
     private final Codec<P> codec;
     private final Function<R, P> packer;
@@ -75,6 +82,151 @@ public class SectionStorage<R, P> implements AutoCloseable {
         this.registryAccess = registryAccess;
         this.errorReporter = errorReporter;
         this.levelHeightAccessor = levelHeightAccessor;
+        // MODIFIED for porting: lithium ai.poi SectionStorageMixin#init (<init> RETURN)
+        this.lithium$columns = new Long2ObjectOpenHashMap<>();
+        this.storage = new net.caffeinemc.mods.lithium.common.util.collections.ListeningLong2ObjectOpenHashMap<>(this::lithium$onEntryAdded, this::lithium$onEntryRemoved);
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#onEntryRemoved
+    private void lithium$onEntryRemoved(final long key, final Optional<R> value) {
+        int y = net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.fromSectionCoord(this.levelHeightAccessor, SectionPos.y(key));
+        // We only care about items belonging to a valid sub-chunk
+        if (y < 0 || y >= net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.getNumYSections(this.levelHeightAccessor)) {
+            return;
+        }
+
+        long pos = ChunkPos.pack(SectionPos.x(key), SectionPos.z(key));
+        java.util.BitSet flags = this.lithium$columns.get(pos);
+        if (flags != null) {
+            flags.clear(y);
+            if (flags.isEmpty()) {
+                this.lithium$columns.remove(pos);
+            }
+        }
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#onEntryAdded
+    private void lithium$onEntryAdded(final long key, final Optional<R> value) {
+        int y = net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.fromSectionCoord(this.levelHeightAccessor, SectionPos.y(key));
+        // We only care about items belonging to a valid sub-chunk
+        if (y < 0 || y >= net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.getNumYSections(this.levelHeightAccessor)) {
+            return;
+        }
+
+        long pos = ChunkPos.pack(SectionPos.x(key), SectionPos.z(key));
+        java.util.BitSet flags = this.lithium$columns.get(pos);
+        if (flags == null) {
+            this.lithium$columns.put(pos, flags = new java.util.BitSet(net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.getNumYSections(this.levelHeightAccessor)));
+        }
+
+        flags.set(y, value.isPresent());
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getFirstInRangeInChunkColumn
+    @Override
+    public <S, T, U> U lithium$getFirstInRangeInChunkColumn(
+        final int chunkX,
+        final int chunkZ,
+        final long deltaYSqMargin,
+        final net.minecraft.core.BlockPos center,
+        final long radiusSq,
+        final net.caffeinemc.mods.lithium.common.util.functions.FunLongAnd5<
+            R,
+            net.minecraft.core.BlockPos,
+            java.util.function.Predicate<net.minecraft.core.Holder<S>>,
+            java.util.function.Predicate<net.minecraft.core.BlockPos>,
+            T,
+            U
+        > sectionMapper,
+        final java.util.function.Predicate<net.minecraft.core.Holder<S>> predicate,
+        final java.util.function.Predicate<net.minecraft.core.BlockPos> filter,
+        final T status
+    ) {
+        java.util.BitSet sectionsWithPOI = this.lithium$getNonEmptyPOISections(chunkX, chunkZ);
+        if (sectionsWithPOI.isEmpty()) {
+            return null;
+        }
+
+        int minYSection = net.caffeinemc.mods.lithium.common.util.Pos.SectionYCoord.getMinYSection(this.levelHeightAccessor);
+
+        for (int chunkYIndex = sectionsWithPOI.nextSetBit(0); chunkYIndex != -1; chunkYIndex = sectionsWithPOI.nextSetBit(chunkYIndex + 1)) {
+            int chunkY = chunkYIndex + minYSection;
+            long minYDistance = net.caffeinemc.mods.lithium.common.util.Distances.getClosestBlockCoordInSection(center.getY(), chunkY) - center.getY();
+            if (minYDistance * minYDistance <= deltaYSqMargin) {
+                R r = this.storage.get(SectionPos.asLong(chunkX, chunkY, chunkZ)).orElse(null);
+                U result = sectionMapper.apply(r, center, predicate, filter, status, radiusSq);
+                if (result != null) {
+                    return result;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getInChunkColumn - fast path for collecting all items
+    // in a chunk column, avoiding a lookup per sub-chunk
+    @Override
+    public Iterable<R> lithium$getInChunkColumn(final int chunkX, final int chunkZ) {
+        java.util.BitSet sectionsWithPOI = this.lithium$getNonEmptyPOISections(chunkX, chunkZ);
+        // No items are present in this column
+        if (sectionsWithPOI.isEmpty()) {
+            return java.util.Collections::emptyIterator;
+        }
+
+        Long2ObjectMap<Optional<R>> loadedElements = this.storage;
+        LevelHeightAccessor world = this.levelHeightAccessor;
+        return () -> new com.google.common.collect.AbstractIterator<>() {
+            private int nextBit = sectionsWithPOI.nextSetBit(0);
+
+            @Override
+            protected R computeNext() {
+                // If the next bit is <0, that means that no remaining set bits exist
+                while (this.nextBit >= 0) {
+                    Optional<R> next = loadedElements.get(
+                        SectionPos.asLong(chunkX, net.caffeinemc.mods.lithium.common.util.Pos.SectionYCoord.fromSectionIndex(world, this.nextBit), chunkZ)
+                    );
+                    // Find and advance to the next set bit
+                    this.nextBit = sectionsWithPOI.nextSetBit(this.nextBit + 1);
+                    if (next.isPresent()) {
+                        return next.get();
+                    }
+                }
+
+                return this.endOfData();
+            }
+        };
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getNonEmptyPOISections
+    @Override
+    public java.util.BitSet lithium$getNonEmptyPOISections(final int chunkX, final int chunkZ) {
+        long pos = ChunkPos.pack(chunkX, chunkZ);
+        java.util.BitSet flags = this.lithium$columns.get(pos);
+        if (flags != null) {
+            return flags;
+        }
+
+        this.unpackChunk(ChunkPos.unpack(pos));
+        return java.util.Objects.requireNonNull(this.lithium$columns.get(pos), "Failed to load POI section data!");
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getElementAt
+    @Override
+    public Optional<R> lithium$getElementAt(final long sectionPos) {
+        return this.storage.get(sectionPos);
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getChunkYMin
+    @Override
+    public int lithium$getChunkYMin() {
+        return net.caffeinemc.mods.lithium.common.util.Pos.SectionYCoord.getMinYSection(this.levelHeightAccessor);
+    }
+
+    // MODIFIED for porting: lithium ai.poi SectionStorageMixin#lithium$getChunkYMaxInclusive
+    @Override
+    public int lithium$getChunkYMaxInclusive() {
+        return net.caffeinemc.mods.lithium.common.util.Pos.SectionYCoord.getMaxYSectionInclusive(this.levelHeightAccessor);
     }
 
     protected void tick(final BooleanSupplier haveTime) {
@@ -121,7 +273,7 @@ public class SectionStorage<R, P> implements AutoCloseable {
         return this.storage.get(sectionPos);
     }
 
-    protected Optional<R> getOrLoad(final long sectionPos) {
+    public Optional<R> getOrLoad(final long sectionPos) { // MODIFIED for porting: lithium.accesswidener widened access
         if (this.outsideStoredRange(sectionPos)) {
             return Optional.empty();
         } else {

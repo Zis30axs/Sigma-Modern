@@ -22,8 +22,20 @@ import net.minecraft.world.level.storage.loot.LootTable;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-public abstract class AbstractMinecartContainer extends AbstractMinecart implements ContainerEntity {
+public abstract class AbstractMinecartContainer extends AbstractMinecart
+    implements ContainerEntity, net.caffeinemc.mods.lithium.api.inventory.LithiumInventory { // MODIFIED for porting: lithium block.hopper InventoryAccessors
     private NonNullList<ItemStack> itemStacks = NonNullList.withSize(36, ItemStack.EMPTY);
+
+    // MODIFIED for porting: the next two methods were lithium's block.hopper InventoryAccessors Mixin
+    @Override
+    public NonNullList<ItemStack> getInventoryLithium() {
+        return this.itemStacks;
+    }
+
+    @Override
+    public void setInventoryLithium(final NonNullList<ItemStack> inventory) {
+        this.itemStacks = inventory;
+    }
     private @Nullable ResourceKey<LootTable> lootTable;
     private long lootTableSeed;
 

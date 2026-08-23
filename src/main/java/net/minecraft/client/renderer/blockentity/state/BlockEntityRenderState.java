@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
 @OnlyIn(Dist.CLIENT)
 public class BlockEntityRenderState {
     public BlockPos blockPos = BlockPos.ZERO;
-    private BlockState blockState = Blocks.AIR.defaultBlockState();
+    public BlockState blockState = Blocks.AIR.defaultBlockState(); // MODIFIED for porting: iris.accesswidener makes BlockEntityRenderState#blockState accessible
     public BlockEntityType<?> blockEntityType = BlockEntityTypes.TEST_BLOCK;
     public int lightCoords;
     public ModelFeatureRenderer.@Nullable CrumblingOverlay breakProgress;

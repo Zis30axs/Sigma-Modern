@@ -15,12 +15,45 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public abstract class RenderTarget {
+// MODIFIED for porting: iris injects this interface into the class (loom:injected_interfaces in fabric.mod.json)
+public abstract class RenderTarget
+    implements net.irisshaders.iris.mixinterface.RenderTargetInterface,
+    net.irisshaders.iris.targets.Blaze3dRenderTargetExt { // MODIFIED for porting: iris MixinRenderTarget
     private static int UNNAMED_RENDER_TARGETS = 0;
     public int width;
     public int height;
     protected final String label;
     public final boolean useDepth;
+    /**
+     * MODIFIED for porting: iris MixinRenderTarget @Unique fields (its Blaze3dRenderTargetExt implementation). They let iris
+     * notice that the depth/color texture was re-created so it can re-attach it to the shader framebuffers - see
+     * {@code IrisRenderingPipeline} and {@code RenderTargets}.
+     */
+    private int iris$depthBufferVersion;
+
+    private int iris$colorBufferVersion;
+
+    @Override
+    public int iris$getDepthBufferVersion() {
+        return this.iris$depthBufferVersion;
+    }
+
+    @Override
+    public int iris$getColorBufferVersion() {
+        return this.iris$colorBufferVersion;
+    }
+
+    @Override
+    public void iris$bindFramebuffer() {
+        int fbo = net.irisshaders.iris.gl.IrisRenderSystem.getGlDevice()
+            .frameBufferCache()
+            .getFbo(
+                net.irisshaders.iris.gl.IrisRenderSystem.getGlDevice().directStateAccess(),
+                java.util.List.of((com.mojang.blaze3d.opengl.FrameBufferAttachment)this.colorTexture),
+                (com.mojang.blaze3d.opengl.FrameBufferAttachment)this.depthTexture
+            );
+        com.mojang.blaze3d.opengl.GlStateManager._glBindFramebuffer(com.mojang.blaze3d.opengl.GlConst.GL_FRAMEBUFFER, fbo);
+    }
     protected final GpuFormat format;
     protected @Nullable GpuTexture colorTexture;
     protected @Nullable GpuTextureView colorTextureView;
@@ -40,6 +73,10 @@ public abstract class RenderTarget {
     }
 
     public void destroyBuffers() {
+        // MODIFIED for porting: was iris's MixinRenderTarget#iris$onDestroyBuffers (@Inject HEAD)
+        this.iris$depthBufferVersion++;
+        this.iris$colorBufferVersion++;
+
         RenderSystem.assertOnRenderThread();
         if (this.depthTexture != null) {
             this.depthTexture.close();

@@ -37,6 +37,12 @@ public class ChainedJsonException extends IOException {
     }
 
     public static ChainedJsonException forException(final Exception e) {
+        // MODIFIED for porting: was iris's MixinChainedJsonException#iris$changeShaderParseException (@Inject HEAD,
+        // cancellable) - iris reports shader compile failures through its own exception type.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && e instanceof net.irisshaders.iris.gl.shader.ShaderCompileException sce) {
+            return new net.irisshaders.iris.helpers.FakeChainedJsonException(sce);
+        }
+
         if (e instanceof ChainedJsonException chainedJsonException) {
             return chainedJsonException;
         } else {

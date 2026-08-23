@@ -57,7 +57,9 @@ public interface EntityGetter {
         }
 
         Predicate<Entity> canCollide = source == null ? EntitySelector.CAN_BE_COLLIDED_WITH : EntitySelector.NO_SPECTATORS.and(source::canCollideWith);
-        List<Entity> collidingEntities = this.getEntities(source, testArea.inflate(1.0E-7), canCollide);
+        // MODIFIED for porting: lithium entity.collisions.intersection EntityGetterMixin#getCollisionEntities - only the
+        // entity classes that can actually be collided with are visited, instead of every nearby entity.
+        List<Entity> collidingEntities = net.caffeinemc.mods.lithium.common.world.WorldHelper.getOtherEntitiesForCollision(this, testArea.inflate(1.0E-7), source, canCollide);
         if (collidingEntities.isEmpty()) {
             return List.of();
         }

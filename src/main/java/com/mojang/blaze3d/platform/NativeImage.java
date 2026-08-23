@@ -37,7 +37,14 @@ import org.lwjgl.util.freetype.FreeType;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public final class NativeImage implements AutoCloseable {
+// MODIFIED for porting: implements sodium's NativeImageAccessor (mixin.features.textures.NativeImageAccessor)
+public final class NativeImage implements AutoCloseable, net.caffeinemc.mods.sodium.mixin.features.textures.NativeImageAccessor {
+    // MODIFIED for porting: was sodium's NativeImageAccessor @Accessor("pixels")
+    @Override
+    public long sodium$getPixels() {
+        return this.pixels;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final MemoryPool MEMORY_POOL = TracyClient.createMemoryPool("NativeImage");
     private static final Set<StandardOpenOption> OPEN_OPTIONS = EnumSet.of(

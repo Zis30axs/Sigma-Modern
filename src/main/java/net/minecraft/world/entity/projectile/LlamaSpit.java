@@ -43,7 +43,10 @@ public class LlamaSpit extends Projectile {
     public void tick() {
         super.tick();
         Vec3 movement = this.getDeltaMovement();
-        HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions LlamaSpitMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
+        HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(this, new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity));
         this.hitTargetOrDeflectSelf(hitResult);
         double x = this.getX() + movement.x;
         double y = this.getY() + movement.y;

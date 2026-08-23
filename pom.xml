@@ -492,16 +492,59 @@
             <artifactId>org.osgi.service.serviceloader</artifactId>
             <version>1.0.0</version>
         </dependency>
+        <!--
+          MODIFIED for porting: asm moved from runtime to compile scope. Sodium's
+          net.caffeinemc.mods.sodium.client.render.vertex.serializers.generated.VertexSerializerFactory generates its vertex
+          format converters with ASM at runtime and therefore needs the library at compile time as well. No new dependency
+          and no version change.
+        -->
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm</artifactId>
             <version>9.7</version>
-            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>2.0.17</version>
+        </dependency>
+        <!--
+          MODIFIED for porting: the libraries Iris compiles and runs against. Upstream declares them in
+          Iris/common/build.gradle.kts as compileOnly and ships them inside the loader jars (jar-in-jar); there is no loader
+          here, so they are ordinary dependencies. Versions are exactly the ones Iris pins.
+            - glsl-transformer + antlr4-runtime: the GLSL parser/transformer Iris rewrites shader packs with
+              (net.irisshaders.iris.pipeline.transform.**)
+            - jcpp: the C preprocessor Iris runs over shader sources (net.irisshaders.iris.helpers.JcppProcessor and
+              net.irisshaders.iris.shaderpack.preprocessor.**)
+        -->
+        <dependency>
+            <groupId>io.github.douira</groupId>
+            <artifactId>glsl-transformer</artifactId>
+            <version>3.0.0-pre3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>4.13.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.anarres</groupId>
+            <artifactId>jcpp</artifactId>
+            <version>1.4.14</version>
+        </dependency>
+        <!--
+          MODIFIED for porting: the Distant Horizons API. Upstream keeps this jar in the repository root and declares it
+          compileOnly (DH itself provides the classes at run time when it is installed). Iris's net.irisshaders.iris.compat.dh
+          package compiles against it, so the same jar is kept in lib/ here. Distant Horizons cannot be installed in this
+          project (there is no mod loader), so IrisPlatformHelpers#isModLoaded("distanthorizons") is always false and the DH
+          code paths never run - but the classes still have to load, which is why this is not compile-only.
+        -->
+        <dependency>
+            <groupId>com.seibel.distanthorizons</groupId>
+            <artifactId>dhapi</artifactId>
+            <version>local</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/DHApi.jar</systemPath>
         </dependency>
     </dependencies>
 

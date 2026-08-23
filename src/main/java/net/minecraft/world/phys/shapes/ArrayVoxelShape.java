@@ -3,13 +3,16 @@ package net.minecraft.world.phys.shapes;
 import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
 import it.unimi.dsi.fastutil.doubles.DoubleList;
 import java.util.Arrays;
+import malte0811.ferritecore.mixin.accessors.ArrayVSAccess; // MODIFIED for porting
 import net.minecraft.core.Direction;
 import net.minecraft.util.Util;
 
-public class ArrayVoxelShape extends VoxelShape {
-    private final DoubleList xs;
-    private final DoubleList ys;
-    private final DoubleList zs;
+public class ArrayVoxelShape extends VoxelShape implements ArrayVSAccess { // MODIFIED for porting
+    // MODIFIED for porting: no longer final so that FerriteCore's blockstate cache deduplication can replace the point
+    // lists of a duplicate shape with those of the shape it keeps.
+    private DoubleList xs;
+    private DoubleList ys;
+    private DoubleList zs;
 
     ArrayVoxelShape(final DiscreteVoxelShape shape, final double[] xs, final double[] ys, final double[] zs) {
         this(
@@ -20,7 +23,8 @@ public class ArrayVoxelShape extends VoxelShape {
         );
     }
 
-    ArrayVoxelShape(final DiscreteVoxelShape shape, final DoubleList xs, final DoubleList ys, final DoubleList zs) {
+    // MODIFIED for porting: lithium reached this constructor through a Mixin @Invoker, so it must be public
+    public ArrayVoxelShape(final DiscreteVoxelShape shape, final DoubleList xs, final DoubleList ys, final DoubleList zs) {
         super(shape);
         int xSize = shape.getXSize() + 1;
         int ySize = shape.getYSize() + 1;
@@ -43,5 +47,36 @@ public class ArrayVoxelShape extends VoxelShape {
             case Y -> this.ys;
             case Z -> this.zs;
         };
+    }
+
+    // MODIFIED for porting: the following accessors were FerriteCore's ArrayVSAccess accessor Mixin
+    @Override
+    public void setXPoints(final DoubleList newPoints) {
+        this.xs = newPoints;
+    }
+
+    @Override
+    public void setYPoints(final DoubleList newPoints) {
+        this.ys = newPoints;
+    }
+
+    @Override
+    public void setZPoints(final DoubleList newPoints) {
+        this.zs = newPoints;
+    }
+
+    @Override
+    public DoubleList getXPoints() {
+        return this.xs;
+    }
+
+    @Override
+    public DoubleList getYPoints() {
+        return this.ys;
+    }
+
+    @Override
+    public DoubleList getZPoints() {
+        return this.zs;
     }
 }

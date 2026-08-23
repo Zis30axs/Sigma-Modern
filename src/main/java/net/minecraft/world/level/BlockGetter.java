@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.Blocks; // MODIFIED for porting: lithium world.raycast
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -62,23 +63,94 @@ public interface BlockGetter extends LevelHeightAccessor {
         );
     }
 
+    /**
+     * MODIFIED for porting: lithium world.raycast BlockGetterMixin. For the two level implementations it can recognise, the
+     * per-block callback is replaced by a stateful one that caches the chunk between steps of the ray and skips the fluid
+     * lookup entirely when the context does not handle fluids. Custom level implementations keep the vanilla callback, which
+     * is what upstream does for compatibility with mods such as Create and Ponder.
+     */
     default BlockHitResult clip(final ClipContext c) {
-        return traverseBlocks(c.getFrom(), c.getTo(), c, (context, pos) -> {
-            BlockState blockState = this.getBlockState(pos);
-            FluidState fluidState = this.getFluidState(pos);
-            Vec3 from = context.getFrom();
-            Vec3 to = context.getTo();
-            VoxelShape blockShape = context.getBlockShape(blockState, this, pos);
-            BlockHitResult blockResult = this.clipWithInteractionOverride(from, to, pos, blockShape, blockState);
-            VoxelShape fluidShape = context.getFluidShape(fluidState, this, pos);
-            BlockHitResult liquidResult = fluidShape.clip(from, to, pos);
-            double blockDistanceSquared = blockResult == null ? Double.MAX_VALUE : context.getFrom().distanceToSqr(blockResult.getLocation());
-            double liquidDistanceSquared = liquidResult == null ? Double.MAX_VALUE : context.getFrom().distanceToSqr(liquidResult.getLocation());
-            return blockDistanceSquared <= liquidDistanceSquared ? blockResult : liquidResult;
-        }, context -> {
+        BiFunction<ClipContext, BlockPos, BlockHitResult> blockHitFactory = this instanceof net.minecraft.server.level.ServerLevel
+                || this instanceof Level level && level.isClientSide()
+            ? this.lithium$blockHitFactory()
+            : (context, pos) -> {
+                BlockState blockState = this.getBlockState(pos);
+                FluidState fluidState = this.getFluidState(pos);
+                Vec3 from = context.getFrom();
+                Vec3 to = context.getTo();
+                VoxelShape blockShape = context.getBlockShape(blockState, this, pos);
+                BlockHitResult blockResult = this.clipWithInteractionOverride(from, to, pos, blockShape, blockState);
+                VoxelShape fluidShape = context.getFluidShape(fluidState, this, pos);
+                BlockHitResult liquidResult = fluidShape.clip(from, to, pos);
+                double blockDistanceSquared = blockResult == null ? Double.MAX_VALUE : context.getFrom().distanceToSqr(blockResult.getLocation());
+                double liquidDistanceSquared = liquidResult == null ? Double.MAX_VALUE : context.getFrom().distanceToSqr(liquidResult.getLocation());
+                return blockDistanceSquared <= liquidDistanceSquared ? blockResult : liquidResult;
+            };
+        return traverseBlocks(c.getFrom(), c.getTo(), c, blockHitFactory, context -> {
             Vec3 delta = context.getFrom().subtract(context.getTo());
             return BlockHitResult.miss(context.getTo(), Direction.getApproximateNearest(delta.x, delta.y, delta.z), BlockPos.containing(context.getTo()));
         });
+    }
+
+    // MODIFIED for porting: was lithium's world.raycast BlockGetterMixin#lithium$blockHitFactory
+    private BiFunction<ClipContext, BlockPos, BlockHitResult> lithium$blockHitFactory() {
+        return new BiFunction<>() {
+            private int chunkX = Integer.MIN_VALUE;
+            private int chunkZ = Integer.MIN_VALUE;
+            private net.minecraft.world.level.chunk.ChunkAccess chunk = null;
+
+            @Override
+            public BlockHitResult apply(final ClipContext innerContext, final BlockPos pos) {
+                // [VanillaCopy] BlockGetter#clip, but with optional fluid handling
+                boolean handleFluids = innerContext.getFluidHandling() != ClipContext.Fluid.NONE;
+                BlockState blockState = this.getBlock((LevelReader)BlockGetter.this, pos);
+                Vec3 start = innerContext.getFrom();
+                Vec3 end = innerContext.getTo();
+                VoxelShape blockShape = innerContext.getBlockShape(blockState, BlockGetter.this, pos);
+                BlockHitResult blockHitResult = BlockGetter.this.clipWithInteractionOverride(start, end, pos, blockShape, blockState);
+                double d = blockHitResult == null ? Double.MAX_VALUE : innerContext.getFrom().distanceToSqr(blockHitResult.getLocation());
+                double e = Double.MAX_VALUE;
+                BlockHitResult fluidHitResult = null;
+                if (handleFluids) {
+                    FluidState fluidState = blockState.getFluidState();
+                    VoxelShape fluidShape = innerContext.getFluidShape(fluidState, BlockGetter.this, pos);
+                    fluidHitResult = fluidShape.clip(start, end, pos);
+                    e = fluidHitResult == null ? Double.MAX_VALUE : innerContext.getFrom().distanceToSqr(fluidHitResult.getLocation());
+                }
+
+                return d <= e ? blockHitResult : fluidHitResult;
+            }
+
+            private BlockState getBlock(final LevelReader level, final BlockPos blockPos) {
+                if (level.isOutsideBuildHeight(blockPos.getY())) {
+                    return Blocks.VOID_AIR.defaultBlockState();
+                }
+
+                int chunkX = net.caffeinemc.mods.lithium.common.util.Pos.ChunkCoord.fromBlockCoord(blockPos.getX());
+                int chunkZ = net.caffeinemc.mods.lithium.common.util.Pos.ChunkCoord.fromBlockCoord(blockPos.getZ());
+                // Avoid calling into the chunk manager as much as possible by managing the current chunk locally
+                if (this.chunkX != chunkX || this.chunkZ != chunkZ) {
+                    this.chunk = level.getChunk(chunkX, chunkZ);
+                    this.chunkX = chunkX;
+                    this.chunkZ = chunkZ;
+                }
+
+                net.minecraft.world.level.chunk.ChunkAccess chunk = this.chunk;
+                // If the chunk is missing or out of bounds, assume that it is air
+                if (chunk != null) {
+                    // Operate directly on chunk sections to avoid interacting with BlockPos
+                    net.minecraft.world.level.chunk.LevelChunkSection section = chunk.getSections()[
+                        net.caffeinemc.mods.lithium.common.util.Pos.SectionYIndex.fromBlockCoord(chunk, blockPos.getY())
+                    ];
+                    // If the section doesn't exist or is empty, assume that the block is air
+                    if (section != null && !section.hasOnlyAir()) {
+                        return section.getBlockState(blockPos.getX() & 15, blockPos.getY() & 15, blockPos.getZ() & 15);
+                    }
+                }
+
+                return Blocks.AIR.defaultBlockState();
+            }
+        };
     }
 
     default @Nullable BlockHitResult clipWithInteractionOverride(

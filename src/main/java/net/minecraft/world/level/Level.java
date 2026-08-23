@@ -68,6 +68,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection; // MODIFIED for porting: lithium world.inline_block_access
 import net.minecraft.world.level.chunk.PalettedContainerFactory;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -90,7 +91,13 @@ import net.minecraft.world.scores.Scoreboard;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.jspecify.annotations.Nullable;
 
-public abstract class Level implements LevelAccessor, AutoCloseable {
+public abstract class Level
+    implements LevelAccessor,
+    AutoCloseable,
+    net.caffeinemc.mods.lithium.mixin.util.accessors.LevelAccessor,
+    net.caffeinemc.mods.lithium.common.world.LithiumData,
+    net.caffeinemc.mods.lithium.common.world.blockentity.BlockEntityGetter,
+    net.caffeinemc.mods.lithium.common.world.ChunkRandomSource { // MODIFIED for porting: lithium alloc.chunk_random // MODIFIED for porting: lithium LevelAccessor
     public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
     public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, Identifier.withDefaultNamespace("overworld"));
     public static final ResourceKey<Level> NETHER = ResourceKey.create(Registries.DIMENSION, Identifier.withDefaultNamespace("the_nether"));
@@ -131,6 +138,16 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
     private final DamageSources damageSources;
     private final PalettedContainerFactory palettedContainerFactory;
     private long subTickCount;
+    // MODIFIED for porting: lithium world.inline_block_access LevelMixin constants
+    private static final BlockState LITHIUM_OUTSIDE_WORLD_BLOCK = Blocks.VOID_AIR.defaultBlockState();
+    private static final BlockState LITHIUM_INSIDE_WORLD_DEFAULT_BLOCK = Blocks.AIR.defaultBlockState();
+    // MODIFIED for porting: lithium world.inline_height LevelMixin caches the dimension's height limits so the
+    // LevelHeightAccessor methods below do not have to go through LevelReader -> DimensionType on every call.
+    private final int lithium$bottomY;
+    private final int lithium$height;
+    private final int lithium$topYInclusive;
+    // MODIFIED for porting: lithium util.data_storage LevelMixin @Unique field
+    private net.caffeinemc.mods.lithium.common.world.LithiumData.Data lithium$storage;
 
     protected Level(
         final WritableLevelData levelData,
@@ -153,10 +170,201 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
         this.registryAccess = registryAccess;
         this.palettedContainerFactory = PalettedContainerFactory.create(registryAccess);
         this.damageSources = new DamageSources(registryAccess);
+        // MODIFIED for porting: lithium world.inline_height LevelMixin#initHeightCache (injected at RETURN of <init>)
+        this.lithium$height = dimensionTypeRegistration.value().height();
+        this.lithium$bottomY = dimensionTypeRegistration.value().minY();
+        this.lithium$topYInclusive = this.lithium$bottomY + this.lithium$height - 1;
+        // MODIFIED for porting: lithium util.data_storage LevelMixin#initLithiumData (injected at RETURN of <init>)
+        this.lithium$storage = new net.caffeinemc.mods.lithium.common.world.LithiumData.Data(registryAccess);
     }
 
     public int getNextEntityId() {
         return 0;
+    }
+
+    // MODIFIED for porting: the following overrides were lithium's world.inline_height LevelMixin
+    @Override
+    public int getHeight() {
+        return this.lithium$height;
+    }
+
+    @Override
+    public int getMinY() {
+        return this.lithium$bottomY;
+    }
+
+    @Override
+    public int getMaxY() {
+        return this.lithium$topYInclusive;
+    }
+
+    @Override
+    public int getSectionsCount() {
+        return (this.lithium$topYInclusive >> 4) + 1 - (this.lithium$bottomY >> 4);
+    }
+
+    @Override
+    public int getMinSectionY() {
+        return this.lithium$bottomY >> 4;
+    }
+
+    @Override
+    public int getMaxSectionY() {
+        return this.lithium$topYInclusive >> 4;
+    }
+
+    @Override
+    public boolean isOutsideBuildHeight(final BlockPos pos) {
+        int y = pos.getY();
+        return y < this.lithium$bottomY || y > this.lithium$topYInclusive;
+    }
+
+    @Override
+    public boolean isOutsideBuildHeight(final int blockY) {
+        return blockY < this.lithium$bottomY || blockY > this.lithium$topYInclusive;
+    }
+
+    @Override
+    public int getSectionIndex(final int blockY) {
+        return (blockY >> 4) - (this.lithium$bottomY >> 4);
+    }
+
+    @Override
+    public int getSectionIndexFromSectionY(final int sectionY) {
+        return sectionY - (this.lithium$bottomY >> 4);
+    }
+
+    @Override
+    public int getSectionYFromSectionIndex(final int sectionIndex) {
+        return sectionIndex + (this.lithium$bottomY >> 4);
+    }
+
+    /**
+     * MODIFIED for porting: lithium minimal_nonvanilla.collisions.empty_space LevelMixin. Vanilla builds one big shape out of
+     * all nearby block collisions and then searches it; lithium collects the collision boxes and asks
+     * VoxelShapeHelper for the closest free point directly, which avoids the expensive shape combination.
+     */
+    @Override
+    public Optional<Vec3> findFreePosition(
+        final @Nullable Entity collidingEntity,
+        final net.minecraft.world.phys.shapes.VoxelShape collidingShape,
+        final Vec3 originalPosition,
+        final double maxXOffset,
+        final double maxYOffset,
+        final double maxZOffset
+    ) {
+        if (collidingShape.isEmpty()) {
+            return Optional.empty();
+        }
+
+        AABB collidingBox = collidingShape.bounds();
+        AABB searchBox = collidingBox.inflate(maxXOffset, maxYOffset, maxZOffset);
+        List<net.minecraft.world.phys.shapes.VoxelShape> blockCollisions = net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.getBlockCollisions(this, collidingEntity, searchBox);
+        if (blockCollisions.isEmpty()) {
+            return collidingShape.closestPointTo(originalPosition);
+        }
+
+        WorldBorder worldBorder = this.getWorldBorder();
+        if (worldBorder != null) {
+            double sideLength = Math.max(searchBox.getXsize(), searchBox.getZsize());
+            double centerX = Mth.lerp(0.5, searchBox.minX, searchBox.maxX);
+            double centerZ = Mth.lerp(0.5, searchBox.minZ, searchBox.maxZ);
+            // Use a magic margin of 2 blocks so over-sized blocks are not handled incorrectly
+            boolean worldBorderIsNearby = 2 + 2 * sideLength >= worldBorder.getDistanceToBorder(centerX, centerZ);
+            if (worldBorderIsNearby) {
+                blockCollisions.removeIf(voxelShape -> !worldBorder.isWithinBounds(voxelShape.bounds()));
+            }
+        }
+
+        List<AABB> allCollisionBoxes = new java.util.ArrayList<>();
+
+        for (net.minecraft.world.phys.shapes.VoxelShape blockCollision : blockCollisions) {
+            for (AABB box : blockCollision.toAabbs()) {
+                // Like vanilla, fold the boxes with the entity / the max offset
+                allCollisionBoxes.add(box.inflate(maxXOffset / 2.0, maxYOffset / 2.0, maxZOffset / 2.0));
+            }
+        }
+
+        // The closest point to the original position that is inside the colliding shape but not inside any of the folded
+        // collision boxes is the closest point where the entity can be placed.
+        return net.caffeinemc.mods.lithium.common.shapes.VoxelShapeHelper.getClosestPointTo(originalPosition, collidingShape, allCollisionBoxes);
+    }
+
+    /**
+     * MODIFIED for porting: lithium entity.collisions.intersection LevelMixin#noCollision. Checks blocks with lithium's
+     * chunk-aware sweeper, only visits the entity classes that can be hard-collided with, and tests the world border without
+     * going through the VoxelShape system.
+     */
+    @Override
+    public boolean noCollision(final @Nullable Entity entity, final AABB box) {
+        boolean ret = !net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.doesBoxCollideWithBlocks(this, entity, box);
+        // If no blocks were collided with, check for entity collisions (this has to include the world border)
+        if (ret) {
+            ret = !net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.doesBoxCollideWithHardEntities(this, entity, box);
+        }
+
+        if (ret && entity != null) {
+            ret = !net.caffeinemc.mods.lithium.common.entity.LithiumEntityCollisions.doesBoxCollideWithWorldBorder(this, entity, box);
+        }
+
+        return ret;
+    }
+
+    /**
+     * MODIFIED for porting: lithium entity.collisions.intersection LevelMixin#findSupportingBlock uses the chunk-aware
+     * collision sweeper. The visiting order does not matter because vanilla already breaks ties by block position.
+     */
+    @Override
+    public Optional<BlockPos> findSupportingBlock(final Entity entity, final AABB box) {
+        BlockPos blockPos = null;
+        double closestDistance = Double.MAX_VALUE;
+        net.caffeinemc.mods.lithium.common.entity.movement.ChunkAwareBlockCollisionSweeperBlockPos blockCollisions = new net.caffeinemc.mods.lithium.common.entity.movement.ChunkAwareBlockCollisionSweeperBlockPos(this, entity, box);
+
+        while (blockCollisions.hasNext()) {
+            BlockPos candidate = blockCollisions.next();
+            double distance = candidate.distToCenterSqr(entity.position());
+            if (distance < closestDistance || distance == closestDistance && (blockPos == null || blockPos.compareTo(candidate) < 0)) {
+                blockPos = candidate.immutable();
+                closestDistance = distance;
+            }
+        }
+
+        return Optional.ofNullable(blockPos);
+    }
+
+    // MODIFIED for porting: lithium alloc.chunk_random LevelMixin - allocation free variant of getBlockRandomPos
+    @Override
+    public void lithium$getRandomPosInChunk(final int x, final int y, final int z, final int mask, final BlockPos.MutableBlockPos out) {
+        this.randValue = this.randValue * 3 + 1013904223;
+        int rand = this.randValue >> 2;
+        out.set(x + (rand & 15), y + (rand >> 16 & mask), z + (rand >> 8 & 15));
+    }
+
+    // MODIFIED for porting: lithium util.block_entity_retrieval LevelMixin#lithium$getLoadedExistingBlockEntity
+    @Override
+    public @Nullable BlockEntity lithium$getLoadedExistingBlockEntity(final BlockPos pos) {
+        if (!this.isOutsideBuildHeight(pos)) {
+            if (this.isClientSide || Thread.currentThread() == this.thread) {
+                ChunkAccess chunk = this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()), ChunkStatus.FULL, false);
+                if (chunk != null) {
+                    return chunk.getBlockEntity(pos);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // MODIFIED for porting: lithium util.data_storage LevelMixin#lithium$getData
+    @Override
+    public net.caffeinemc.mods.lithium.common.world.LithiumData.Data lithium$getData() {
+        return this.lithium$storage;
+    }
+
+    // MODIFIED for porting: was lithium's LevelAccessor accessor Mixin
+    @Override
+    public Thread getThread() {
+        return this.thread;
     }
 
     @Override
@@ -195,12 +403,28 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
         return y < -20000000 || y >= 20000000;
     }
 
+    /**
+     * MODIFIED for porting: lithium world.chunk_access LevelMixin implements the {@link LevelReader} /
+     * {@link CollisionGetter} chunk lookups directly on Level so that the JVM does not have to go through the interface
+     * default methods on every block access.
+     */
     public LevelChunk getChunkAt(final BlockPos pos) {
-        return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+        return (LevelChunk)this.getChunk(pos);
     }
 
+    @Override
+    public ChunkAccess getChunk(final BlockPos pos) {
+        return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()), ChunkStatus.FULL, true);
+    }
+
+    @Override
     public LevelChunk getChunk(final int chunkX, final int chunkZ) {
-        return (LevelChunk)this.getChunk(chunkX, chunkZ, ChunkStatus.FULL);
+        return (LevelChunk)this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, true);
+    }
+
+    @Override
+    public ChunkAccess getChunk(final int chunkX, final int chunkZ, final ChunkStatus status) {
+        return this.getChunk(chunkX, chunkZ, status, true);
     }
 
     @Override
@@ -261,6 +485,10 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
                 blockState.updateIndirectNeighbourShapes(this, pos, neighbourUpdateFlags, updateLimit - 1);
             }
 
+            // MODIFIED for porting: lithium (fabric) block.hopper LevelMixin#updateHopperOnUpdateSuppression
+            // (INVOKE updatePOIOnBlockStateChange) - when no block updates are sent, nearby hoppers still have to
+            // drop their inventory caches.
+            net.caffeinemc.mods.lithium.common.hopper.HopperHelper.updateHopperOnUpdateSuppression(this, pos, updateFlags, chunk, oldState != newState);
             this.updatePOIOnBlockStateChange(pos, oldState, newState);
         }
 
@@ -362,14 +590,31 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
         return this.getChunkSource().getLightEngine();
     }
 
+    /**
+     * MODIFIED for porting: lithium world.inline_block_access LevelMixin reads the section directly instead of delegating
+     * to LevelChunk#getBlockState, and folds the height-limit check into the section index test.
+     * The horizontal part of the vanilla isInValidBounds check is covered by the chunk lookup itself (an out-of-range chunk
+     * position yields an EmptyLevelChunk, which is what LevelChunk#isEmpty detects below).
+     */
     @Override
     public BlockState getBlockState(final BlockPos pos) {
-        if (!this.isInValidBounds(pos)) {
-            return Blocks.VOID_AIR.defaultBlockState();
+        LevelChunk chunk = this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+        LevelChunkSection[] sections = chunk.getSections();
+        int x = pos.getX();
+        int y = pos.getY();
+        int z = pos.getZ();
+        int sectionIndex = this.getSectionIndex(y);
+        // chunk.isEmpty() catches EmptyLevelChunk, which is only VOID_AIR (used for client-side unloaded chunks)
+        if (sectionIndex < 0 || sectionIndex >= sections.length || chunk.isEmpty()) {
+            return LITHIUM_OUTSIDE_WORLD_BLOCK;
         }
 
-        LevelChunk chunk = this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
-        return chunk.getBlockState(pos);
+        LevelChunkSection section = sections[sectionIndex];
+        if (section == null || section.hasOnlyAir()) {
+            return LITHIUM_INSIDE_WORLD_DEFAULT_BLOCK;
+        }
+
+        return section.getBlockState(x & 15, y & 15, z & 15);
     }
 
     @Override
@@ -540,12 +785,33 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
 
         Iterator<TickingBlockEntity> iterator = this.blockEntityTickers.iterator();
         boolean tickBlockEntities = this.tickRateManager().runsNormally();
+        // MODIFIED for porting: lithium world.block_entity_ticking.chunk_tickable LevelMixin#initPos - block entity
+        // tickers are grouped by chunk, so remembering the last chunk that was allowed to tick turns almost all of the
+        // shouldTickBlocksAt lookups into a single long comparison.
+        long lithium$lastTickableChunk = Long.MIN_VALUE;
 
         while (iterator.hasNext()) {
             TickingBlockEntity ticker = iterator.next();
             if (ticker.isRemoved()) {
                 iterator.remove();
-            } else if (tickBlockEntities && this.shouldTickBlocksAt(ticker.getPos())) {
+            } else if (tickBlockEntities) {
+                // MODIFIED for porting: lithium world.block_entity_ticking.chunk_tickable LevelMixin#optimizedShouldTick,
+                // which also covers the null position of a sleeping ticker (lithium
+                // world.block_entity_ticking.sleeping LevelMixin#shouldTickBlockPosFilterNull).
+                BlockPos lithium$tickerPos = ticker.getPos();
+                if (lithium$tickerPos == null) {
+                    continue;
+                }
+
+                long lithium$chunkPos = ChunkPos.pack(lithium$tickerPos);
+                if (lithium$chunkPos != lithium$lastTickableChunk) {
+                    if (!this.shouldTickBlocksAt(lithium$chunkPos)) {
+                        continue;
+                    }
+
+                    lithium$lastTickableChunk = lithium$chunkPos;
+                }
+
                 ticker.tick();
             }
         }
@@ -856,7 +1122,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
     }
 
     public List<Entity> getPushableEntities(final Entity pusher, final AABB boundingBox) {
-        return this.getEntities(pusher, boundingBox, EntitySelector.pushableBy(pusher));
+        // MODIFIED for porting: lithium entity.collisions.unpushable_cramming LevelMixin#getOtherPushableEntities
+        return Entity.lithium$getOtherPushableEntities(this, pusher, boundingBox, EntitySelector.pushableBy(pusher));
     }
 
     public abstract @Nullable Entity getEntity(int id);

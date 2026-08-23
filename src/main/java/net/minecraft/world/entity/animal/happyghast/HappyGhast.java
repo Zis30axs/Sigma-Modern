@@ -127,6 +127,10 @@ public class HappyGhast extends Animal {
             this.getBrain().stopAll(serverLevel, this);
             this.brain.clearMemories();
         }
+
+        // MODIFIED for porting: lithium entity.inactive_navigations HappyGhastMixin#updateRegisteredNavigation (RETURN).
+        // The navigation instance was just replaced.
+        this.lithium$updateNavigationRegistration();
     }
 
     private void babyGhastSetup() {
@@ -135,6 +139,9 @@ public class HappyGhast extends Animal {
         this.navigation = this.createBabyNavigation(this.level());
         this.setServerStillTimeout(0);
         this.removeAllGoals(goal -> true);
+        // MODIFIED for porting: lithium entity.inactive_navigations HappyGhastMixin#updateRegisteredNavigation1 (RETURN).
+        // The navigation instance was just replaced.
+        this.lithium$updateNavigationRegistration();
     }
 
     @Override

@@ -4,6 +4,9 @@ import it.unimi.dsi.fastutil.doubles.AbstractDoubleList;
 
 public class CubePointRange extends AbstractDoubleList {
     private final int parts;
+    // MODIFIED for porting: lithium shapes.precompute_shape_arrays CubePointRangeMixin precomputes the reciprocal so the
+    // very hot getDouble can multiply instead of divide.
+    private final double scale;
 
     public CubePointRange(final int parts) {
         if (parts <= 0) {
@@ -11,11 +14,13 @@ public class CubePointRange extends AbstractDoubleList {
         }
 
         this.parts = parts;
+        this.scale = 1.0 / parts;
     }
 
     @Override
     public double getDouble(final int index) {
-        return (double)index / this.parts;
+        // MODIFIED for porting: lithium shapes.precompute_shape_arrays CubePointRangeMixin
+        return index * this.scale;
     }
 
     @Override

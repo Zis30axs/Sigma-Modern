@@ -52,6 +52,15 @@ public class ParticleEngine {
     public @Nullable Particle createParticle(
         final ParticleOptions options, final double x, final double y, final double z, final double xa, final double ya, final double za
     ) {
+        // MODIFIED for porting: was sodium-extra's particle MixinParticleEngine#addParticle (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE) {
+            net.minecraft.resources.Identifier particleTypeId = net.minecraft.core.registries.BuiltInRegistries.PARTICLE_TYPE
+                .getKey(options.getType());
+            if (!me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.isParticleEnabled(particleTypeId)) {
+                return null;
+            }
+        }
+
         Particle particle = this.makeParticle(options, x, y, z, xa, ya, za);
         if (particle != null) {
             this.add(particle);

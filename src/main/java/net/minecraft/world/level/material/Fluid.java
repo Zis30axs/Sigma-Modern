@@ -80,7 +80,7 @@ public abstract class Fluid {
         return false;
     }
 
-    protected boolean isEmpty() {
+    public boolean isEmpty() { // MODIFIED for porting: lithium.accesswidener widened access
         return false;
     }
 

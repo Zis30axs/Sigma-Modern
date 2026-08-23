@@ -39,7 +39,21 @@ public class LightmapRenderStateExtractor {
         this.needsUpdate = true;
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinLightTexture#storeDarknessValue (@Inject RETURN) - the darkness factor is exposed
+     * to shader packs.
+     */
     private float calculateDarknessScale(final LivingEntity camera, final float darknessGamma, final float partialTickTime) {
+        float irisResult = this.iris$calculateDarknessScale(camera, darknessGamma, partialTickTime);
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setDarknessLightFactor((float)(irisResult * this.minecraft.options.darknessEffectScale().get()));
+        }
+
+        return irisResult;
+    }
+
+    // MODIFIED for porting: original vanilla body of calculateDarknessScale
+    private float iris$calculateDarknessScale(final LivingEntity camera, final float darknessGamma, final float partialTickTime) {
         float darkness = 0.45F * darknessGamma;
         return Math.max(0.0F, Mth.cos((camera.tickCount - partialTickTime) * (float) Math.PI * 0.025F) * darkness);
     }
@@ -54,6 +68,12 @@ public class LightmapRenderStateExtractor {
                 profiler.push("lightmap");
                 Camera camera = this.renderer.mainCamera();
                 renderState.blockFactor = this.blockLightFlicker + 1.4F;
+                // MODIFIED for porting: was iris's MixinLightTexture#resetDarknessValue (@Inject at the first INVOKE of
+                // EnvironmentAttributeProbe#getValue inside extract)
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setDarknessLightFactor(0.0F);
+                }
+
                 renderState.blockLightTint = ARGB.vector3fFromRGB24(camera.attributeProbe().getValue(EnvironmentAttributes.BLOCK_LIGHT_TINT, partialTicks));
                 renderState.skyFactor = camera.attributeProbe().getValue(EnvironmentAttributes.SKY_LIGHT_FACTOR, partialTicks);
                 renderState.skyLightColor = ARGB.vector3fFromRGB24(camera.attributeProbe().getValue(EnvironmentAttributes.SKY_LIGHT_COLOR, partialTicks));

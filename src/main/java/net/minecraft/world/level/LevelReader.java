@@ -23,8 +23,16 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import org.jspecify.annotations.Nullable;
 
-public interface LevelReader extends BlockAndLightGetter, CollisionGetter, SignalGetter, BiomeManager.NoiseBiomeSource {
+// MODIFIED for porting: lithium util.chunk_access LevelReaderMixin makes LevelReader a ChunkView
+public interface LevelReader
+    extends BlockAndLightGetter, CollisionGetter, SignalGetter, BiomeManager.NoiseBiomeSource, net.caffeinemc.mods.lithium.common.world.ChunkView {
     @Nullable ChunkAccess getChunk(final int chunkX, final int chunkZ, final ChunkStatus targetStatus, final boolean loadOrGenerate);
+
+    // MODIFIED for porting: lithium util.chunk_access LevelReaderMixin#lithium$getLoadedChunk
+    @Override
+    default @Nullable ChunkAccess lithium$getLoadedChunk(final int chunkX, final int chunkZ) {
+        return this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+    }
 
     @Deprecated
     boolean hasChunk(int chunkX, int chunkZ);

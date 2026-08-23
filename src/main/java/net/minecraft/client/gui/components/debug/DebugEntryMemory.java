@@ -36,6 +36,19 @@ public class DebugEntryMemory implements DebugScreenEntry {
                 String.format(Locale.ROOT, "Allocated: %2d%% %03dMiB", total * 100L / max, bytesToMebibytes(total))
             )
         );
+        // MODIFIED for porting: sodium features.gui.hooks.debug DebugEntryMemoryMixin#sodium$addOffHeap (RETURN)
+        displayer.addToGroup(GROUP, sodium$getNativeMemoryString());
+    }
+
+    // MODIFIED for porting: was sodium's features.gui.hooks.debug DebugEntryMemoryMixin#getNativeMemoryString
+    private static String sodium$getNativeMemoryString() {
+        return "Off-Heap: +" + net.caffeinemc.mods.sodium.client.util.MathUtil.toMib(sodium$getNativeMemoryUsage()) + "MB";
+    }
+
+    // MODIFIED for porting: was sodium's features.gui.hooks.debug DebugEntryMemoryMixin#getNativeMemoryUsage
+    private static long sodium$getNativeMemoryUsage() {
+        return java.lang.management.ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage().getUsed()
+            + net.caffeinemc.mods.sodium.client.util.NativeBuffer.getTotalAllocated();
     }
 
     private static long bytesToMebibytes(final long used) {

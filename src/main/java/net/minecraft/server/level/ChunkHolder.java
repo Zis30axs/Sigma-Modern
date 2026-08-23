@@ -29,7 +29,18 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.jspecify.annotations.Nullable;
 
-public class ChunkHolder extends GenerationChunkHolder {
+// MODIFIED for porting: implements lithium's ChunkHolderExtended (world.chunk_access ChunkHolderMixin)
+public class ChunkHolder extends GenerationChunkHolder implements net.caffeinemc.mods.lithium.common.world.chunk.ChunkHolderExtended {
+    // MODIFIED for porting: lithium world.chunk_access ChunkHolderMixin @Unique field
+    private long lastRequestTime;
+
+    @Override
+    public boolean lithium$updateLastAccessTime(final long time) {
+        long prev = this.lastRequestTime;
+        this.lastRequestTime = time;
+        return prev != time;
+    }
+
     public static final ChunkResult<LevelChunk> UNLOADED_LEVEL_CHUNK = ChunkResult.error("Unloaded level chunk");
     private static final CompletableFuture<ChunkResult<LevelChunk>> UNLOADED_LEVEL_CHUNK_FUTURE = CompletableFuture.completedFuture(UNLOADED_LEVEL_CHUNK);
     private final LevelHeightAccessor levelHeightAccessor;
@@ -315,6 +326,26 @@ public class ChunkHolder extends GenerationChunkHolder {
         if (wasEntityTicking && !isEntityTicking) {
             this.entityTickingChunkFuture.complete(UNLOADED_LEVEL_CHUNK);
             this.entityTickingChunkFuture = UNLOADED_LEVEL_CHUNK_FUTURE;
+        }
+
+        // MODIFIED for porting: lithium util.chunk_status_tracking ChunkHolderMixin#trackUpdate, injected before the
+        // seventh FullChunkStatus.isOrAfter call in this method.
+        {
+            net.minecraft.server.level.ServerLevel lithium$serverLevel = scheduler.level;
+            boolean lithium$loaded = newFullStatus.isOrAfter(FullChunkStatus.FULL);
+            boolean lithium$wasLoaded = oldFullStatus.isOrAfter(FullChunkStatus.FULL);
+            if (!lithium$loaded && lithium$wasLoaded) {
+                net.caffeinemc.mods.lithium.common.world.chunk.ChunkStatusTracker.onChunkInaccessible(lithium$serverLevel, this.pos);
+            } else if (!lithium$wasLoaded) {
+                // The chunk is loaded. Either the future still has work (-> LevelChunk#setFullStatus handles it), or the
+                // chunk is available immediately (-> we have to handle it here).
+                net.minecraft.world.level.chunk.ChunkAccess lithium$chunkAccess = this.getChunkIfPresentUnchecked(
+                    net.minecraft.world.level.chunk.status.ChunkStatus.FULL
+                );
+                if (lithium$chunkAccess instanceof net.minecraft.world.level.chunk.LevelChunk lithium$chunk) {
+                    net.caffeinemc.mods.lithium.common.world.chunk.ChunkStatusTracker.onChunkAccessible(lithium$serverLevel, lithium$chunk);
+                }
+            }
         }
 
         if (!newFullStatus.isOrAfter(oldFullStatus)) {

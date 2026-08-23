@@ -168,6 +168,11 @@ public abstract class DiodeBlock extends HorizontalDirectionalBlock {
     @Override
     protected void onPlace(final BlockState state, final Level level, final BlockPos pos, final BlockState oldState, final boolean movedByPiston) {
         this.updateNeighborsInFront(level, pos, state);
+    
+        // MODIFIED for porting: lithium util.inventory_comparator_tracking DiodeBlockMixin#notifyOnBlockAdded (RETURN)
+        if (this instanceof net.minecraft.world.level.block.ComparatorBlock && !oldState.is(net.minecraft.world.level.block.Blocks.COMPARATOR)) {
+            net.caffeinemc.mods.lithium.common.block.entity.inventory_comparator_tracking.ComparatorTracking.notifyNearbyBlockEntitiesAboutNewComparator(level, pos);
+        }
     }
 
     @Override

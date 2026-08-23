@@ -6,13 +6,79 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public class SpriteCoordinateExpander implements VertexConsumer {
+// MODIFIED for porting: implements sodium's VertexBufferWriter (core.render.immediate.consumer
+// SpriteCoordinateExpanderMixin), so batches of encoded vertices can be re-mapped into the sprite area in bulk.
+public class SpriteCoordinateExpander implements VertexConsumer, net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter {
     private final VertexConsumer delegate;
     private final TextureAtlasSprite sprite;
+    // MODIFIED for porting: sodium core.render.immediate.consumer SpriteCoordinateExpanderMixin @Unique fields
+    private final boolean sodium$canUseIntrinsics;
+    private final float sodium$minU;
+    private final float sodium$minV;
+    private final float sodium$maxU;
+    private final float sodium$maxV;
 
     public SpriteCoordinateExpander(final VertexConsumer delegate, final TextureAtlasSprite sprite) {
         this.delegate = delegate;
         this.sprite = sprite;
+        // MODIFIED for porting: sodium core.render.immediate.consumer SpriteCoordinateExpanderMixin#onInit (<init> RETURN)
+        this.sodium$minU = sprite.getU0();
+        this.sodium$minV = sprite.getV0();
+        this.sodium$maxU = sprite.getU1();
+        this.sodium$maxV = sprite.getV1();
+        this.sodium$canUseIntrinsics = net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter.tryOf(this.delegate) != null;
+    }
+
+    // MODIFIED for porting: everything in this block was sodium's core.render.immediate.consumer SpriteCoordinateExpanderMixin
+    @Override
+    public boolean canUseIntrinsics() {
+        return this.sodium$canUseIntrinsics;
+    }
+
+    @Override
+    public void push(
+        final org.lwjgl.system.MemoryStack stack, final long ptr, final int count, final com.mojang.blaze3d.vertex.VertexFormat format
+    ) {
+        sodium$transform(ptr, count, format, this.sodium$minU, this.sodium$minV, this.sodium$maxU, this.sodium$maxV);
+        net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter.of(this.delegate).push(stack, ptr, count, format);
+    }
+
+    /**
+     * Transforms the texture UVs for each vertex from their absolute coordinates into the sprite area specified by the
+     * parameters.
+     *
+     * @param ptr The buffer of vertices to transform
+     * @param count The number of vertices to transform
+     * @param format The format of the vertices
+     * @param minU The minimum X-coordinate of the sprite bounds
+     * @param minV The minimum Y-coordinate of the sprite bounds
+     * @param maxU The maximum X-coordinate of the sprite bounds
+     * @param maxV The maximum Y-coordinate of the sprite bounds
+     */
+    private static void sodium$transform(
+        long ptr,
+        final int count,
+        final com.mojang.blaze3d.vertex.VertexFormat format,
+        final float minU,
+        final float minV,
+        final float maxU,
+        final float maxV
+    ) {
+        long stride = format.getVertexSize();
+        int[] cache = net.caffeinemc.mods.sodium.client.render.vertex.VertexFormatOffsetCache.getInstance().getCachedOffsets(format);
+        int offsetUV = cache[net.caffeinemc.mods.sodium.client.render.vertex.VertexFormatOffsetCache.UV];
+        // The width/height of the sprite
+        float w = maxU - minU;
+        float h = maxV - minV;
+
+        for (int vertexIndex = 0; vertexIndex < count; vertexIndex++) {
+            // The texture coordinates relative to the sprite bounds
+            float u = net.caffeinemc.mods.sodium.api.vertex.attributes.common.TextureAttribute.getU(ptr + offsetUV);
+            float v = net.caffeinemc.mods.sodium.api.vertex.attributes.common.TextureAttribute.getV(ptr + offsetUV);
+            // The texture coordinates in absolute space on the sprite sheet
+            net.caffeinemc.mods.sodium.api.vertex.attributes.common.TextureAttribute.put(ptr + offsetUV, minU + w * u, minV + h * v);
+            ptr += stride;
+        }
     }
 
     @Override

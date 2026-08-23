@@ -25,12 +25,23 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.slf4j.Logger;
 
-public class Heightmap {
+public class Heightmap implements net.caffeinemc.mods.lithium.mixin.world.combined_heightmap_update.HeightmapAccessor { // MODIFIED for porting: lithium world.combined_heightmap_update HeightmapAccessor
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Predicate<BlockState> NOT_AIR = input -> !input.isAir();
     private static final Predicate<BlockState> MATERIAL_MOTION_BLOCKING = BlockBehaviour.BlockStateBase::blocksMotion;
     private final BitStorage data;
     private final Predicate<BlockState> isOpaque;
+
+    // MODIFIED for porting: the next two methods were lithium's HeightmapAccessor accessor/invoker Mixin
+    @Override
+    public void callSet(final int x, final int z, final int height) {
+        this.setHeight(x, z, height);
+    }
+
+    @Override
+    public Predicate<BlockState> getBlockPredicate() {
+        return this.isOpaque;
+    }
     private final ChunkAccess chunk;
 
     public Heightmap(final ChunkAccess chunk, final Heightmap.Types heightmapType) {

@@ -12,7 +12,37 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class VertexFormat {
+// MODIFIED for porting: implements sodium's VertexFormatExtensions (core.render VertexFormatMixin), which assigns every
+// vertex format a dense global id used by sodium's vertex serializer registry.
+public class VertexFormat implements net.caffeinemc.mods.sodium.api.vertex.format.VertexFormatExtensions,
+    net.irisshaders.iris.pipeline.programs.VertexFormatExtension { // MODIFIED for porting: iris vertices MixinVertexFormat
+    /**
+     * MODIFIED for porting: was iris's vertices MixinVertexFormat (its VertexFormatExtension implementation) - makes sure the
+     * correct attribute binding state for the extended vertex format is set up when needed.
+     */
+    private static final com.google.common.collect.ImmutableSet<String> IRIS_ATTRIBUTE_LIST = com.google.common.collect.ImmutableSet
+        .of("Position", "Color", "Normal", "UV0", "UV1", "UV2", "LineWidth");
+
+    @Override
+    public void bindAttributesIris(final boolean isFallback, final int i) {
+        int j = 0;
+
+        for (VertexFormatElement x : this.getElements()) {
+            String string = x.name();
+            com.mojang.blaze3d.opengl.GlStateManager
+                ._glBindAttribLocation(i, j, IRIS_ATTRIBUTE_LIST.contains(string) && !isFallback ? "iris_" + string : string);
+            j++;
+        }
+    }
+
+    // MODIFIED for porting: sodium core.render VertexFormatMixin @Unique field
+    private int sodium$globalId;
+
+    @Override
+    public int sodium$getGlobalId() {
+        return this.sodium$globalId;
+    }
+
     private static final int VERTEX_ALIGNMENT = 4;
     public static final int MAX_VERTEX_ELEMENTS = 16;
     private final Map<String, VertexFormatElement> elements = new Object2ObjectArrayMap<>(16);
@@ -21,6 +51,9 @@ public class VertexFormat {
     private final List<VertexFormatElement> elementValues;
 
     private VertexFormat(final List<VertexFormatElement> elements, final int vertexSize, final int stepRate) {
+        // MODIFIED for porting: sodium core.render VertexFormatMixin#afterInit (<init> RETURN). Assigned first so that the
+        // remainder of the constructor keeps its original order; the registry only stores the reference.
+        this.sodium$globalId = net.caffeinemc.mods.sodium.api.vertex.format.VertexFormatRegistry.instance().allocateGlobalId(this);
         this.vertexSize = vertexSize;
         this.stepRate = stepRate;
 

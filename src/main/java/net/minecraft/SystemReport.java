@@ -68,6 +68,23 @@ public class SystemReport {
         this.ignoreErrors("software", () -> this.putSoftware(new SystemInfo()));
         this.setDetail("JVM Flags", () -> printJvmFlags(arg -> arg.startsWith("-X")));
         this.setDetail("Debug Flags", () -> printJvmFlags(arg -> arg.startsWith("-DMC_DEBUG_")));
+        // MODIFIED for porting: was iris's MixinSystemReport#fillSystemDetails (@Inject into <init> at RETURN) - adds the
+        // loaded shader pack and its changed options to crash reports.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.getCurrentPackName() != null) {
+            this.setDetail(
+                "Loaded Shaderpack",
+                () -> {
+                    StringBuilder sb = new StringBuilder(
+                        net.irisshaders.iris.Iris.getCurrentPackName() + (net.irisshaders.iris.Iris.isFallback() ? " (fallback)" : "")
+                    );
+                    net.irisshaders.iris.Iris.getCurrentPack().ifPresent(pack -> {
+                        sb.append("\n\t\t");
+                        sb.append(pack.getProfileInfo());
+                    });
+                    return sb.toString();
+                }
+            );
+        }
     }
 
     private static String printMemoryUsage(final MemoryUsage memoryUsage) {

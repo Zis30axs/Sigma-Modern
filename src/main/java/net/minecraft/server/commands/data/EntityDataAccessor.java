@@ -57,6 +57,12 @@ public class EntityDataAccessor implements DataAccessor {
         try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.entity.problemPath(), LOGGER)) {
             this.entity.load(TagValueInput.create(reporter, this.entity.registryAccess(), tag));
             this.entity.setUUID(uuid);
+            // MODIFIED for porting: lithium block.hopper EntityDataAccessorMixin#updateEntityTrackerEngine
+            // (INVOKE setUUID, shift AFTER) - fixes hoppers not noticing that the item type of item entities changed after
+            // running the data command.
+            if (this.entity instanceof net.minecraft.world.entity.item.ItemEntity) {
+                this.entity.getChangeListener().onMove();
+            }
         }
     }
 

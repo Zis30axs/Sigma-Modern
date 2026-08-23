@@ -9,7 +9,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public abstract class GpuTexture implements AutoCloseable {
+// MODIFIED for porting: iris injects this interface into the class (loom:injected_interfaces in fabric.mod.json)
+public abstract class GpuTexture implements AutoCloseable, net.irisshaders.iris.mixinterface.GpuTextureInterface {
     public static final int USAGE_COPY_DST = 1;
     public static final int USAGE_COPY_SRC = 2;
     public static final int USAGE_TEXTURE_BINDING = 4;

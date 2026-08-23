@@ -22,13 +22,76 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public record ChunkSectionsToRender(
-    GpuTextureView textureView,
-    EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroupsPerLayer,
-    int maxIndicesRequired,
-    GpuBufferSlice[] chunkSectionInfos
-) {
+/**
+ * MODIFIED for porting: sodium's core.render.world ChunkSectionsToRenderMixin adds five mutable fields to this type, which a
+ * record cannot have. It was therefore rewritten as a plain final class with the same components and accessors. The generated
+ * {@code equals}/{@code hashCode}/{@code toString} are not used anywhere (the type is only constructed by
+ * {@link net.minecraft.client.renderer.LevelRenderer#prepareChunkRenders} and consumed by {@link #renderGroup}).
+ */
+public final class ChunkSectionsToRender implements net.caffeinemc.mods.sodium.client.util.SodiumChunkSection {
+    private final GpuTextureView textureView;
+    private final EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroupsPerLayer;
+    private final int maxIndicesRequired;
+    private final GpuBufferSlice[] chunkSectionInfos;
+    // MODIFIED for porting: sodium core.render.world ChunkSectionsToRenderMixin @Unique fields
+    private net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer sodium$renderer;
+    private net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices sodium$matrices;
+    private double sodium$x;
+    private double sodium$y;
+    private double sodium$z;
+
+    public ChunkSectionsToRender(
+        final GpuTextureView textureView,
+        final EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroupsPerLayer,
+        final int maxIndicesRequired,
+        final GpuBufferSlice[] chunkSectionInfos
+    ) {
+        this.textureView = textureView;
+        this.drawGroupsPerLayer = drawGroupsPerLayer;
+        this.maxIndicesRequired = maxIndicesRequired;
+        this.chunkSectionInfos = chunkSectionInfos;
+    }
+
+    public GpuTextureView textureView() {
+        return this.textureView;
+    }
+
+    public EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroupsPerLayer() {
+        return this.drawGroupsPerLayer;
+    }
+
+    public int maxIndicesRequired() {
+        return this.maxIndicesRequired;
+    }
+
+    public GpuBufferSlice[] chunkSectionInfos() {
+        return this.chunkSectionInfos;
+    }
+
+    // MODIFIED for porting: was sodium's core.render.world ChunkSectionsToRenderMixin#sodium$setRendering
+    @Override
+    public void sodium$setRendering(
+        final net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer renderer,
+        final net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices matrices,
+        final double x,
+        final double y,
+        final double z
+    ) {
+        this.sodium$renderer = renderer;
+        this.sodium$matrices = matrices;
+        this.sodium$x = x;
+        this.sodium$y = y;
+        this.sodium$z = z;
+    }
+
     public void renderGroup(final ChunkSectionLayerGroup group, final GpuSampler sampler) {
+        // MODIFIED for porting: sodium core.render.world ChunkSectionsToRenderMixin#sodium$renderGroup (HEAD, cancellable) -
+        // once sodium is driving the terrain rendering, its own chunk renderer draws the layer group.
+        if (this.sodium$renderer != null) {
+            this.sodium$renderer.drawChunkLayer(group, this.sodium$matrices, this.sodium$x, this.sodium$y, this.sodium$z, sampler);
+            return;
+        }
+
         RenderSystem.AutoStorageIndexBuffer autoIndices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
         GpuBuffer defaultIndexBuffer = this.maxIndicesRequired == 0 ? null : autoIndices.getBuffer(this.maxIndicesRequired);
         IndexType defaultIndexType = this.maxIndicesRequired == 0 ? null : autoIndices.type();

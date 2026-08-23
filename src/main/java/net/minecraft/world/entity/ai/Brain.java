@@ -35,16 +35,136 @@ import net.minecraft.world.entity.schedule.Activity;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-public class Brain<E extends LivingEntity> {
+public class Brain<E extends LivingEntity> implements net.caffeinemc.mods.lithium.mixin.ai.useless_sensors.BrainAccessor<E>, // MODIFIED for porting: lithium ai.useless_sensors BrainAccessor
+    net.caffeinemc.mods.lithium.common.ai.brain.memories.BrainExtended, // MODIFIED for porting: lithium client_tick.entity.unused_brain BrainMixin
+    net.caffeinemc.mods.lithium.common.ai.brain.memories.MemoryModificationCounter { // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin
     private static final int SCHEDULE_UPDATE_DELAY = 20;
-    private final Map<MemoryModuleType<?>, MemorySlot<?>> memories = Maps.newHashMap();
-    private final Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> sensors = Maps.newLinkedHashMap();
+    /**
+     * MODIFIED for porting: lithium ai.task.memory_changes BrainMixin. Tracks changes to the presence of memory values,
+     * possibly including false positives (equals() is never called). Changes to the time to live are not tracked. Behaviors
+     * use this counter to cache the result of their required-memory check.
+     */
+    private long memoryModCount = 1;
+
+    // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin
+    @Override
+    public long lithium$getMemoryValueModCount() {
+        return this.memoryModCount;
+    }
+
+    // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin
+    @Override
+    public void lithium$onMemoryModified() {
+        this.memoryModCount++;
+    }
+    // MODIFIED for porting: lithium collections.brain BrainMixin swaps three of the brain's collections for fastutil ones. Upstream replaces the
+    // maps in an @Inject at the RETURN of the 5-argument constructor; setting the field initializers reaches the same
+    // state (and additionally covers the no-argument constructor, which behaves identically with either map type -
+    // MemoryModuleType/SensorType/Activity are registry singletons, so reference and equals comparison agree).
+    // MODIFIED for porting: lithium client_tick.entity.unused_brain BrainMixin needs to replace this map
+    // (@Mutable @Shadow @Final), so it lost its `final`.
+    private Map<MemoryModuleType<?>, MemorySlot<?>> memories = new it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap<>();
+
+    /**
+     * MODIFIED for porting: was lithium's client_tick.entity.unused_brain BrainMixin. Makes every memory lookup return the
+     * shared dummy memory slot instead of null, so the dummy brain used on the client behaves as if all memory types were
+     * registered. Writes to that slot are ignored, see {@link MemorySlot#set(Object, long)}.
+     */
+    @Override
+    public void lithium$pretendAllMemoryTypesRegistered() {
+        if (this.memories instanceof it.unimi.dsi.fastutil.objects.AbstractReference2ObjectFunction<?, ?> memoryCollection) {
+            ((it.unimi.dsi.fastutil.objects.AbstractReference2ObjectFunction<MemoryModuleType<?>, MemorySlot<?>>)memoryCollection)
+                .defaultReturnValue(net.caffeinemc.mods.lithium.common.client.SharedFields.DUMMY_SLOT);
+        } else {
+            it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap<MemoryModuleType<?>, MemorySlot<?>> memoryCollection =
+                new it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap<>(this.memories);
+            memoryCollection.defaultReturnValue(net.caffeinemc.mods.lithium.common.client.SharedFields.DUMMY_SLOT);
+            this.memories = memoryCollection;
+        }
+    }
+    private final Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> sensors = new it.unimi.dsi.fastutil.objects.Reference2ReferenceLinkedOpenHashMap<>();
+
+    // MODIFIED for porting: was lithium's ai.useless_sensors BrainAccessor accessor Mixin
+    @Override
+    public Map<SensorType<? extends Sensor<? super E>>, Sensor<? super E>> getSensors() {
+        return this.sensors;
+    }
     private final Map<Integer, Map<Activity, Set<BehaviorControl<? super E>>>> availableBehaviorsByPriority = Maps.newTreeMap();
     private @Nullable EnvironmentAttribute<Activity> schedule;
-    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = Maps.newHashMap();
+    // MODIFIED for porting: lithium collections.brain BrainMixin (see above)
+    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
     private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = Maps.newHashMap();
     private Set<Activity> coreActivities = Sets.newHashSet();
     private final Set<Activity> activeActivities = Sets.newHashSet();
+    /**
+     * MODIFIED for porting: lithium ai.task.launch BrainMixin. Cached collections that avoid walking the whole
+     * priority/activity/behavior structure on every brain tick: {@code lithium$possibleTasks} holds the behaviors of all
+     * currently active activities, {@code lithium$runningTasks} is a masked view over all behaviors where only the currently
+     * running ones are visible. Both are invalidated lazily.
+     */
+    private java.util.@org.jspecify.annotations.Nullable ArrayList<BehaviorControl<? super E>> lithium$possibleTasks;
+
+    private net.caffeinemc.mods.lithium.common.util.collections.@org.jspecify.annotations.Nullable MaskedList<BehaviorControl<? super E>> lithium$runningTasks;
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#onTasksChanged
+    private void lithium$onTasksChanged() {
+        this.lithium$runningTasks = null;
+        this.lithium$onPossibleActivitiesChanged();
+    }
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#onPossibleActivitiesChanged
+    private void lithium$onPossibleActivitiesChanged() {
+        this.lithium$possibleTasks = null;
+    }
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#initPossibleTasks
+    private void lithium$initPossibleTasks() {
+        this.lithium$possibleTasks = new java.util.ArrayList<>();
+
+        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
+            for (Entry<Activity, Set<BehaviorControl<? super E>>> entry : map.entrySet()) {
+                Activity activity = entry.getKey();
+                if (this.activeActivities.contains(activity)) {
+                    for (BehaviorControl<? super E> task : entry.getValue()) {
+                        this.lithium$possibleTasks.add(task);
+                    }
+                }
+            }
+        }
+    }
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#getPossibleTasks
+    private java.util.ArrayList<BehaviorControl<? super E>> lithium$getPossibleTasks() {
+        if (this.lithium$possibleTasks == null) {
+            this.lithium$initPossibleTasks();
+        }
+
+        return this.lithium$possibleTasks;
+    }
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#getCurrentlyRunningTasks
+    private net.caffeinemc.mods.lithium.common.util.collections.MaskedList<BehaviorControl<? super E>> lithium$getCurrentlyRunningTasks() {
+        if (this.lithium$runningTasks == null) {
+            this.lithium$initCurrentlyRunningTasks();
+        }
+
+        return this.lithium$runningTasks;
+    }
+
+    // MODIFIED for porting: lithium ai.task.launch BrainMixin#initCurrentlyRunningTasks
+    private void lithium$initCurrentlyRunningTasks() {
+        net.caffeinemc.mods.lithium.common.util.collections.MaskedList<BehaviorControl<? super E>> list = new net.caffeinemc.mods.lithium.common.util.collections.MaskedList<>(new ObjectArrayList<>(), false);
+
+        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
+            for (Set<BehaviorControl<? super E>> set : map.values()) {
+                for (BehaviorControl<? super E> task : set) {
+                    list.addOrSet(task, task.getStatus() == Behavior.Status.RUNNING);
+                }
+            }
+        }
+
+        this.lithium$runningTasks = list;
+    }
     private Activity defaultActivity = Activity.IDLE;
     private long lastScheduleUpdate = -9999L;
 
@@ -99,10 +219,14 @@ public class Brain<E extends LivingEntity> {
 
         this.setCoreActivities(ImmutableSet.of(Activity.CORE));
         this.useDefaultActivity();
+        // MODIFIED for porting: lithium ai.task.launch BrainMixin#reinitializeBrainCollections (<init> RETURN)
+        this.lithium$onTasksChanged();
     }
 
     private void registerMemory(final MemoryModuleType<?> memoryType) {
         this.memories.putIfAbsent(memoryType, MemorySlot.create());
+        // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#increaseMemoryModCount (RETURN)
+        this.lithium$onMemoryModified();
     }
 
     public Brain() {
@@ -153,11 +277,18 @@ public class Brain<E extends LivingEntity> {
 
     public void clearMemories() {
         this.memories.values().forEach(MemorySlot::clear);
+        // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#increaseMemoryModCount (RETURN)
+        this.lithium$onMemoryModified();
     }
 
     public <U> void eraseMemory(final MemoryModuleType<U> type) {
         MemorySlot<U> slot = this.getMemorySlotIfPresent(type);
         if (slot != null) {
+            // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#increaseMemoryModCount (INVOKE MemorySlot#clear)
+            if (slot.hasValue()) {
+                this.lithium$onMemoryModified();
+            }
+
             slot.clear();
         }
     }
@@ -190,9 +321,20 @@ public class Brain<E extends LivingEntity> {
                 value = null;
             }
 
+            // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#clearTrackingChanges /
+            // #setTrackingChanges (@WrapOperation around MemorySlot#clear / MemorySlot#set) - only changes of the
+            // presence of a value have to bump the counter.
             if (value == null) {
+                if (slot.hasValue()) {
+                    this.lithium$onMemoryModified();
+                }
+
                 slot.clear();
             } else {
+                if (!slot.hasValue()) {
+                    this.lithium$onMemoryModified();
+                }
+
                 slot.set(value, tileToLive);
             }
         }
@@ -205,9 +347,19 @@ public class Brain<E extends LivingEntity> {
                 value = null;
             }
 
+            // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#clearTrackingChanges /
+            // #setTrackingChanges (@WrapOperation around MemorySlot#clear / MemorySlot#set)
             if (value == null) {
+                if (slot.hasValue()) {
+                    this.lithium$onMemoryModified();
+                }
+
                 slot.clear();
             } else {
+                if (!slot.hasValue()) {
+                    this.lithium$onMemoryModified();
+                }
+
                 slot.set(value);
             }
         }
@@ -265,19 +417,9 @@ public class Brain<E extends LivingEntity> {
     @Deprecated
     @VisibleForDebug
     public List<BehaviorControl<? super E>> getRunningBehaviors() {
-        List<BehaviorControl<? super E>> runningBehaviours = new ObjectArrayList<>();
-
-        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
-            for (Set<BehaviorControl<? super E>> behaviors : behavioursByActivities.values()) {
-                for (BehaviorControl<? super E> behavior : behaviors) {
-                    if (behavior.getStatus() == Behavior.Status.RUNNING) {
-                        runningBehaviours.add(behavior);
-                    }
-                }
-            }
-        }
-
-        return runningBehaviours;
+        // MODIFIED for porting: lithium ai.task.launch BrainMixin#getRunningBehaviors (@Overwrite) - use the cached
+        // masked collection instead of scanning every registered behavior
+        return this.lithium$getCurrentlyRunningTasks();
     }
 
     public void useDefaultActivity() {
@@ -308,6 +450,8 @@ public class Brain<E extends LivingEntity> {
             this.activeActivities.clear();
             this.activeActivities.addAll(this.coreActivities);
             this.activeActivities.add(activity);
+            // MODIFIED for porting: lithium ai.task.launch BrainMixin#onPossibleActivitiesChanged (INVOKE Set#add, AFTER)
+            this.lithium$onPossibleActivitiesChanged();
         }
     }
 
@@ -360,6 +504,12 @@ public class Brain<E extends LivingEntity> {
 
         for (Pair<Integer, ? extends BehaviorControl<? super E>> pair : behaviorPriorityPairs) {
             BehaviorControl<? super E> behavior = (BehaviorControl<? super E>)pair.getSecond();
+            // MODIFIED for porting: lithium ai.useless_behaviors BrainMixin#filterSentinels (@WrapOperation around the
+            // iterator of the behavior list) - behaviors that are known to be useless are replaced by this sentinel and must
+            // not be registered at all.
+            if (behavior == net.caffeinemc.mods.lithium.common.ai.useless_behaviors.LithiumEmptyBehavior.EMPTY_BEHAVIOR_SENTINEL) {
+                continue;
+            }
 
             for (MemoryModuleType<?> requiredMemory : behavior.getRequiredMemories()) {
                 this.registerMemory(requiredMemory);
@@ -370,11 +520,16 @@ public class Brain<E extends LivingEntity> {
                 .computeIfAbsent(activity, key -> Sets.newLinkedHashSet())
                 .add(behavior);
         }
+
+        // MODIFIED for porting: lithium ai.task.launch BrainMixin#reinitializeTasksSorted (RETURN)
+        this.lithium$onTasksChanged();
     }
 
     @VisibleForTesting
     public void removeAllBehaviors() {
         this.availableBehaviorsByPriority.clear();
+        // MODIFIED for porting: lithium ai.task.launch BrainMixin#reinitializeTasksSorted (RETURN)
+        this.lithium$onTasksChanged();
     }
 
     public boolean isActive(final Activity activity) {
@@ -395,29 +550,45 @@ public class Brain<E extends LivingEntity> {
     }
 
     private void forgetOutdatedMemories() {
-        this.memories.values().forEach(MemorySlot::tick);
+        // MODIFIED for porting: lithium ai.task.memory_changes BrainMixin#tickExpiringSlotsTrackingChanges (@ModifyArg
+        // replacing the MemorySlot::tick consumer) - only slots that can expire need to be ticked, and an expiry has to bump
+        // the modification counter.
+        for (MemorySlot<?> slot : this.memories.values()) {
+            // canExpire implies hasValue
+            if (slot.canExpire()) {
+                slot.tick();
+                if (!slot.hasValue()) {
+                    // Expired memory was deleted during tick
+                    this.lithium$onMemoryModified();
+                }
+            }
+        }
     }
 
     public void stopAll(final ServerLevel level, final E body) {
         long timestamp = body.level().getGameTime();
 
         for (BehaviorControl<? super E> behavior : this.getRunningBehaviors()) {
+            // MODIFIED for porting: lithium ai.task.launch BrainMixin#removeStoppedTask (INVOKE doStop)
+            if (this.lithium$runningTasks != null) {
+                this.lithium$runningTasks.setVisible(behavior, false);
+            }
+
             behavior.doStop(level, body, timestamp);
         }
     }
 
     private void startEachNonRunningBehavior(final ServerLevel level, final E body) {
+        // MODIFIED for porting: lithium ai.task.launch BrainMixin#startEachNonRunningBehavior (@Overwrite) - iterate the
+        // cached list of behaviors belonging to the currently active activities. The block after tryStart was upstream's
+        // #addStartedTasks (@ModifyVariable after the tryStart call).
         long time = level.getGameTime();
 
-        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
-            for (Entry<Activity, Set<BehaviorControl<? super E>>> behavioursForActivity : behavioursByActivities.entrySet()) {
-                Activity activity = behavioursForActivity.getKey();
-                if (this.activeActivities.contains(activity)) {
-                    for (BehaviorControl<? super E> behavior : behavioursForActivity.getValue()) {
-                        if (behavior.getStatus() == Behavior.Status.STOPPED) {
-                            behavior.tryStart(level, body, time);
-                        }
-                    }
+        for (BehaviorControl<? super E> task : this.lithium$getPossibleTasks()) {
+            if (task.getStatus() == Behavior.Status.STOPPED) {
+                task.tryStart(level, body, time);
+                if (this.lithium$runningTasks != null && task.getStatus() == Behavior.Status.RUNNING) {
+                    this.lithium$runningTasks.setVisible(task, true);
                 }
             }
         }
@@ -428,6 +599,10 @@ public class Brain<E extends LivingEntity> {
 
         for (BehaviorControl<? super E> behavior : this.getRunningBehaviors()) {
             behavior.tickOrStop(level, body, timestamp);
+            // MODIFIED for porting: lithium ai.task.launch BrainMixin#removeTaskIfStopped (INVOKE tickOrStop, AFTER)
+            if (this.lithium$runningTasks != null && behavior.getStatus() != Behavior.Status.RUNNING) {
+                this.lithium$runningTasks.setVisible(behavior, false);
+            }
         }
     }
 

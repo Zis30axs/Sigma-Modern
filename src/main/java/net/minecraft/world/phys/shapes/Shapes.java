@@ -20,13 +20,21 @@ import net.minecraft.world.phys.Vec3;
 public final class Shapes {
     public static final double EPSILON = 1.0E-7;
     public static final double BIG_EPSILON = 1.0E-6;
-    private static final VoxelShape BLOCK = Util.make(() -> {
-        DiscreteVoxelShape shape = new BitSetDiscreteVoxelShape(1, 1, 1);
+    // MODIFIED for porting: lithium shapes.specialized_shapes ShapesMixin replaces the three global shapes with
+    // specialized implementations that know they consist of exactly one cuboid / one voxel, which makes intersection and
+    // penetration tests plain arithmetic. Upstream did this in a static block appended after the vanilla initializers;
+    // initializing the fields directly here reaches the same end state without the transient vanilla objects.
+    // [VanillaCopy] BLOCK and INFINITY use a single 1x1x1 voxel as neither contains multiple inner cuboids.
+    private static final DiscreteVoxelShape FULL_CUBE_VOXELS = Util.make(() -> {
+        BitSetDiscreteVoxelShape shape = new BitSetDiscreteVoxelShape(1, 1, 1);
         shape.fill(0, 0, 0);
-        return new CubeVoxelShape(shape);
+        return shape;
     });
+    private static final VoxelShape BLOCK = new net.caffeinemc.mods.lithium.common.shapes.VoxelShapeSimpleCube(FULL_CUBE_VOXELS, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
     private static final Vec3 BLOCK_CENTER = new Vec3(0.5, 0.5, 0.5);
-    public static final VoxelShape INFINITY = box(
+    // Used in some rare cases to indicate a shape which encompasses the entire world (such as a moving world border)
+    public static final VoxelShape INFINITY = new net.caffeinemc.mods.lithium.common.shapes.VoxelShapeSimpleCube(
+        FULL_CUBE_VOXELS,
         Double.NEGATIVE_INFINITY,
         Double.NEGATIVE_INFINITY,
         Double.NEGATIVE_INFINITY,
@@ -34,12 +42,7 @@ public final class Shapes {
         Double.POSITIVE_INFINITY,
         Double.POSITIVE_INFINITY
     );
-    private static final VoxelShape EMPTY = new ArrayVoxelShape(
-        new BitSetDiscreteVoxelShape(0, 0, 0),
-        new DoubleArrayList(new double[]{0.0}),
-        new DoubleArrayList(new double[]{0.0}),
-        new DoubleArrayList(new double[]{0.0})
-    );
+    private static final VoxelShape EMPTY = new net.caffeinemc.mods.lithium.common.shapes.VoxelShapeEmpty(new BitSetDiscreteVoxelShape(0, 0, 0));
 
     public static VoxelShape empty() {
         return EMPTY;
@@ -57,42 +60,42 @@ public final class Shapes {
         }
     }
 
+    /**
+     * MODIFIED for porting: lithium shapes.specialized_shapes ShapesMixin#create.
+     * Vanilla uses different kinds of VoxelShapes depending on the size and position of the box: a box that is not
+     * aligned to 1/8 of a block becomes a two-point ArrayVoxelShape, others become a CubeVoxelShape whose
+     * BitSetDiscreteVoxelShape may have a higher resolution (1-3 bits per axis) and therefore internal collision layers.
+     * Lithium returns its specialized equivalents, which represent the same shapes but compare much faster.
+     */
     public static VoxelShape create(final double minX, final double minY, final double minZ, final double maxX, final double maxY, final double maxZ) {
-        if (!(maxX - minX < 1.0E-7) && !(maxY - minY < 1.0E-7) && !(maxZ - minZ < 1.0E-7)) {
-            int xBits = findBits(minX, maxX);
-            int yBits = findBits(minY, maxY);
-            int zBits = findBits(minZ, maxZ);
-            if (xBits < 0 || yBits < 0 || zBits < 0) {
-                return new ArrayVoxelShape(
-                    BLOCK.shape,
-                    DoubleArrayList.wrap(new double[]{minX, maxX}),
-                    DoubleArrayList.wrap(new double[]{minY, maxY}),
-                    DoubleArrayList.wrap(new double[]{minZ, maxZ})
-                );
-            }
-
-            if (xBits == 0 && yBits == 0 && zBits == 0) {
-                return block();
-            }
-
-            int xSize = 1 << xBits;
-            int ySize = 1 << yBits;
-            int zSize = 1 << zBits;
-            BitSetDiscreteVoxelShape voxelShape = BitSetDiscreteVoxelShape.withFilledBounds(
-                xSize,
-                ySize,
-                zSize,
-                (int)Math.round(minX * xSize),
-                (int)Math.round(minY * ySize),
-                (int)Math.round(minZ * zSize),
-                (int)Math.round(maxX * xSize),
-                (int)Math.round(maxY * ySize),
-                (int)Math.round(maxZ * zSize)
-            );
-            return new CubeVoxelShape(voxelShape);
-        } else {
-            return empty();
+        if (maxX - minX < 1.0E-7 || maxY - minY < 1.0E-7 || maxZ - minZ < 1.0E-7) {
+            return EMPTY;
         }
+
+        int xBits;
+        int yBits;
+        int zBits;
+        if ((xBits = findBits(minX, maxX)) < 0 || (yBits = findBits(minY, maxY)) < 0 || (zBits = findBits(minZ, maxZ)) < 0) {
+            // vanilla uses ArrayVoxelShape here without any rounding of the coordinates
+            return new net.caffeinemc.mods.lithium.common.shapes.VoxelShapeSimpleCube(FULL_CUBE_VOXELS, minX, minY, minZ, maxX, maxY, maxZ);
+        }
+
+        if (xBits == 0 && yBits == 0 && zBits == 0) {
+            return BLOCK;
+        }
+
+        // vanilla would use a CubeVoxelShape with a BitSetDiscreteVoxelShape of resolution xBits/yBits/zBits here
+        return new net.caffeinemc.mods.lithium.common.shapes.VoxelShapeAlignedCuboid(
+            Math.round(minX * 8.0) / 8.0,
+            Math.round(minY * 8.0) / 8.0,
+            Math.round(minZ * 8.0) / 8.0,
+            Math.round(maxX * 8.0) / 8.0,
+            Math.round(maxY * 8.0) / 8.0,
+            Math.round(maxZ * 8.0) / 8.0,
+            xBits,
+            yBits,
+            zBits
+        );
     }
 
     public static VoxelShape create(final AABB aabb) {
@@ -100,7 +103,7 @@ public final class Shapes {
     }
 
     @VisibleForTesting
-    static int findBits(final double min, final double max) {
+    public static int findBits(final double min, final double max) { // MODIFIED for porting: lithium.accesswidener widened access
         if (!(min < -1.0E-7) && !(max > 1.0000001)) {
             for (int bits = 0; bits <= 3; bits++) {
                 int intervals = 1 << bits;
@@ -195,6 +198,13 @@ public final class Shapes {
                 if (second.max(axis) < first.min(axis) - 1.0E-7) {
                     return firstOnlyMatters || secondOnlyMatters;
                 }
+            }
+
+            // MODIFIED for porting: lithium shapes.optimized_matching ShapesMixin#cuboidMatchesAnywhere - when both
+            // shapes are simple cuboids the answer can be computed directly, without building any index mergers.
+            int lithium$matchesAnywhere = net.caffeinemc.mods.lithium.common.shapes.VoxelShapeMatchesAnywhere.cuboidMatchesAnywhere(first, second, op);
+            if (lithium$matchesAnywhere != -1) {
+                return lithium$matchesAnywhere != 0;
             }
 
             IndexMerger xMerger = createIndexMerger(
@@ -314,9 +324,11 @@ public final class Shapes {
         } else if (second.getDouble(secondSize) < first.getDouble(0) - 1.0E-7) {
             return new NonOverlappingMerger(second, first, true);
         } else {
+            // MODIFIED for porting: lithium shapes.shape_merging ShapesMixin#injectCustomListPair replaces
+            // IndirectMerger by lithium's own pair list implementation.
             return firstSize == secondSize && Objects.equals(first, second)
                 ? new IdenticalMerger(first)
-                : new IndirectMerger(first, second, firstOnlyMatters, secondOnlyMatters);
+                : new net.caffeinemc.mods.lithium.common.shapes.pairs.LithiumDoublePairList(first, second, firstOnlyMatters, secondOnlyMatters);
         }
     }
 

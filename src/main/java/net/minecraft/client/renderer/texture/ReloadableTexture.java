@@ -13,8 +13,15 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
-public abstract class ReloadableTexture extends AbstractTexture {
+public abstract class ReloadableTexture extends AbstractTexture
+    implements net.irisshaders.iris.mixin.texture.ReloadableTextureAccessor { // MODIFIED for porting: iris ReloadableTextureAccessor
     private final Identifier resourceId;
+
+    // MODIFIED for porting: was iris's texture ReloadableTextureAccessor @Accessor("resourceId")
+    @Override
+    public Identifier getLocation() {
+        return this.resourceId;
+    }
 
     public ReloadableTexture(final Identifier resourceId) {
         this.resourceId = resourceId;
@@ -37,6 +44,15 @@ public abstract class ReloadableTexture extends AbstractTexture {
     }
 
     protected void doLoad(final NativeImage image) {
+        this.iris$doLoad(image);
+        // MODIFIED for porting: was iris's texture pbr MixinReloadableTexture#iris$onDoLoad (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.TextureTracker.INSTANCE.trackTexture(this.texture.iris$getGlId(), this);
+        }
+    }
+
+    // MODIFIED for porting: original vanilla body of doLoad
+    private void iris$doLoad(final NativeImage image) {
         GpuDevice device = RenderSystem.getDevice();
         this.close();
         this.texture = device.createTexture(this.resourceId::toString, 5, GpuFormat.RGBA8_UNORM, image.getWidth(), image.getHeight(), 1, 1);

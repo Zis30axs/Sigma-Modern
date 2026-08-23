@@ -177,7 +177,8 @@ public class PistonStructureResolver {
     private boolean addBranchingBlocks(final BlockPos fromPos) {
         BlockState fromState = this.level.getBlockState(fromPos);
 
-        for (Direction direction : Direction.values()) {
+        // MODIFIED for porting: lithium alloc.enum_values.piston_handler PistonStructureResolverMixin#removeAllocation
+        for (Direction direction : net.caffeinemc.mods.lithium.common.util.DirectionConstants.ALL) {
             if (direction.getAxis() != this.pushDirection.getAxis()) {
                 BlockPos neighbourPos = fromPos.relative(direction);
                 BlockState neighbourState = this.level.getBlockState(neighbourPos);

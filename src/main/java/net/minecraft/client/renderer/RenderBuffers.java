@@ -10,7 +10,9 @@ public class RenderBuffers implements AutoCloseable {
     private final StagedVertexBuffer stagedVertexBuffer;
 
     public RenderBuffers(final int maxSectionBuilders) {
-        this.sectionBufferPool = SectionBufferBuilderPool.allocate(maxSectionBuilders);
+        // MODIFIED for porting: sodium core.render.world RenderBuffersMixin#sodium$doNotAllocateChunks (@Redirect) -
+        // sodium never uses the vanilla section buffers, so nothing is allocated for them.
+        this.sectionBufferPool = new net.caffeinemc.mods.sodium.client.render.chunk.NonStoringBuilderPool();
         this.stagedVertexBuffer = new StagedVertexBuffer(() -> "Shared Buffer", 4194304);
     }
 

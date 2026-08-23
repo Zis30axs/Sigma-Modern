@@ -99,7 +99,10 @@ import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public final class ItemStack implements DataComponentHolder, ItemInstance {
+// MODIFIED for porting: lithium util.item_component_and_count_tracking ItemStackMixin lets other objects
+// (item entities, inventories) observe component and count changes of a stack instead of polling it.
+public final class ItemStack
+    implements DataComponentHolder, ItemInstance, net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<ItemStack>, net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<PatchedDataComponentMap> {
     private static final List<Component> OP_NBT_WARNING = List.of(
         Component.translatable("item.op_warning.line1").withStyle(ChatFormatting.RED, ChatFormatting.BOLD),
         Component.translatable("item.op_warning.line2").withStyle(ChatFormatting.RED),
@@ -154,6 +157,9 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
     @Deprecated
     private final @Nullable Holder<Item> item;
     private final PatchedDataComponentMap components;
+    // MODIFIED for porting: lithium util.item_component_and_count_tracking ItemStackMixin @Unique fields
+    private net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemStack> lithium$subscriber;
+    private int lithium$subscriberData;
 
     public static DataResult<ItemStack> validateStrict(final ItemStack itemStack) {
         DataResult<?> result = validateComponents(itemStack.getComponents());
@@ -758,7 +764,14 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
     }
 
     public <T> @Nullable T set(final DataComponentType<T> type, final @Nullable T value) {
-        return this.components.set(type, value);
+        T result = this.components.set(type, value);
+        // MODIFIED for porting: lithium util.item_component_and_count_tracking ItemStackMixin#onSetComponent (RETURN)
+        if (type == DataComponents.ENCHANTMENTS
+            && this.lithium$subscriber instanceof net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.EnchantmentSubscriber<ItemStack> lithium$enchantmentSubscriber) {
+            lithium$enchantmentSubscriber.lithium$notifyAfterEnchantmentChange(this, this.lithium$subscriberData);
+        }
+
+        return result;
     }
 
     public <T> @Nullable T set(final TypedDataComponent<T> value) {
@@ -966,6 +979,12 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
     }
 
     public boolean hasFoil() {
+        // MODIFIED for porting: was iris's ItemStackMixin#fism$cancelGlintRendering (@Inject HEAD, cancellable) - the
+        // enchantment glint is not visible in the shadow map, so it is not rendered during the shadow pass.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.apiimpl.IrisApiV0Impl.INSTANCE.isRenderingShadowPass()) {
+            return false;
+        }
+
         Boolean enchantmentGlintOverride = this.get(DataComponents.ENCHANTMENT_GLINT_OVERRIDE);
         return enchantmentGlintOverride != null ? enchantmentGlintOverride : this.getItem().isFoil(this);
     }
@@ -1061,7 +1080,106 @@ public final class ItemStack implements DataComponentHolder, ItemInstance {
         return this.getCount();
     }
 
+    // MODIFIED for porting: the following block of methods was lithium's ItemStackMixin
+    @Override
+    public void lithium$subscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemStack> subscriber, final int subscriberData) {
+        if (this.isEmpty()) {
+            throw new IllegalStateException("Cannot subscribe to an empty ItemStack!");
+        }
+
+        if (this.lithium$subscriber == null) {
+            this.lithium$startTrackingChanges();
+        }
+
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.combine(this.lithium$subscriber, this.lithium$subscriberData, subscriber, subscriberData);
+        if (this.lithium$subscriber instanceof net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.Multi<?>) {
+            this.lithium$subscriberData = 0;
+        } else {
+            this.lithium$subscriberData = subscriberData;
+        }
+    }
+
+    @Override
+    public int lithium$unsubscribe(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemStack> subscriber) {
+        if (this.isEmpty()) {
+            throw new IllegalStateException("Cannot unsubscribe from an empty ItemStack!");
+        }
+
+        int retval = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.dataOf(this.lithium$subscriber, subscriber, this.lithium$subscriberData);
+        this.lithium$subscriberData = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.dataWithout(this.lithium$subscriber, subscriber, this.lithium$subscriberData);
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.without(this.lithium$subscriber, subscriber);
+        if (this.lithium$subscriber == null) {
+            ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<PatchedDataComponentMap>)(Object)this.components).lithium$unsubscribe(this);
+        }
+
+        return retval;
+    }
+
+    @Override
+    public void lithium$unsubscribeWithData(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemStack> subscriber, final int subscriberData) {
+        if (this.isEmpty()) {
+            throw new IllegalStateException("Cannot unsubscribe from an empty ItemStack!");
+        }
+
+        this.lithium$subscriberData = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.dataWithout(this.lithium$subscriber, subscriber, this.lithium$subscriberData, subscriberData, true);
+        this.lithium$subscriber = net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.without(this.lithium$subscriber, subscriber, subscriberData, true);
+        if (this.lithium$subscriber == null) {
+            ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<PatchedDataComponentMap>)(Object)this.components).lithium$unsubscribe(this);
+        }
+    }
+
+    @Override
+    public boolean lithium$isSubscribedWithData(final net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber<ItemStack> subscriber, final int subscriberData) {
+        if (this.isEmpty()) {
+            throw new IllegalStateException("Cannot be subscribed to an empty ItemStack!");
+        }
+
+        return net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.containsSubscriber(this.lithium$subscriber, this.lithium$subscriberData, subscriber, subscriberData);
+    }
+
+    @Override
+    public void lithium$forceUnsubscribe(final PatchedDataComponentMap publisher, final int subscriberData) {
+        if (publisher != this.components) {
+            throw new IllegalStateException("Invalid publisher, expected " + this.components + " but got " + publisher);
+        }
+
+        this.lithium$subscriber.lithium$forceUnsubscribe(this, this.lithium$subscriberData);
+        this.lithium$subscriber = null;
+        this.lithium$subscriberData = 0;
+    }
+
+    @Override
+    public void lithium$notify(final PatchedDataComponentMap publisher, final int subscriberData) {
+        if (publisher != this.components) {
+            throw new IllegalStateException("Invalid publisher, expected " + this.components + " but got " + publisher);
+        }
+
+        if (this.lithium$subscriber != null) {
+            this.lithium$subscriber.lithium$notify(this, this.lithium$subscriberData);
+        }
+    }
+
+    private void lithium$startTrackingChanges() {
+        ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<PatchedDataComponentMap>)(Object)this.components).lithium$subscribe(this, 0);
+    }
+
     public void setCount(final int count) {
+        // MODIFIED for porting: lithium ItemStackMixin#beforeChangeCount (HEAD of setCount)
+        if (count != this.count) {
+            if (this.lithium$subscriber instanceof net.caffeinemc.mods.lithium.common.util.change_tracking.ChangeSubscriber.CountChangeSubscriber<ItemStack> lithium$countChangeSubscriber) {
+                lithium$countChangeSubscriber.lithium$notifyCount(this, this.lithium$subscriberData, count);
+            }
+
+            if (count == 0) {
+                ((net.caffeinemc.mods.lithium.common.util.change_tracking.ChangePublisher<PatchedDataComponentMap>)(Object)this.components).lithium$unsubscribe(this);
+                if (this.lithium$subscriber != null) {
+                    this.lithium$subscriber.lithium$forceUnsubscribe(this, this.lithium$subscriberData);
+                    this.lithium$subscriber = null;
+                    this.lithium$subscriberData = 0;
+                }
+            }
+        }
+
         this.count = count;
     }
 

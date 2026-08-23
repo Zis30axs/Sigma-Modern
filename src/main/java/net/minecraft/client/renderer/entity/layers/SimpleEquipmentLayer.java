@@ -60,6 +60,17 @@ public class SimpleEquipmentLayer<S extends LivingEntityRenderState, RM extends 
         Equippable equippable = equipment.get(DataComponents.EQUIPPABLE);
         if (equippable != null && !equippable.assetId().isEmpty() && (!state.isBaby || this.babyModel != null)) {
             EM model = state.isBaby ? this.babyModel : this.adultModel;
+            // MODIFIED for porting: was iris's entity_render_context MixinHorseArmorLayer#changeId (@Inject at the INVOKE of
+            // EquipmentLayerRenderer#renderLayers, with @Local ItemStack)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds() != null) {
+                net.minecraft.resources.Identifier irisLocation = net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    .getKey(equipment.getItem());
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                    .setCurrentRenderedItem(
+                        net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings.INSTANCE.getItemIds().applyAsInt(new net.irisshaders.iris.shaderpack.materialmap.NamespacedId(irisLocation.getNamespace(), irisLocation.getPath()))
+                    );
+            }
+
             this.equipmentRenderer
                 .renderLayers(
                     this.layer,
@@ -74,6 +85,11 @@ public class SimpleEquipmentLayer<S extends LivingEntityRenderState, RM extends 
                     state.outlineColor,
                     this.order
                 );
+        }
+
+        // MODIFIED for porting: was iris's entity_render_context MixinHorseArmorLayer#changeId2 (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCurrentRenderedItem(0);
         }
     }
 }

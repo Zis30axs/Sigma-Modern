@@ -4,7 +4,7 @@ import net.minecraft.world.entity.ContainerUser;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
-public class CompoundContainer implements Container {
+public class CompoundContainer implements Container, net.caffeinemc.mods.lithium.mixin.block.hopper.CompoundContainerAccessor { // MODIFIED for porting: lithium block.hopper CompoundContainerAccessor
     private final Container container1;
     private final Container container2;
 
@@ -21,6 +21,17 @@ public class CompoundContainer implements Container {
     @Override
     public boolean isEmpty() {
         return this.container1.isEmpty() && this.container2.isEmpty();
+    }
+
+    // MODIFIED for porting: the next two methods were lithium's block.hopper CompoundContainerAccessor Mixin
+    @Override
+    public Container getFirst() {
+        return this.container1;
+    }
+
+    @Override
+    public Container getSecond() {
+        return this.container2;
     }
 
     public boolean contains(final Container container) {

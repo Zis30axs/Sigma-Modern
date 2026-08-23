@@ -107,9 +107,16 @@ public interface VertexConsumer {
         return this.addVertex(pose.pose(), x, y, z);
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.immediate.matrix_stack VertexConsumerMixin (@Overwrite) - avoid the
+     * temporary Vector3f allocation.
+     */
     default VertexConsumer addVertex(final Matrix4fc pose, final float x, final float y, final float z) {
-        Vector3f pos = pose.transformPosition(x, y, z, new Vector3f());
-        return this.addVertex(pos.x(), pos.y(), pos.z());
+        return this.addVertex(
+            net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionX(pose, x, y, z),
+            net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionY(pose, x, y, z),
+            net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformPositionZ(pose, x, y, z)
+        );
     }
 
     default VertexConsumer addVertexWith2DPose(final Matrix3x2fc pose, final float x, final float y) {
@@ -117,9 +124,24 @@ public interface VertexConsumer {
         return this.addVertex(pos.x(), pos.y(), 0.0F);
     }
 
+    /**
+     * MODIFIED for porting: sodium features.render.immediate.matrix_stack VertexConsumerMixin (@Overwrite) - avoid the
+     * temporary Vector3f allocation. The normalization is only performed when the pose does not guarantee unit normals,
+     * matching {@code PoseStack.Pose#transformNormal}.
+     */
     default VertexConsumer setNormal(final PoseStack.Pose pose, final float x, final float y, final float z) {
-        Vector3f normal = pose.transformNormal(x, y, z, new Vector3f());
-        return this.setNormal(normal.x(), normal.y(), normal.z());
+        org.joml.Matrix3f matrix = pose.normal();
+        float xt = net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformNormalX(matrix, x, y, z);
+        float yt = net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformNormalY(matrix, x, y, z);
+        float zt = net.caffeinemc.mods.sodium.api.math.MatrixHelper.transformNormalZ(matrix, x, y, z);
+        if (!pose.trustedNormals) {
+            float scalar = org.joml.Math.invsqrt(org.joml.Math.fma(xt, xt, org.joml.Math.fma(yt, yt, zt * zt)));
+            xt *= scalar;
+            yt *= scalar;
+            zt *= scalar;
+        }
+
+        return this.setNormal(xt, yt, zt);
     }
 
     default VertexConsumer setNormal(final PoseStack.Pose pose, final Vector3fc normal) {

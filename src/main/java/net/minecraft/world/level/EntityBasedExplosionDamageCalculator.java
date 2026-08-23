@@ -13,12 +13,22 @@ public class EntityBasedExplosionDamageCalculator extends ExplosionDamageCalcula
         this.source = source;
     }
 
+    // MODIFIED for porting: lithium alloc.explosion_behavior EntityBasedExplosionDamageCalculatorMixin avoids the
+    // lambda and the extra Optional that Optional#map allocates on every explosion ray step.
     @Override
     public Optional<Float> getBlockExplosionResistance(
         final Explosion explosion, final BlockGetter level, final BlockPos pos, final BlockState block, final FluidState fluid
     ) {
-        return super.getBlockExplosionResistance(explosion, level, pos, block, fluid)
-            .map(resistance -> this.source.getBlockExplosionResistance(explosion, level, pos, block, fluid, resistance));
+        Optional<Float> optionalBlastResistance = super.getBlockExplosionResistance(explosion, level, pos, block, fluid);
+        if (optionalBlastResistance.isPresent()) {
+            float blastResistance = optionalBlastResistance.get();
+            float effectiveExplosionResistance = this.source.getBlockExplosionResistance(explosion, level, pos, block, fluid, blastResistance);
+            if (effectiveExplosionResistance != blastResistance) {
+                return Optional.of(effectiveExplosionResistance);
+            }
+        }
+
+        return optionalBlastResistance;
     }
 
     @Override

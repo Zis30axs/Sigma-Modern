@@ -138,7 +138,16 @@ public class SculkShriekerBlock extends BaseEntityBlock implements SimpleWaterlo
             ? BaseEntityBlock.createTickerHelper(
                 type,
                 BlockEntityTypes.SCULK_SHRIEKER,
-                (innerLevel, pos, state, entity) -> VibrationSystem.Ticker.tick(innerLevel, entity.getVibrationData(), entity.getVibrationUser())
+                (innerLevel, pos, state, entity) -> {
+                    VibrationSystem.Ticker.tick(innerLevel, entity.getVibrationData(), entity.getVibrationUser());
+                    // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.sculk_sensor_shrieker
+                    // SculkShriekerBlockMixin#checkSleep (RETURN of the ticker lambda)
+                    VibrationSystem.Data lithium$vibrationData = entity.getVibrationData();
+                    if (lithium$vibrationData.getCurrentVibration() == null
+                        && lithium$vibrationData.getSelectionStrategy().chosenCandidate(Long.MAX_VALUE).isEmpty()) {
+                        ((net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity)entity).lithium$startSleeping();
+                    }
+                }
             )
             : null;
     }

@@ -753,6 +753,12 @@ public abstract class AbstractContainerMenu {
             return 0;
         }
 
+        // MODIFIED for porting: lithium block.hopper AbstractContainerMenuMixin#getFastOutputStrength - lithium's stack list
+        // keeps the signal strength up to date, so the whole inventory does not have to be scanned.
+        if (container instanceof net.caffeinemc.mods.lithium.api.inventory.LithiumInventory optimizedInventory) {
+            return net.caffeinemc.mods.lithium.common.hopper.InventoryHelper.getLithiumStackList(optimizedInventory).getSignalStrength(container);
+        }
+
         float totalPercent = 0.0F;
 
         for (int i = 0; i < container.getContainerSize(); i++) {

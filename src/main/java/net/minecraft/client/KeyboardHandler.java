@@ -163,6 +163,14 @@ public class KeyboardHandler {
     }
 
     private boolean handleDebugKeys(final KeyEvent event) {
+        // MODIFIED for porting: was iris's MixinKeyboardHandler#iris$handleDebugKeys (@Inject RETURN, cancellable). Iris only
+        // claims a debug key when its own debug options are off - otherwise its keys are reachable through the debug screen.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && !net.irisshaders.iris.Iris.getIrisConfig().areDebugOptionsEnabled()
+            && net.irisshaders.iris.Iris.handleDebugKeys(event)) {
+            return true;
+        }
+
         if (this.debugCrashKeyTime > 0L && this.debugCrashKeyTime < Util.getMillis() - 100L) {
             return true;
         }

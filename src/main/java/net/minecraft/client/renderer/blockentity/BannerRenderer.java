@@ -189,6 +189,24 @@ public class BannerRenderer implements BlockEntityRenderer<BannerBlockEntity, Ba
         final BannerPatternLayers patterns,
         final ModelFeatureRenderer.@Nullable CrumblingOverlay breakProgress
     ) {
+        // MODIFIED for porting: was iris's BannerRendererMixin#fism$cancelSubmitPatterns (@Inject HEAD, cancellable) - the
+        // individual pattern layers are not visible in the shadow map, so only the base layer is submitted there.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.apiimpl.IrisApiV0Impl.INSTANCE.isRenderingShadowPass()) {
+            submitPatternLayer(
+                sprites,
+                poseStack,
+                submitNodeCollector,
+                lightCoords,
+                overlayCoords,
+                model,
+                state,
+                banner ? net.minecraft.client.renderer.Sheets.BANNER_PATTERN_BASE : net.minecraft.client.renderer.Sheets.SHIELD_PATTERN_BASE,
+                baseColor,
+                breakProgress
+            );
+            return;
+        }
+
         submitPatternLayer(
             sprites,
             poseStack,
@@ -211,7 +229,8 @@ public class BannerRenderer implements BlockEntityRenderer<BannerBlockEntity, Ba
         }
     }
 
-    private static <S> void submitPatternLayer(
+    // MODIFIED for porting: widened for iris's BannerRendererAccessor @Invoker("submitPatternLayer")
+    public static <S> void submitPatternLayer(
         final SpriteGetter sprites,
         final PoseStack poseStack,
         final OrderedSubmitNodeCollector submitNodeCollector,

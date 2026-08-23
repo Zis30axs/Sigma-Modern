@@ -562,6 +562,53 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             this.minecraft.gui.toastManager().addToast(toast);
             this.seenInsecureChatWarning = true;
         }
+
+        // MODIFIED for porting: was iris's MixinClientPacketListener#iris$showUpdateMessage (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && Minecraft.getInstance().player != null) {
+            net.irisshaders.iris.Iris.getUpdateChecker()
+                .getUpdateMessage()
+                .ifPresent(msg -> Minecraft.getInstance().player.sendSystemMessage(msg));
+            net.irisshaders.iris.Iris.getStoredError()
+                .ifPresent(
+                    e -> Minecraft.getInstance()
+                        .player
+                        .sendSystemMessage(
+                            Component.translatable(
+                                    e instanceof net.irisshaders.iris.gl.shader.ShaderCompileException
+                                        ? "iris.load.failure.shader"
+                                        : "iris.load.failure.generic"
+                                )
+                                .append(
+                                    Component.literal("Copy Info")
+                                        .withStyle(
+                                            arg -> arg.withUnderlined(true)
+                                                .withColor(net.minecraft.ChatFormatting.BLUE)
+                                                .withClickEvent(new net.minecraft.network.chat.ClickEvent.CopyToClipboard(e.getMessage()))
+                                                .withHoverEvent(
+                                                    new net.minecraft.network.chat.HoverEvent.ShowText(Component.translatable("chat.copy.click"))
+                                                )
+                                        )
+                                )
+                        )
+                );
+
+            if (net.irisshaders.iris.Iris.loadedIncompatiblePack()) {
+                Minecraft.getInstance().gui.hud.setTimes(10, 70, 140);
+                net.irisshaders.iris.Iris.logger.warn("Incompatible pack for DH!");
+                Minecraft.getInstance()
+                    .player
+                    .sendSystemMessage(
+                        Component.literal("This pack doesn't have DH support.")
+                            .withStyle(net.minecraft.ChatFormatting.BOLD, net.minecraft.ChatFormatting.RED)
+                    );
+                Minecraft.getInstance()
+                    .player
+                    .sendSystemMessage(
+                        Component.literal("Distant Horizons (DH) chunks won't show up. This isn't a bug, get another shader.")
+                            .withStyle(net.minecraft.ChatFormatting.RED)
+                    );
+            }
+        }
     }
 
     @Override
@@ -914,6 +961,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         this.level.getChunkSource().drop(packet.pos());
         this.debugSubscriber.dropChunk(packet.pos());
         this.queueLightRemoval(packet);
+        // MODIFIED for porting: sodium core.world.map ClientPacketListenerMixin#onChunkUnloadPacket (RETURN)
+        net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder.get(this.level).onChunkStatusRemoved(packet.pos().x(), packet.pos().z(), net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus.FLAG_ALL);
     }
 
     private void queueLightRemoval(final ClientboundForgetLevelChunkPacket packet) {
@@ -2405,6 +2454,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         Iterator<byte[]> blockUpdates = lightData.getBlockUpdates().iterator();
         this.readSectionList(x, z, lightEngine, LightLayer.BLOCK, blockYMask, emptyBlockYMask, blockUpdates, scheduleRebuild);
         lightEngine.setLightEnabled(new ChunkPos(x, z), true);
+        // MODIFIED for porting: sodium core.world.map ClientPacketListenerMixin#onLightDataReceived (RETURN)
+        net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder.get(this.level).onChunkStatusAdded(x, z, net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus.FLAG_HAS_LIGHT_DATA);
     }
 
     @Override

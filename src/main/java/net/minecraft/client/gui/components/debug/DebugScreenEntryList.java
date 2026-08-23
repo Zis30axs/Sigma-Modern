@@ -81,8 +81,32 @@ public class DebugScreenEntryList {
     }
 
     private void resetToProfile(final DebugScreenProfile profile) {
+        // MODIFIED for porting: sodium features.gui.hooks.debug DebugScreenEntryListMixin#injectLoadProfile (HEAD) - sodium
+        // enables the render statistics it needs for its own debug entries.
+        if (profile == DebugScreenProfile.PERFORMANCE && !net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation.getInstance().isDevelopmentEnvironment()) {
+            this.sodium$setReducedDebugStatuses();
+        } else {
+            this.sodium$setFullDebugStatuses();
+        }
+
         this.profile = profile;
         this.resetStatuses(DebugScreenEntries.PROFILES.get(profile));
+    }
+
+    // MODIFIED for porting: was sodium's features.gui.hooks.debug DebugScreenEntryListMixin#setFullDebugStatuses
+    private void sodium$setFullDebugStatuses() {
+        this.allStatuses.put(DebugScreenEntries.CHUNK_RENDER_STATS, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(DebugScreenEntries.ENTITY_RENDER_STATS, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(DebugScreenEntries.PARTICLE_RENDER_STATS, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(DebugScreenEntries.MEMORY, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(DebugScreenEntries.SYSTEM_SPECS, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_FPS_PERCENTILES, DebugScreenEntryStatus.IN_OVERLAY);
+    }
+
+    // MODIFIED for porting: was sodium's features.gui.hooks.debug DebugScreenEntryListMixin#setReducedDebugStatuses
+    private void sodium$setReducedDebugStatuses() {
+        this.allStatuses.put(DebugScreenEntries.CHUNK_RENDER_STATS, DebugScreenEntryStatus.IN_OVERLAY);
+        this.allStatuses.put(net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_FPS_PERCENTILES, DebugScreenEntryStatus.IN_OVERLAY);
     }
 
     public void loadProfile(final DebugScreenProfile profile) {
@@ -154,6 +178,30 @@ public class DebugScreenEntryList {
     }
 
     public void rebuildCurrentList() {
+        // MODIFIED for porting: was iris's MixinDebugScreenEntriesList#injectSodiumSettings (@Inject HEAD)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (!this.allStatuses.containsKey(net.minecraft.resources.Identifier.fromNamespaceAndPath("iris", "iris"))) {
+                this.allStatuses.put(net.minecraft.resources.Identifier.fromNamespaceAndPath("iris", "iris"), DebugScreenEntryStatus.IN_OVERLAY);
+            }
+
+            if (net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation.getInstance().isDevelopmentEnvironment()
+                && !this.allStatuses.containsKey(net.minecraft.resources.Identifier.fromNamespaceAndPath("iris", "debug"))) {
+                this.allStatuses.put(net.minecraft.resources.Identifier.fromNamespaceAndPath("iris", "debug"), DebugScreenEntryStatus.IN_OVERLAY);
+            }
+        }
+
+        // MODIFIED for porting: sodium features.gui.hooks.debug DebugScreenEntryListMixin#injectSodiumSettings (HEAD)
+        net.minecraft.resources.Identifier sodium$setting = net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation.getInstance().isDevelopmentEnvironment()
+            ? net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_DEBUG_ENTRY_FULL
+            : net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_DEBUG_ENTRY_REDUCED;
+        if (!this.allStatuses.containsKey(sodium$setting)) {
+            this.allStatuses.put(sodium$setting, DebugScreenEntryStatus.IN_OVERLAY);
+        }
+
+        if (!this.allStatuses.containsKey(net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_FPS_PERCENTILES)) {
+            this.allStatuses.put(net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_FPS_PERCENTILES, DebugScreenEntryStatus.IN_OVERLAY);
+        }
+
         this.currentlyEnabled.clear();
         boolean isReducedDebugInfo = Minecraft.getInstance().showOnlyReducedInfo();
         this.allStatuses.forEach((key, value) -> {

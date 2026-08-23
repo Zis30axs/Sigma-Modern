@@ -147,7 +147,10 @@ public class FireworkRocketEntity extends Projectile implements ItemSupplier {
                 this.setDeltaMovement(this.attachedToEntity.getDeltaMovement());
             }
 
-            hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions FireworkRocketEntityMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
+            hitResult = ProjectileUtil.getHitResultOnMoveVector(this, new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity));
         } else {
             if (!this.isShotAtAngle()) {
                 double horizontalAcceleration = this.horizontalCollision ? 1.0 : 1.15;
@@ -155,7 +158,10 @@ public class FireworkRocketEntity extends Projectile implements ItemSupplier {
             }
 
             Vec3 movement = this.getDeltaMovement();
-            hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        // MODIFIED for porting: lithium entity.projectile_projectile_collisions FireworkRocketEntityMixin#getTypedPredicate
+        // (@ModifyExpressionValue on "this::canHitEntity"). Wrapping the predicate in lithium's own type lets
+        // ProjectileUtil recognise a projectile collision check and skip entity types this projectile can never hit.
+            hitResult = ProjectileUtil.getHitResultOnMoveVector(this, new net.caffeinemc.mods.lithium.common.entity.projectile.ProjectileCanHitEntityPredicate(this::canHitEntity));
             this.move(MoverType.SELF, movement);
             this.applyEffectsFromBlocks();
             this.setDeltaMovement(movement);

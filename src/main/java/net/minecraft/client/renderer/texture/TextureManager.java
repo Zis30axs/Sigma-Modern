@@ -119,6 +119,10 @@ public class TextureManager implements PreparableReloadListener, AutoCloseable {
         this.byPath.forEach(this::safeClose);
         this.byPath.clear();
         this.tickableTextures.clear();
+        // MODIFIED for porting: was iris's texture MixinTextureManager#iris$onTailClose (@Inject TAIL)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.texture.PBRTextureManager.INSTANCE.close();
+        }
     }
 
     @Override
@@ -143,6 +147,14 @@ public class TextureManager implements PreparableReloadListener, AutoCloseable {
                 for (TextureManager.PendingReload reload : reloads) {
                     reload.texture.apply(reload.newContents.join());
                 }
+
+                // MODIFIED for porting: was iris's texture MixinTextureManager#iris$onTailReloadLambda (@Inject TAIL of the
+                // reload lambda) - the PBR texture format is re-read and the PBR caches are dropped on every resource reload.
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    net.irisshaders.iris.pbr.format.TextureFormatLoader.reload(this.resourceManager);
+                    net.irisshaders.iris.pbr.texture.PBRTextureManager.INSTANCE.clear();
+                    net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.incrementTextureReloadCount();
+                }
             }, reloadExecutor);
     }
 
@@ -152,6 +164,11 @@ public class TextureManager implements PreparableReloadListener, AutoCloseable {
         } catch (IOException e) {
             LOGGER.error("Failed to create directory {}", targetDir, e);
             return;
+        }
+
+        // MODIFIED for porting: was iris's texture MixinTextureManager#iris$onInnerDumpTextures (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pbr.texture.PBRTextureManager.INSTANCE.dumpTextures(targetDir);
         }
 
         this.byPath.forEach((location, texture) -> {

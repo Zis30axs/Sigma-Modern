@@ -118,6 +118,20 @@ public class WeatherEffectRenderer implements AutoCloseable {
     }
 
     public void render(final Vec3 cameraPos, final WeatherRenderState renderState) {
+        // MODIFIED for porting: was sodium-extra's particle MixinLevelRenderer#renderWeather (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().detailSettings.rainSnow) {
+            return;
+        }
+
+        // MODIFIED for porting: was iris's MixinWeatherRenderer#iris$disableWeather (@WrapMethod on render) - a shader pack
+        // can turn weather rendering off. Merged with sodium-extra's guard above: both just skip the whole method.
+        // Upstream's second wrapper (disableRainParticles, on extractRenderState) is commented out with a "// TODO 26.2"
+        // note and is therefore not ported.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+            && !net.irisshaders.iris.Iris.getPipelineManager().getPipeline().map(net.irisshaders.iris.pipeline.WorldRenderingPipeline::shouldRenderWeather).orElse(true)) {
+            return;
+        }
+
         int columnCount = renderState.rainColumns.size() + renderState.snowColumns.size();
         if (columnCount != 0) {
             TextureManager textureManager = Minecraft.getInstance().getTextureManager();

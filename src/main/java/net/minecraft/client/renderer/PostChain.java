@@ -31,9 +31,15 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class PostChain implements AutoCloseable {
+public class PostChain implements AutoCloseable, me.flashyreese.mods.sodiumextra.mixin.panini_projection.AccessorPostChain { // MODIFIED for porting: sodium-extra AccessorPostChain
     public static final Identifier MAIN_TARGET_ID = Identifier.withDefaultNamespace("main");
     private final List<PostPass> passes;
+
+    // MODIFIED for porting: was sodium-extra's panini_projection AccessorPostChain @Accessor("passes")
+    @Override
+    public List<PostPass> sodiumExtra$getPasses() {
+        return this.passes;
+    }
     private final Map<Identifier, PostChainConfig.InternalTarget> internalTargets;
     private final Set<Identifier> externalTargets;
     private final Map<Identifier, RenderTarget> persistentTargets = new HashMap<>();

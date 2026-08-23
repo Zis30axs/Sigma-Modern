@@ -45,7 +45,8 @@ public class ItemPickupParticleGroup extends ParticleGroup<ItemPickupParticle> {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private record State(List<ItemPickupParticleGroup.ParticleInstance> instances) implements ParticleGroupRenderState {
+// MODIFIED for porting: iris.accesswidener makes ItemPickupParticleGroup$State accessible
+    public record State(List<ItemPickupParticleGroup.ParticleInstance> instances) implements ParticleGroupRenderState {
         @Override
         public void submit(final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera) {
             PoseStack poseStack = new PoseStack();

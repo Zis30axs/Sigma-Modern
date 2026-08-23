@@ -26,6 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.timeline.Timeline;
 
+// MODIFIED for porting: implements iris's DimensionTypeAccessor
 public record DimensionType(
     boolean hasFixedTime,
     boolean hasSkyLight,
@@ -43,7 +44,13 @@ public record DimensionType(
     EnvironmentAttributeMap attributes,
     HolderSet<Timeline> timelines,
     Optional<Holder<WorldClock>> defaultClock
-) {
+) implements net.irisshaders.iris.mixin.DimensionTypeAccessor {
+    // MODIFIED for porting: was iris's DimensionTypeAccessor @Accessor for `ambientLight`
+    @Override
+    public float getAmbientLight() {
+        return this.ambientLight;
+    }
+
     public static final int BITS_FOR_Y = BlockPos.PACKED_Y_LENGTH;
     public static final int MIN_HEIGHT = 16;
     public static final int Y_SIZE = (1 << BITS_FOR_Y) - 32;

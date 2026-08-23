@@ -96,7 +96,8 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.ticks.ContainerSingleItem;
 import org.jspecify.annotations.Nullable;
 
-public abstract class Mob extends LivingEntity implements Targeting, EquipmentUser, Leashable {
+// MODIFIED for porting: implements lithium's NavigatingEntity (entity.inactive_navigations MobMixin)
+public abstract class Mob extends LivingEntity implements Targeting, EquipmentUser, Leashable, net.caffeinemc.mods.lithium.common.entity.NavigatingEntity {
     private static final EntityDataAccessor<Byte> DATA_MOB_FLAGS_ID = SynchedEntityData.defineId(Mob.class, EntityDataSerializers.BYTE);
     private static final int MOB_FLAG_NO_AI = 1;
     private static final int MOB_FLAG_LEFTHANDED = 2;
@@ -131,6 +132,9 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
     protected JumpControl jumpControl;
     private final BodyRotationControl bodyRotationControl;
     protected PathNavigation navigation;
+    // MODIFIED for porting: lithium entity.inactive_navigations MobMixin. The navigation instance this mob is registered to
+    // the level with, so that swapping out the navigation object keeps the level's active-navigation set consistent.
+    private PathNavigation registeredNavigation;
     protected final GoalSelector goalSelector;
     protected final GoalSelector targetSelector;
     private @Nullable LivingEntity target;
@@ -213,6 +217,36 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
         return this.jumpControl;
     }
 
+    // MODIFIED for porting: the following block of methods was lithium's entity.inactive_navigations MobMixin
+    @Override
+    public boolean lithium$isRegisteredToWorld() {
+        return this.registeredNavigation != null;
+    }
+
+    @Override
+    public void lithium$setRegisteredToWorld(final PathNavigation navigation) {
+        this.registeredNavigation = navigation;
+    }
+
+    @Override
+    public PathNavigation lithium$getRegisteredNavigation() {
+        return this.registeredNavigation;
+    }
+
+    @Override
+    public void lithium$updateNavigationRegistration() {
+        if (this.lithium$isRegisteredToWorld()) {
+            PathNavigation navigation = this.getNavigation();
+            if (this.registeredNavigation != navigation) {
+                ((net.caffeinemc.mods.lithium.common.world.ServerWorldExtended)this.level()).lithium$setNavigationInactive(this);
+                this.registeredNavigation = navigation;
+                if (navigation.getPath() != null) {
+                    ((net.caffeinemc.mods.lithium.common.world.ServerWorldExtended)this.level()).lithium$setNavigationActive(this);
+                }
+            }
+        }
+    }
+
     public PathNavigation getNavigation() {
         return this.getControlledVehicle() instanceof Mob riding ? riding.getNavigation() : this.navigation;
     }
@@ -284,7 +318,12 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
         super.baseTick();
         ProfilerFiller profiler = Profiler.get();
         profiler.push("mobBaseTick");
-        if (this.isAlive() && this.random.nextInt(1000) < this.ambientSoundTime++) {
+        // MODIFIED for porting: lithium client_tick.entity.base_tick.unused_ambient_sound MobMixin#andIsServerSide
+        // (@ModifyExpressionValue on isAlive) - ambient sounds are played by the server. The Breeze is the exception:
+        // it plays client side sounds when it is not on the ground and its client side brain has no target.
+        if (this.isAlive()
+            && (!this.level().isClientSide() || this instanceof net.minecraft.world.entity.monster.breeze.Breeze)
+            && this.random.nextInt(1000) < this.ambientSoundTime++) {
             this.resetAmbientSoundTime();
             this.playAmbientSound();
         }
@@ -1305,6 +1344,9 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
             this.dropLeash();
         }
 
+        // MODIFIED for porting: lithium entity.inactive_navigations MobMixin#onNavigationReplacement (RETURN). Mounting can
+        // replace the navigation instance, so the level's active-navigation set has to be updated.
+        this.lithium$updateNavigationRegistration();
         return result;
     }
 

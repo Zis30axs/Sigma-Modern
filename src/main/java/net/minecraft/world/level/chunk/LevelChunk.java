@@ -85,12 +85,37 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
             return "<null>";
         }
     };
-    private final Map<BlockPos, LevelChunk.RebindableTickingBlockEntityWrapper> tickersInLevel = Maps.newHashMap();
+    // MODIFIED for porting: lithium collections.block_entity_tickers LevelChunkMixin#createFastUtilMap
+    private final Map<BlockPos, LevelChunk.RebindableTickingBlockEntityWrapper> tickersInLevel = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
     private boolean loaded;
     private final Level level;
+    // MODIFIED for porting: lithium world.inline_block_access LevelChunkMixin constants
+    private static final BlockState LITHIUM_DEFAULT_BLOCK_STATE = Blocks.AIR.defaultBlockState();
+    private static final FluidState LITHIUM_DEFAULT_FLUID_STATE = Fluids.EMPTY.defaultFluidState();
     private @Nullable Supplier<FullChunkStatus> fullStatus;
     private LevelChunk.@Nullable PostLoadProcessor postLoad;
-    private final Int2ObjectMap<GameEventListenerRegistry> gameEventListenerRegistrySections;
+    // MODIFIED for porting: lithium world.game_events.dispatch LevelChunkMixin - the map is only created once the
+    // chunk actually has a listener, and is mirrored into the level-wide GameEventDispatcherStorage.
+    private @Nullable Int2ObjectMap<GameEventListenerRegistry> gameEventListenerRegistrySections;
+
+    static {
+        // MODIFIED for porting: lithium world.game_events.dispatch LevelChunkMixin static initializer
+        net.caffeinemc.mods.lithium.common.world.chunk.ChunkStatusTracker.registerLoadCallback((serverLevel, chunk) -> {
+            net.caffeinemc.mods.lithium.common.world.GameEventDispatcherStorage dispatcherStorage = ((net.caffeinemc.mods.lithium.common.world.LithiumData)serverLevel).lithium$getData().gameEventDispatchers();
+            dispatcherStorage.addChunk(chunk.getPos().pack(), chunk.gameEventListenerRegistrySections);
+        });
+        net.caffeinemc.mods.lithium.common.world.chunk.ChunkStatusTracker.registerUnloadCallback((serverLevel, pos) -> {
+            net.caffeinemc.mods.lithium.common.world.GameEventDispatcherStorage dispatcherStorage = ((net.caffeinemc.mods.lithium.common.world.LithiumData)serverLevel).lithium$getData().gameEventDispatchers();
+            dispatcherStorage.removeChunk(pos.pack());
+        });
+    }
+
+    // MODIFIED for porting: was lithium's world.game_events.dispatch LevelChunkMixin#setGameEventListenerRegistrySections
+    private void setGameEventListenerRegistrySections(final @Nullable Int2ObjectMap<GameEventListenerRegistry> gameEventListenerRegistrySections) {
+        net.caffeinemc.mods.lithium.common.world.GameEventDispatcherStorage storage = ((net.caffeinemc.mods.lithium.common.world.LithiumData)this.getLevel()).lithium$getData().gameEventDispatchers();
+        storage.replace(this.getPos().pack(), gameEventListenerRegistrySections);
+        this.gameEventListenerRegistrySections = gameEventListenerRegistrySections;
+    }
     private final LevelChunkTicks<Block> blockTicks;
     private final LevelChunkTicks<Fluid> fluidTicks;
     private LevelChunk.UnsavedListener unsavedListener = chunkPos -> {};
@@ -112,7 +137,9 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
     ) {
         super(pos, upgradeData, level, level.palettedContainerFactory(), inhabitedTime, sections, blendingData);
         this.level = level;
-        this.gameEventListenerRegistrySections = new Int2ObjectOpenHashMap<>();
+        // MODIFIED for porting: lithium world.game_events.dispatch LevelChunkMixin#initGameEventDispatchers - upstream
+        // creates the (empty) map here and immediately nulls it again, so start out with null.
+        this.gameEventListenerRegistrySections = null;
 
         for (Heightmap.Types type : Heightmap.Types.values()) {
             if (ChunkStatus.FULL.heightmapsAfter().contains(type)) {
@@ -198,46 +225,42 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
 
     @Override
     public GameEventListenerRegistry getListenerRegistry(final int section) {
-        return this.level instanceof ServerLevel serverLevel
-            ? this.gameEventListenerRegistrySections
-                .computeIfAbsent(section, key -> new EuclideanGameEventListenerRegistry(serverLevel, section, this::removeGameEventListenerRegistry))
-            : super.getListenerRegistry(section);
+        if (this.level instanceof ServerLevel serverLevel) {
+            // MODIFIED for porting: lithium world.game_events.dispatch LevelChunkMixin#initializeCollection
+            if (this.gameEventListenerRegistrySections == null) {
+                this.setGameEventListenerRegistrySections(new Int2ObjectOpenHashMap<>(4));
+            }
+
+            return this.gameEventListenerRegistrySections
+                .computeIfAbsent(section, key -> new EuclideanGameEventListenerRegistry(serverLevel, section, this::removeGameEventListenerRegistry));
+        }
+
+        return super.getListenerRegistry(section);
     }
 
-    @Override
+    /**
+     * MODIFIED for porting: lithium world.inline_block_access LevelChunkMixin. The body is cut down to the plain section
+     * lookup so the JVM can inline it - the debug-world branch and the crash-report try/catch (whose exception table
+     * blocks inlining) are gone.
+     * Dropping the debug branch is behaviour-preserving here: DebugLevelSource#applyBiomeDecoration actually writes the
+     * barrier layer (y=60) and the pattern layer (y=70) into the chunk sections, and a debug world does not let the player
+     * change blocks, so the sections already answer exactly what that branch answered.
+     */
     public BlockState getBlockState(final BlockPos pos) {
         int x = pos.getX();
         int y = pos.getY();
         int z = pos.getZ();
-        if (this.level.isDebug()) {
-            BlockState blockState = null;
-            if (y == 60) {
-                blockState = Blocks.BARRIER.defaultBlockState();
-            }
-
-            if (y == 70) {
-                blockState = DebugLevelSource.getBlockStateFor(x, z);
-            }
-
-            return blockState == null ? Blocks.AIR.defaultBlockState() : blockState;
-        } else {
-            try {
-                int sectionIndex = this.getSectionIndex(y);
-                if (sectionIndex >= 0 && sectionIndex < this.sections.length) {
-                    LevelChunkSection currentSection = this.sections[sectionIndex];
-                    if (!currentSection.hasOnlyAir()) {
-                        return currentSection.getBlockState(x & 15, y & 15, z & 15);
-                    }
-                }
-
-                return Blocks.AIR.defaultBlockState();
-            } catch (Throwable t) {
-                CrashReport report = CrashReport.forThrowable(t, "Getting block state");
-                CrashReportCategory category = report.addCategory("Block being got");
-                category.setDetail("Location", () -> CrashReportCategory.formatLocation(this, x, y, z));
-                throw new ReportedException(report);
+        int sectionIndex = this.getSectionIndex(y);
+        if (sectionIndex >= 0 && sectionIndex < this.sections.length) {
+            LevelChunkSection currentSection = this.sections[sectionIndex];
+            // The hasOnlyAir check cannot be skipped here (MC-232360): sections that contain only air and cave_air are
+            // treated as empty.
+            if (!currentSection.hasOnlyAir()) {
+                return currentSection.getBlockState(x & 15, y & 15, z & 15);
             }
         }
+
+        return LITHIUM_DEFAULT_BLOCK_STATE;
     }
 
     @Override
@@ -245,23 +268,77 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         return this.getFluidState(pos.getX(), pos.getY(), pos.getZ());
     }
 
+    // MODIFIED for porting: lithium world.inline_block_access LevelChunkMixin - as getBlockState above. Lithium also
+    // drops the hasOnlyAir short-circuit here, since an air-only section returns the empty fluid state anyway.
     public FluidState getFluidState(final int x, final int y, final int z) {
-        try {
-            int sectionIndex = this.getSectionIndex(y);
-            if (sectionIndex >= 0 && sectionIndex < this.sections.length) {
-                LevelChunkSection currentSection = this.sections[sectionIndex];
-                if (!currentSection.hasOnlyAir()) {
-                    return currentSection.getFluidState(x & 15, y & 15, z & 15);
-                }
-            }
-
-            return Fluids.EMPTY.defaultFluidState();
-        } catch (Throwable t) {
-            CrashReport report = CrashReport.forThrowable(t, "Getting fluid state");
-            CrashReportCategory category = report.addCategory("Block being got");
-            category.setDetail("Location", () -> CrashReportCategory.formatLocation(this, x, y, z));
-            throw new ReportedException(report);
+        int sectionIndex = this.getSectionIndex(y);
+        if (sectionIndex >= 0 && sectionIndex < this.sections.length) {
+            return this.sections[sectionIndex].getFluidState(x & 15, y & 15, z & 15);
         }
+
+        return LITHIUM_DEFAULT_FLUID_STATE;
+    }
+
+    // MODIFIED for porting: the following overrides were lithium's world.inline_height LevelChunkMixin. ChunkAccess
+    // answers these through its `levelHeightAccessor` field; asking the level directly removes one indirection.
+    @Override
+    public int getMaxY() {
+        return this.level.getMaxY();
+    }
+
+    @Override
+    public int getMinSectionY() {
+        return this.level.getMinSectionY();
+    }
+
+    @Override
+    public int getMaxSectionY() {
+        return this.level.getMaxSectionY();
+    }
+
+    @Override
+    public boolean isInsideBuildHeight(final int blockY) {
+        return this.level.isInsideBuildHeight(blockY);
+    }
+
+    @Override
+    public int getHeight() {
+        return this.level.getHeight();
+    }
+
+    @Override
+    public int getMinY() {
+        return this.level.getMinY();
+    }
+
+    @Override
+    public int getSectionsCount() {
+        return this.level.getSectionsCount();
+    }
+
+    @Override
+    public boolean isOutsideBuildHeight(final BlockPos pos) {
+        return this.level.isOutsideBuildHeight(pos);
+    }
+
+    @Override
+    public boolean isOutsideBuildHeight(final int blockY) {
+        return this.level.isOutsideBuildHeight(blockY);
+    }
+
+    @Override
+    public int getSectionIndex(final int blockY) {
+        return this.level.getSectionIndex(blockY);
+    }
+
+    @Override
+    public int getSectionIndexFromSectionY(final int sectionY) {
+        return this.level.getSectionIndexFromSectionY(sectionY);
+    }
+
+    @Override
+    public int getSectionYFromSectionIndex(final int sectionIndex) {
+        return this.level.getSectionYFromSectionIndex(sectionIndex);
     }
 
     @Override
@@ -282,10 +359,20 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         }
 
         Block newBlock = state.getBlock();
-        this.heightmaps.get(Heightmap.Types.MOTION_BLOCKING).update(localX, y, localZ, state);
-        this.heightmaps.get(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES).update(localX, y, localZ, state);
-        this.heightmaps.get(Heightmap.Types.OCEAN_FLOOR).update(localX, y, localZ, state);
-        this.heightmaps.get(Heightmap.Types.WORLD_SURFACE).update(localX, y, localZ, state);
+        // MODIFIED for porting: lithium world.combined_heightmap_update LevelChunkMixin. The four heightmaps are updated in
+        // one pass: their current heights are read first so that the (common) case where the new block is far below all of
+        // them exits immediately, and the per-heightmap block predicate is only consulted for the ones that can still change.
+        net.caffeinemc.mods.lithium.common.world.chunk.heightmap.CombinedHeightmapUpdate.updateHeightmaps(
+            this.heightmaps.get(Heightmap.Types.MOTION_BLOCKING),
+            this.heightmaps.get(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES),
+            this.heightmaps.get(Heightmap.Types.OCEAN_FLOOR),
+            this.heightmaps.get(Heightmap.Types.WORLD_SURFACE),
+            this,
+            localX,
+            y,
+            localZ,
+            state
+        );
         boolean isEmpty = section.hasOnlyAir();
         if (wasEmpty != isEmpty) {
             this.level.getChunkSource().getLightEngine().updateSectionStatus(pos, isEmpty);
@@ -336,12 +423,21 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
             }
 
             if (blockEntity == null) {
-                blockEntity = ((EntityBlock)newBlock).newBlockEntity(pos, state);
+                // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
+                // LevelChunkMixin#createBlockEntityWithCachedStateFix
+                blockEntity = this.lithium$createBlockEntityWithCachedStateFix((EntityBlock)newBlock, pos, state);
                 if (blockEntity != null) {
                     this.addAndRegisterBlockEntity(blockEntity);
                 }
             } else {
                 blockEntity.setBlockState(state);
+                // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
+                // LevelChunkMixin#fixCachedState - onPlace may have changed the block state again in the meantime.
+                BlockState lithium$updatedBlockState = this.getBlockState(pos);
+                if (lithium$updatedBlockState != state) {
+                    blockEntity.setBlockState(lithium$updatedBlockState);
+                }
+
                 this.updateBlockEntityTicker(blockEntity);
             }
         }
@@ -353,6 +449,25 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
     @Deprecated
     @Override
     public void addEntity(final Entity entity) {
+    }
+
+    /**
+     * MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
+     * LevelChunkMixin#createBlockEntityWithCachedStateFix. Fixes
+     * {@code BlockBehaviour.BlockStateBase#onPlace} being able to change the block state while the block entity's cached
+     * state still refers to the old one. In vanilla this only affects hoppers, the only block with a block entity that also
+     * implements onPlace.
+     */
+    private @Nullable BlockEntity lithium$createBlockEntityWithCachedStateFix(final EntityBlock blockEntityProvider, final BlockPos pos, final BlockState state) {
+        // Modded EntityBlock objects are not always the same as state.getBlock(), so use theirs if it is still valid.
+        BlockState blockState = this.getBlockState(pos);
+        if (state == blockState) {
+            return blockEntityProvider.newBlockEntity(pos, state);
+        } else if (blockState.hasBlockEntity()) {
+            return ((EntityBlock)blockState.getBlock()).newBlockEntity(pos, blockState);
+        } else {
+            return null;
+        }
     }
 
     private @Nullable BlockEntity createBlockEntity(final BlockPos pos) {
@@ -496,6 +611,10 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
 
     private void removeGameEventListenerRegistry(final int sectionY) {
         this.gameEventListenerRegistrySections.remove(sectionY);
+        // MODIFIED for porting: lithium world.game_events.dispatch LevelChunkMixin#removeGameEventDispatcher (RETURN)
+        if (this.gameEventListenerRegistrySections != null && this.gameEventListenerRegistrySections.isEmpty()) {
+            this.setGameEventListenerRegistrySections(null);
+        }
     }
 
     private void removeBlockEntityTicker(final BlockPos pos) {
@@ -670,6 +789,10 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
 
     public void setFullStatus(final Supplier<FullChunkStatus> fullStatus) {
         this.fullStatus = fullStatus;
+        // MODIFIED for porting: lithium util.chunk_status_tracking LevelChunkMixin#onChunkFull (injected at RETURN)
+        if (fullStatus != null && this.getLevel() instanceof net.minecraft.server.level.ServerLevel lithium$serverLevel) {
+            net.caffeinemc.mods.lithium.common.world.chunk.ChunkStatusTracker.onChunkAccessible(lithium$serverLevel, this);
+        }
     }
 
     public void clearAllBlockEntities() {
@@ -708,10 +831,21 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
             this.tickersInLevel.compute(blockEntity.getBlockPos(), (blockPos, existingTicker) -> {
                 TickingBlockEntity actualTicker = this.createTicker(blockEntity, ticker);
                 if (existingTicker != null) {
+                    // MODIFIED for porting: lithium world.block_entity_ticking.sleeping LevelChunkMixin remembers the
+                    // wrapper a sleeping-capable block entity is ticked through, so it can swap the wrapped ticker later.
+                    if (blockEntity instanceof net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity lithium$sleepingBlockEntity) {
+                        lithium$sleepingBlockEntity.lithium$setTickWrapper(existingTicker);
+                    }
+
                     existingTicker.rebind(actualTicker);
                     return (LevelChunk.RebindableTickingBlockEntityWrapper)existingTicker;
                 } else if (this.isInLevel()) {
                     LevelChunk.RebindableTickingBlockEntityWrapper result = new LevelChunk.RebindableTickingBlockEntityWrapper(actualTicker);
+                    // MODIFIED for porting: lithium world.block_entity_ticking.sleeping LevelChunkMixin (see above)
+                    if (blockEntity instanceof net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity lithium$sleepingBlockEntity) {
+                        lithium$sleepingBlockEntity.lithium$setTickWrapper(result);
+                    }
+
                     this.level.addBlockEntityTicker(result);
                     return result;
                 } else {
@@ -725,10 +859,19 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         return new LevelChunk.BoundTickingBlockEntity<>(blockEntity, ticker);
     }
 
-    private class BoundTickingBlockEntity<T extends BlockEntity> implements TickingBlockEntity {
+    // MODIFIED for porting: implements lithium's WorldBorderListenerOnce
+    // (world.block_entity_ticking.world_border DirectBlockEntityTickInvokerMixin)
+    private class BoundTickingBlockEntity<T extends BlockEntity> implements TickingBlockEntity, net.caffeinemc.mods.lithium.common.world.listeners.WorldBorderListenerOnce {
         private final T blockEntity;
         private final BlockEntityTicker<T> ticker;
         private boolean loggedInvalidBlockState;
+        /**
+         * MODIFIED for porting: lithium world.block_entity_ticking.world_border DirectBlockEntityTickInvokerMixin.
+         * Bit 0: caching started (listener registered). Bit 1: the cached result below is valid. Bit 2: the cached result.
+         * The world border check of {@link LevelChunk#isTicking(BlockPos)} is only cacheable while the border cannot move
+         * across this block entity, i.e. while it is stationary or moving away from the block entity's side.
+         */
+        private byte worldBorderState = 0;
 
         private BoundTickingBlockEntity(final T blockEntity, final BlockEntityTicker<T> ticker) {
             this.blockEntity = blockEntity;
@@ -739,12 +882,17 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         public void tick() {
             if (!this.blockEntity.isRemoved() && this.blockEntity.hasLevel()) {
                 BlockPos pos = this.blockEntity.getBlockPos();
-                if (LevelChunk.this.isTicking(pos)) {
+                // MODIFIED for porting: lithium world.block_entity_ticking.world_border
+                // DirectBlockEntityTickInvokerMixin#cachedCanTickBlockEntity redirects LevelChunk#isTicking
+                if (this.lithium$canTickBlockEntity(pos)) {
                     try {
                         ProfilerFiller profiler = Profiler.get();
                         profiler.push(this::getType);
-                        BlockState blockState = LevelChunk.this.getBlockState(pos);
-                        if (this.blockEntity.getType().isValid(blockState)) {
+                        // MODIFIED for porting: lithium minimal_nonvanilla.world.block_entity_ticking.support_cache
+                        // DirectBlockEntityTickInvokerMixin#getCachedState / #cachedIsSupported - the block entity already
+                        // knows its cached block state and whether that state is valid for its type.
+                        BlockState blockState = this.blockEntity.getBlockState();
+                        if (((net.caffeinemc.mods.lithium.common.world.blockentity.SupportCache)this.blockEntity).lithium$isSupported()) {
                             this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
                             this.loggedInvalidBlockState = false;
                         } else if (!this.loggedInvalidBlockState) {
@@ -788,6 +936,56 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         public String toString() {
             return "Level ticker for " + this.getType() + "@" + this.getPos();
         }
+
+        // MODIFIED for porting: everything below was lithium's world.block_entity_ticking.world_border
+        // DirectBlockEntityTickInvokerMixin
+        private boolean lithium$canTickBlockEntity(final BlockPos pos) {
+            if (this.lithium$isInsideWorldBorder()) {
+                Level level = LevelChunk.this.getLevel();
+                if (level instanceof ServerLevel serverLevel) {
+                    return LevelChunk.this.getFullStatus().isOrAfter(FullChunkStatus.BLOCK_TICKING)
+                        && serverLevel.areEntitiesLoaded(ChunkPos.pack(pos));
+                }
+
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        private boolean lithium$isInsideWorldBorder() {
+            if (this.worldBorderState == (byte)0) {
+                this.lithium$startWorldBorderCaching();
+            }
+
+            int worldBorderState = this.worldBorderState;
+            if ((worldBorderState & 3) == 3) {
+                return (worldBorderState & 4) != 0;
+            }
+
+            return LevelChunk.this.getLevel().getWorldBorder().isWithinBounds(this.getPos());
+        }
+
+        private void lithium$startWorldBorderCaching() {
+            this.worldBorderState = (byte)1;
+            net.minecraft.world.level.border.WorldBorder worldBorder = LevelChunk.this.getLevel().getWorldBorder();
+            worldBorder.addListener(this);
+            boolean isStationary = worldBorder.getStatus() == net.minecraft.world.level.border.BorderStatus.STATIONARY;
+            if (worldBorder.isWithinBounds(this.getPos())) {
+                if (isStationary || worldBorder.getStatus() == net.minecraft.world.level.border.BorderStatus.GROWING) {
+                    this.worldBorderState |= (byte)6;
+                }
+            } else {
+                if (isStationary || worldBorder.getStatus() == net.minecraft.world.level.border.BorderStatus.SHRINKING) {
+                    this.worldBorderState |= (byte)2;
+                }
+            }
+        }
+
+        @Override
+        public void lithium$onWorldBorderShapeChange(final net.minecraft.world.level.border.WorldBorder worldBorder) {
+            this.worldBorderState = (byte)0;
+        }
     }
 
     public enum EntityCreationType {
@@ -801,7 +999,10 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
         void run(LevelChunk levelChunk);
     }
 
-    private static class RebindableTickingBlockEntityWrapper implements TickingBlockEntity {
+    // MODIFIED for porting: lithium.accesswidener widened access; lithium's world.block_entity_ticking.sleeping
+    // WrappedBlockEntityTickInvokerAccessor is implemented directly.
+    public static class RebindableTickingBlockEntityWrapper
+        implements TickingBlockEntity, net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor {
         private TickingBlockEntity ticker;
 
         private RebindableTickingBlockEntityWrapper(final TickingBlockEntity ticker) {
@@ -810,6 +1011,17 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource {
 
         private void rebind(final TickingBlockEntity ticker) {
             this.ticker = ticker;
+        }
+
+        // MODIFIED for porting: the next two methods were lithium's WrappedBlockEntityTickInvokerAccessor Mixin
+        @Override
+        public void callSetWrapped(final TickingBlockEntity wrapped) {
+            this.rebind(wrapped);
+        }
+
+        @Override
+        public TickingBlockEntity getWrapped() {
+            return this.ticker;
         }
 
         @Override

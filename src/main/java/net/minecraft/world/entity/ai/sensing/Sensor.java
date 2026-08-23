@@ -10,7 +10,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.targeting.TargetingConditions;
 
-public abstract class Sensor<E extends LivingEntity> {
+public abstract class Sensor<E extends LivingEntity> implements net.caffeinemc.mods.lithium.mixin.ai.useless_sensors.SensorAccessor { // MODIFIED for porting: lithium ai.useless_sensors SensorAccessor
     private static final int DEFAULT_SCAN_RATE = 20;
     private static final int DEFAULT_TARGETING_RANGE = 16;
     private static final TargetingConditions TARGET_CONDITIONS = TargetingConditions.forNonCombat().range(16.0);
@@ -28,6 +28,22 @@ public abstract class Sensor<E extends LivingEntity> {
         .ignoreInvisibilityTesting();
     private final int scanRate;
     private long timeToTick;
+
+    // MODIFIED for porting: the next three methods were lithium's ai.useless_sensors SensorAccessor Mixin
+    @Override
+    public long getTimeToTick() {
+        return this.timeToTick;
+    }
+
+    @Override
+    public int getSenseInterval() {
+        return this.scanRate;
+    }
+
+    @Override
+    public void setTimeToTick(final long lastSenseTime) {
+        this.timeToTick = lastSenseTime;
+    }
 
     public Sensor(final int scanRate) {
         this.scanRate = scanRate;

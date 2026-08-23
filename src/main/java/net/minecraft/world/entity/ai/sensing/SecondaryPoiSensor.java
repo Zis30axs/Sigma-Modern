@@ -21,6 +21,13 @@ public class SecondaryPoiSensor extends Sensor<Villager> {
     }
 
     protected void doTick(final ServerLevel level, final Villager body) {
+        // MODIFIED for porting: lithium ai.sensor.secondary_poi SecondaryPoiSensorMixin#skipUselessSense (HEAD, cancellable)
+        // - only farmers have a secondary POI, so the 9x5x9 block scan below is pointless for every other profession.
+        if (body.getVillagerData().profession().value().secondaryPoi().isEmpty()) {
+            body.getBrain().eraseMemory(MemoryModuleType.SECONDARY_JOB_SITE);
+            return;
+        }
+
         ResourceKey<Level> dimensionType = level.dimension();
         BlockPos center = body.blockPosition();
         List<GlobalPos> jobSites = Lists.newArrayList();

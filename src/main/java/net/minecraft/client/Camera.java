@@ -81,6 +81,11 @@ public class Camera implements TrackedWaypoint.Camera {
     private final Minecraft minecraft = Minecraft.getInstance();
 
     public void tick() {
+        // MODIFIED for porting: was sodium-extra's instant_sneak MixinCamera#noLerp (@Inject HEAD)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.INSTANT_SNEAK && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.instantSneak && this.entity != null) {
+            this.eyeHeight = this.entity.getEyeHeight();
+        }
+
         if (this.level != null && this.entity != null) {
             this.eyeHeightOld = this.eyeHeight;
             this.eyeHeight = this.eyeHeight + (this.entity.getEyeHeight() - this.eyeHeight) * 0.5F;
@@ -136,7 +141,20 @@ public class Camera implements TrackedWaypoint.Camera {
         if (this.entity instanceof LivingEntity livingEntity) {
             cameraState.entityRenderState.isLiving = true;
             cameraState.entityRenderState.isSleeping = livingEntity.isSleeping();
-            cameraState.entityRenderState.doesMobEffectBlockSky = livingEntity.hasEffect(MobEffects.BLINDNESS) || livingEntity.hasEffect(MobEffects.DARKNESS);
+            // MODIFIED for porting: sodium features.render.world.sky LevelRendererMixin#preRenderSky (@WrapOperation on the
+            // first LivingEntity#hasEffect call). Cancels sky rendering when the camera is submersed in a fluid, which
+            // prevents the sky from being visible through chunks culled by sodium's fog occlusion and fixes MC-152504.
+            // Caveat (matching Bedrock Edition): the sun, stars and moon are not visible while underwater.
+            // When updating sodium for a new game release, check for new ways the fog can be reduced in
+            // FogRenderer#setupFog(Camera, int, DeltaTracker, float, ClientLevel). Credit to bytzo for noticing the change
+            // in 1.18.2.
+            cameraState.entityRenderState.doesMobEffectBlockSky = net.minecraft.client.Minecraft.getInstance()
+                    .gameRenderer
+                    .mainCamera()
+                    .getFluidInCamera()
+                != net.minecraft.world.level.material.FogType.NONE
+                || livingEntity.hasEffect(MobEffects.BLINDNESS)
+                || livingEntity.hasEffect(MobEffects.DARKNESS);
             cameraState.entityRenderState.isDeadOrDying = livingEntity.isDeadOrDying();
             cameraState.entityRenderState.hurtDir = livingEntity.getHurtDir();
             cameraState.entityRenderState.hurtTime = livingEntity.hurtTime - cameraEntityPartialTicks;
@@ -179,13 +197,43 @@ public class Camera implements TrackedWaypoint.Camera {
     private Matrix4f createProjectionMatrixForCulling() {
         float fovForCulling = Math.max(this.fov, this.minecraft.options.fov().get().intValue());
         Matrix4f projection = new Matrix4f();
-        return projection.perspective(
+        projection.perspective(
             fovForCulling * (float) (Math.PI / 180.0),
             (float)this.minecraft.getWindow().getWidth() / this.minecraft.getWindow().getHeight(),
             0.05F,
             this.depthFar,
             RenderSystem.getDevice().getDeviceInfo().isZZeroToOne()
         );
+        // MODIFIED for porting: sodium core.render.frustum CameraMixin#editMatrix (RETURN, cancellable) - applies the same
+        // screen-warping the world rendering does, which fixes a bug causing nausea to not affect culling.
+        return sodium$applySpinningEffect(projection);
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's core.render.frustum CameraMixin#editMatrix.
+     */
+    private static Matrix4f sodium$applySpinningEffect(final Matrix4f projection) {
+        net.minecraft.client.renderer.GameRenderer gameRenderer = Minecraft.getInstance().gameRenderer;
+        net.caffeinemc.mods.sodium.mixin.core.render.frustum.GameRendererAccessor gameRendererAccessor =
+            (net.caffeinemc.mods.sodium.mixin.core.render.frustum.GameRendererAccessor)gameRenderer;
+        net.minecraft.client.player.LocalPlayer player = Minecraft.getInstance().player;
+        float worldPartialTicks = Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false);
+        float screenEffectScale = gameRenderer.gameRenderState().optionsRenderState.screenEffectScale;
+        float portalIntensity = Mth.lerp(worldPartialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
+        float nauseaIntensity = player.getEffectBlendFactor(net.minecraft.world.effect.MobEffects.NAUSEA, worldPartialTicks);
+        float spinningEffectIntensity = Math.max(portalIntensity, nauseaIntensity) * screenEffectScale * screenEffectScale;
+        if (spinningEffectIntensity > 0.0F) {
+            float skew = 5.0F / (spinningEffectIntensity * spinningEffectIntensity + 5.0F) - spinningEffectIntensity * 0.04F;
+            skew *= skew;
+            org.joml.Vector3f axis = new org.joml.Vector3f(0.0F, Mth.SQRT_OF_TWO / 2.0F, Mth.SQRT_OF_TWO / 2.0F);
+            float angle = (gameRendererAccessor.getSpinningEffectTime() + worldPartialTicks * gameRendererAccessor.getSpinningEffectSpeed())
+                * ((float)Math.PI / 180.0F);
+            projection.rotate(angle, axis);
+            projection.scale(1.0F / skew, 1.0F, 1.0F);
+            projection.rotate(-angle, axis);
+        }
+
+        return projection;
     }
 
     public Frustum getCullFrustum() {
@@ -196,7 +244,20 @@ public class Camera implements TrackedWaypoint.Camera {
         if (this.capturedFrustum != null && !this.captureFrustum) {
             this.cullFrustum = this.capturedFrustum;
         } else {
-            this.cullFrustum = new Frustum(modelViewMatrix, projectionMatrixForCulling);
+            // MODIFIED for porting: was iris's MixinCamera#iris$disableFrustum (@WrapOperation around `new Frustum`) -
+            // a shader pack can ask for frustum culling to be turned off entirely.
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                && net.irisshaders.iris.Iris.getPipelineManager()
+                    .getPipeline()
+                    .map(net.irisshaders.iris.pipeline.WorldRenderingPipeline::shouldDisableFrustumCulling)
+                    .orElse(false)) {
+                this.cullFrustum = new net.irisshaders.iris.shadows.frustum.fallback.NonCullingFrustum(
+                    modelViewMatrix, projectionMatrixForCulling
+                );
+            } else {
+                this.cullFrustum = new Frustum(modelViewMatrix, projectionMatrixForCulling);
+            }
+
             this.cullFrustum.prepare(cameraPos.x(), cameraPos.y(), cameraPos.z());
         }
 

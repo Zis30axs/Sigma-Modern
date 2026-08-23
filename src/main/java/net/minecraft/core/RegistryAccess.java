@@ -88,7 +88,9 @@ public interface RegistryAccess extends HolderLookup.Provider {
         }
     }
 
-    record RegistryEntry<T>(ResourceKey<? extends Registry<T>> key, Registry<T> value) {
+// MODIFIED for porting: iris.accesswidener declares `extendable class RegistryAccess$RegistryEntry`; a record cannot be
+    // extended, so it is only widened to public here - iris only needs to name the type.
+    public record RegistryEntry<T>(ResourceKey<? extends Registry<T>> key, Registry<T> value) {
         private static <T, R extends Registry<? extends T>> RegistryAccess.RegistryEntry<T> fromMapEntry(
             final Entry<? extends ResourceKey<? extends Registry<?>>, R> e
         ) {

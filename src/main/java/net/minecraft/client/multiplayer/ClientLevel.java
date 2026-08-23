@@ -138,7 +138,31 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.Cleaner<ClientLevel> {
+public class ClientLevel extends Level
+    implements BlockAndTintGetter,
+    CacheSlot.Cleaner<ClientLevel>,
+    net.caffeinemc.mods.lithium.common.client.ClientWorldAccessor, // MODIFIED for porting: lithium chunk.entity_class_groups
+    net.caffeinemc.mods.sodium.client.world.BiomeSeedProvider, // MODIFIED for porting: sodium core.world.biome ClientLevelMixin
+    net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder { // MODIFIED for porting: sodium core.world.map ClientLevelMixin
+    // MODIFIED for porting: sodium core.world.map ClientLevelMixin @Unique field - tracks which chunks have block and light
+    // data available, so the terrain renderer knows when a section can be meshed.
+    private final net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTracker sodium$chunkTracker =
+        new net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTracker();
+
+    @Override
+    public net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTracker sodium$getTracker() {
+        return java.util.Objects.requireNonNull(this.sodium$chunkTracker);
+    }
+
+    // MODIFIED for porting: sodium core.world.biome ClientLevelMixin @Unique field - the biome zoom seed is not otherwise
+    // reachable from the client level, but sodium's biome blending needs it.
+    private long sodium$biomeZoomSeed;
+
+    @Override
+    public long sodium$getBiomeZoomSeed() {
+        return this.sodium$biomeZoomSeed;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final Component DEFAULT_QUIT_MESSAGE = Component.translatable("multiplayer.status.quitting");
     private static final double FLUID_PARTICLE_SPAWN_OFFSET = 0.05;
@@ -148,6 +172,12 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
     private static final int RAIN_RADIUS = 10;
     private final EntityTickList tickingEntities = new EntityTickList();
     private final TransientEntitySectionManager<Entity> entityStorage = new TransientEntitySectionManager<>(Entity.class, new ClientLevel.EntityCallbacks());
+
+    // MODIFIED for porting: was lithium's chunk.entity_class_groups ClientLevelMixin
+    @Override
+    public TransientEntitySectionManager<Entity> lithium$getEntityManager() {
+        return this.entityStorage;
+    }
     private final ClientPacketListener connection;
     private final LevelExtractor levelExtractor;
     private final LevelEventHandler levelEventHandler;
@@ -260,6 +290,8 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
         this.serverSimulationDistance = serverSimulationDistance;
         this.environmentAttributes = this.addEnvironmentAttributeLayers(EnvironmentAttributeSystem.builder()).build();
         this.updateSkyBrightness();
+        // MODIFIED for porting: sodium core.world.biome ClientLevelMixin#captureSeed (<init> RETURN)
+        this.sodium$biomeZoomSeed = biomeZoomSeed;
     }
 
     private EnvironmentAttributeSystem.Builder addEnvironmentAttributeLayers(final EnvironmentAttributeSystem.Builder environmentAttributes) {
@@ -374,15 +406,21 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
                     ParticleOptions particleType = !fluid.is(FluidTags.LAVA) && !block.is(Blocks.MAGMA_BLOCK) && !CampfireBlock.isLitCampfire(block)
                         ? ParticleTypes.RAIN
                         : ParticleTypes.SMOKE;
-                    this.addParticle(
-                        particleType,
-                        rainParticlePosition.getX() + blockX,
-                        rainParticlePosition.getY() + particleY,
-                        rainParticlePosition.getZ() + blockZ,
-                        0.0,
-                        0.0,
-                        0.0
-                    );
+                    // MODIFIED for porting: was sodium-extra's particle MixinClientLevel#addRainSplashParticle
+                    // (@Redirect on ClientLevel#addParticle)
+                    if (!me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE
+                        || me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.particles
+                            && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.rainSplash) {
+                        this.addParticle(
+                            particleType,
+                            rainParticlePosition.getX() + blockX,
+                            rainParticlePosition.getY() + particleY,
+                            rainParticlePosition.getZ() + blockZ,
+                            0.0,
+                            0.0,
+                            0.0
+                        );
+                    }
                 }
             }
 
@@ -503,6 +541,8 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
     }
 
     public void unload(final LevelChunk levelChunk) {
+        // MODIFIED for porting: sodium core.world.map ClientLevelMixin#sodium$trackChunkUnload (HEAD)
+        this.sodium$chunkTracker.onChunkStatusRemoved(levelChunk.getPos().x(), levelChunk.getPos().z(), net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus.FLAG_ALL);
         levelChunk.clearAllBlockEntities();
         this.chunkSource.getLightEngine().setLightEnabled(levelChunk.getPos(), false);
         this.entityStorage.stopTicking(levelChunk.getPos());
@@ -611,7 +651,12 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
             this.addParticle(new BlockParticleOption(ParticleTypes.BLOCK_MARKER, state), x + 0.5, y + 0.5, z + 0.5, 0.0, 0.0, 0.0);
         }
 
-        if (!state.isCollisionShapeFullBlock(this, pos)) {
+        // MODIFIED for porting: lithium client_tick.particle.biome_particles ClientLevelMixin#evaluateChanceEarly
+        // (@Redirect) - roll the random chance against the largest registered ambient particle probability before
+        // doing the biome lookup below. AmbientParticle#canSpawn scales its own probability by the same maximum, so
+        // the combined chance is unchanged.
+        float lithium$maximumParticleChance = Float.intBitsToFloat(net.caffeinemc.mods.lithium.common.client.SharedFields.MAXIMUM_BIOME_PARTICLE_CHANCE.get());
+        if (!(this.random.nextFloat() > lithium$maximumParticleChance || state.isCollisionShapeFullBlock(this, pos))) {
             for (AmbientParticle particle : this.environmentAttributes().getValue(EnvironmentAttributes.AMBIENT_PARTICLES, pos)) {
                 if (particle.canSpawn(this.random)) {
                     this.addParticle(
@@ -1081,6 +1126,13 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
 
     @Override
     public void addDestroyBlockEffect(final BlockPos pos, final BlockState blockState) {
+        // MODIFIED for porting: was sodium-extra's particle MixinClientLevel#addBlockBreakParticles (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE
+            && (!me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.particles
+                || !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.blockBreak)) {
+            return;
+        }
+
         if (!blockState.isAir() && blockState.shouldSpawnTerrainParticles()) {
             VoxelShape shape = blockState.getShape(this, pos);
             double density = 0.25;
@@ -1118,6 +1170,14 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
     }
 
     public void addBreakingBlockEffect(final BlockPos pos, final Direction direction) {
+        // MODIFIED for porting: was sodium-extra's particle MixinClientLevel#addBlockBreakingParticles
+        // (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PARTICLE
+            && (!me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.particles
+                || !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().particleSettings.blockBreaking)) {
+            return;
+        }
+
         BlockState blockState = this.getBlockState(pos);
         if (blockState.getRenderShape() != RenderShape.INVISIBLE && blockState.shouldSpawnTerrainParticles()) {
             int x = pos.getX();
@@ -1281,6 +1341,15 @@ public class ClientLevel extends Level implements BlockAndTintGetter, CacheSlot.
         }
 
         public double getHorizonHeight(final LevelHeightAccessor level) {
+            // MODIFIED for porting: was iris's sky MixinClientLevelData_DisableVoidPlane#iris$getHorizonHeight
+            // (@Inject HEAD, cancellable) - no void plane while the camera is submerged, so the fog illusion in oceans and
+            // lava is not broken.
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                && net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera().getFluidInCamera()
+                    != net.minecraft.world.level.material.FogType.NONE) {
+                return Double.NEGATIVE_INFINITY;
+            }
+
             return this.isFlat ? level.getMinY() : 63.0;
         }
 

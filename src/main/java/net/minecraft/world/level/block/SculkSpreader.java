@@ -33,7 +33,16 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 
-public class SculkSpreader {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.sculk_catalyst SculkSpreaderMixin lets a parked
+// sculk catalyst be woken up as soon as new charge cursors appear.
+public class SculkSpreader implements net.caffeinemc.mods.lithium.common.block.entity.sleeping_sculk.GameEventListenerWithCallback {
+    private Runnable lithium$listener;
+
+    @Override
+    public void lithium$setGameEventCallback(final Runnable listener) {
+        this.lithium$listener = listener;
+    }
+
     public static final int MAX_GROWTH_RATE_RADIUS = 24;
     public static final int MAX_CHARGE = 1000;
     public static final float MAX_DECAY_FACTOR = 0.5F;
@@ -128,6 +137,11 @@ public class SculkSpreader {
             int currentCharge = Math.min(charge, 1000);
             this.addCursor(new SculkSpreader.ChargeCursor(startPos, currentCharge));
             charge -= currentCharge;
+        }
+
+        // MODIFIED for porting: lithium sculk_catalyst SculkSpreaderMixin#listenToCursorAddition (RETURN)
+        if (this.lithium$listener != null) {
+            this.lithium$listener.run();
         }
     }
 

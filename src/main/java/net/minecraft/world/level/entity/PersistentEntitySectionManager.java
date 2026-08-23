@@ -29,7 +29,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
 
-public class PersistentEntitySectionManager<T extends EntityAccess> implements AutoCloseable {
+public class PersistentEntitySectionManager<T extends EntityAccess> implements AutoCloseable, net.caffeinemc.mods.lithium.mixin.util.accessors.PersistentEntitySectionManagerAccessor<T>,
+    net.caffeinemc.mods.lithium.mixin.util.entity_movement_tracking.PersistentEntitySectionManagerAccessor<T>,
+    net.caffeinemc.mods.lithium.mixin.minimal_nonvanilla.spawning.PersistentEntitySectionManagerAccessor<T> { // MODIFIED for porting: lithium minimal_nonvanilla.spawning (same accessor) // MODIFIED for porting: lithium PersistentEntitySectionManagerAccessor
     private static final Logger LOGGER = LogUtils.getLogger();
     private final Set<UUID> knownUuids = Sets.newHashSet();
     private final LevelCallback<T> callbacks;
@@ -237,6 +239,12 @@ public class PersistentEntitySectionManager<T extends EntityAccess> implements A
         }
     }
 
+    // MODIFIED for porting: was lithium's PersistentEntitySectionManagerAccessor accessor Mixin
+    @Override
+    public EntitySectionStorage<T> getCache() {
+        return this.sectionStorage;
+    }
+
     public void tick() {
         this.processPendingLoads();
         this.processUnloads();
@@ -367,15 +375,40 @@ public class PersistentEntitySectionManager<T extends EntityAccess> implements A
         return this.visibleEntityStorage.count();
     }
 
-    private class Callback implements EntityInLevelCallback {
+    // MODIFIED for porting: lithium util.entity_movement_tracking ServerEntityManagerListenerMixin
+    private class Callback implements EntityInLevelCallback, net.caffeinemc.mods.lithium.common.tracking.entity.ToggleableMovementTracker {
         private final T entity;
         private long currentSectionKey;
         private EntitySection<T> currentSection;
+        // MODIFIED for porting: lithium ServerEntityManagerListenerMixin @Unique field
+        private int lithium$notificationMask;
 
         private Callback(final T entity, final long currentSectionKey, final EntitySection<T> currentSection) {
             this.entity = entity;
             this.currentSectionKey = currentSectionKey;
             this.currentSection = currentSection;
+            // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#init - also fixes upstream issue #284
+            // (summoned inventory minecarts not notifying hoppers immediately).
+            this.lithium$notificationMask = net.caffeinemc.mods.lithium.common.tracking.entity.MovementTrackerHelper.getNotificationMask(
+                (net.minecraft.world.entity.Entity)this.entity
+            );
+            this.lithium$notifyMovementListeners();
+        }
+
+        // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#notifyMovementListeners
+        private void lithium$notifyMovementListeners() {
+            if (this.lithium$notificationMask != 0) {
+                ((net.caffeinemc.mods.lithium.common.tracking.entity.EntityMovementTrackerSection)this.currentSection)
+                    .lithium$trackEntityMovement(this.lithium$notificationMask, ((net.minecraft.world.entity.Entity)this.entity).level().getGameTime());
+            }
+        }
+
+        // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#lithium$setNotificationMask
+        @Override
+        public int lithium$setNotificationMask(final int notificationMask) {
+            int oldNotificationMask = this.lithium$notificationMask;
+            this.lithium$notificationMask = notificationMask;
+            return oldNotificationMask;
         }
 
         @Override
@@ -392,10 +425,17 @@ public class PersistentEntitySectionManager<T extends EntityAccess> implements A
                 PersistentEntitySectionManager.this.removeSectionIfEmpty(this.currentSectionKey, this.currentSection);
                 EntitySection<T> newSection = PersistentEntitySectionManager.this.sectionStorage.getOrCreateSection(newSectionPos);
                 newSection.add(this.entity);
+                // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#onAddEntity, injected directly after
+                // EntitySection#add. At this point `currentSection` is still the section the entity came from, so this
+                // notifies the *old* section; the RETURN injection below notifies the new one.
+                this.lithium$notifyMovementListeners();
                 this.currentSection = newSection;
                 this.currentSectionKey = newSectionPos;
                 this.updateStatus(previousStatus, newSection.getStatus());
             }
+
+            // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#updateEntityTrackerEngine (RETURN of onMove)
+            this.lithium$notifyMovementListeners();
         }
 
         private void updateStatus(final Visibility previousStatus, final Visibility newStatus) {
@@ -430,6 +470,8 @@ public class PersistentEntitySectionManager<T extends EntityAccess> implements A
 
         @Override
         public void onRemove(final Entity.RemovalReason reason) {
+            // MODIFIED for porting: lithium ServerEntityManagerListenerMixin#onRemoveEntity (HEAD of onRemove)
+            this.lithium$notifyMovementListeners();
             if (!this.currentSection.remove(this.entity)) {
                 PersistentEntitySectionManager.LOGGER
                     .warn("Entity {} wasn't found in section {} (destroying due to {})", this.entity, SectionPos.of(this.currentSectionKey), reason);

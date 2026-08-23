@@ -48,6 +48,13 @@ public class ItemFrameRenderer<T extends ItemFrame> extends EntityRenderer<T, It
         final ItemFrameRenderState state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera
     ) {
         super.submit(state, poseStack, submitNodeCollector, camera);
+        // MODIFIED for porting: was sodium-extra's render.entity MixinItemFrameEntityRenderer#render
+        // (@Inject at INVOKE EntityRenderer#submit, shift AFTER, cancellable) - the name tag that the super call submits is
+        // kept, only the frame itself is skipped.
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.itemFrame) {
+            return;
+        }
+
         poseStack.pushPose();
         Direction direction = state.direction;
         Vec3 renderOffset = this.getRenderOffset(state);
@@ -108,6 +115,12 @@ public class ItemFrameRenderer<T extends ItemFrame> extends EntityRenderer<T, It
     }
 
     protected boolean shouldShowName(final T entity, final double distanceToCameraSq) {
+        // MODIFIED for porting: was sodium-extra's render.entity MixinItemFrameEntityRenderer#hasLabel
+        // (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.itemFrameNameTag) {
+            return false;
+        }
+
         return !Minecraft.getInstance().gui.hud.isHidden()
             && this.entityRenderDispatcher.crosshairPickEntity == entity
             && entity.getItem().getCustomName() != null;

@@ -15,7 +15,8 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.PointerBuffer;
 
 @OnlyIn(Dist.CLIENT)
-public interface RenderPassBackend {
+// MODIFIED for porting: iris injects this interface into the class (loom:injected_interfaces in fabric.mod.json)
+public interface RenderPassBackend extends net.irisshaders.iris.mixinterface.RenderPassInterface {
     void pushDebugGroup(final Supplier<String> label);
 
     void popDebugGroup();

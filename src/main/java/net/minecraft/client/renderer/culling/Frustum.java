@@ -10,7 +10,24 @@ import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 
 @OnlyIn(Dist.CLIENT)
-public class Frustum {
+// MODIFIED for porting: implements sodium's ViewportProvider (core.render.frustum FrustumMixin)
+public class Frustum implements net.caffeinemc.mods.sodium.client.render.viewport.ViewportProvider,
+    net.caffeinemc.mods.sodium.mixin.core.render.world.FrustumAccessor { // MODIFIED for porting: sodium FrustumAccessor
+    // MODIFIED for porting: was sodium's core.render.world FrustumAccessor @Accessor("matrix")
+    @Override
+    public org.joml.Matrix4f sodium$getMatrix() {
+        return this.matrix;
+    }
+
+    // MODIFIED for porting: was sodium's core.render.frustum FrustumMixin
+    @Override
+    public net.caffeinemc.mods.sodium.client.render.viewport.Viewport sodium$createViewport() {
+        return new net.caffeinemc.mods.sodium.client.render.viewport.Viewport(
+            new net.caffeinemc.mods.sodium.client.render.viewport.frustum.SimpleFrustum(this.intersection),
+            new org.joml.Vector3d(this.camX, this.camY, this.camZ)
+        );
+    }
+
     public static final int OFFSET_STEP = 4;
     private final FrustumIntersection intersection = new FrustumIntersection();
     private final Matrix4f matrix = new Matrix4f();

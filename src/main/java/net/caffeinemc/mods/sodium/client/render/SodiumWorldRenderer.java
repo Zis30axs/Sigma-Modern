@@ -1,0 +1,628 @@
+package net.caffeinemc.mods.sodium.client.render;
+
+import com.mojang.blaze3d.textures.GpuSampler;
+import com.mojang.blaze3d.vertex.PoseStack;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import net.caffeinemc.mods.sodium.client.SodiumClientMod;
+import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import net.caffeinemc.mods.sodium.client.render.chunk.RenderSectionManager;
+import net.caffeinemc.mods.sodium.client.render.chunk.UniformBufferManager;
+import net.caffeinemc.mods.sodium.client.render.chunk.lists.ChunkRenderList;
+import net.caffeinemc.mods.sodium.client.render.chunk.lists.SortedRenderLists;
+import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTracker;
+import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
+import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
+import net.caffeinemc.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
+import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.SortBehavior;
+import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.trigger.CameraMovement;
+import net.caffeinemc.mods.sodium.client.render.viewport.CameraTransform;
+import net.caffeinemc.mods.sodium.client.render.viewport.Viewport;
+import net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation;
+import net.caffeinemc.mods.sodium.client.util.FogParameters;
+import net.caffeinemc.mods.sodium.client.util.NativeBuffer;
+import net.caffeinemc.mods.sodium.client.world.LevelRendererExtension;
+import net.caffeinemc.mods.sodium.mixin.core.render.world.EntityRendererAccessor;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.level.LevelRenderState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.BlockDestructionProgress;
+import net.minecraft.util.Mth;
+import net.minecraft.util.profiling.Profiler;
+import net.minecraft.util.profiling.ProfilerFiller;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Vector3d;
+import org.joml.Vector4f;
+import org.jspecify.annotations.Nullable;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.SortedSet;
+import java.util.function.Consumer;
+
+/**
+ * Provides an extension to vanilla's {@link LevelRenderer}.
+ */
+public class SodiumWorldRenderer implements net.irisshaders.iris.mixinterface.ShadowRenderListAccess { // MODIFIED for porting: iris compat.sodium MixinSodiumWorldRenderer
+    /**
+     * MODIFIED for porting: iris compat.sodium MixinSodiumWorldRenderer @Unique fields (its ShadowRenderListAccess
+     * implementation) - the camera/fog/cull state the shadow pass uses, swapped in and out around it and forwarded to the
+     * section manager and the uniform buffer manager.
+     * <p>
+     * Upstream also declares a {@code lastSunAngle} field for its {@code iris$forceChunkGraphRebuildInShadowPass} redirect;
+     * see {@code setupTerrain} below for why that redirect never runs, which makes the field dead. It is not ported.
+     */
+    private boolean iris$shadowScopeActive;
+
+    private Vector3d iris$regularLastCameraPos;
+
+    private double iris$regularLastCameraPitch;
+
+    private double iris$regularLastCameraYaw;
+
+    private net.caffeinemc.mods.sodium.client.util.FogParameters iris$regularLastFogParameters;
+
+    private Matrix4f iris$regularCullMatrix;
+
+    private Vector3d iris$shadowLastCameraPos;
+
+    private double iris$shadowLastCameraPitch;
+
+    private double iris$shadowLastCameraYaw;
+
+    private net.caffeinemc.mods.sodium.client.util.FogParameters iris$shadowLastFogParameters = net.caffeinemc.mods.sodium.client.util.FogParameters.NONE;
+
+    private Matrix4f iris$shadowCullMatrix;
+
+    @Override
+    public void iris$beginShadowRenderListScope() {
+        if (!this.iris$shadowScopeActive) {
+            this.iris$regularLastCameraPos = this.lastCameraPos;
+            this.iris$regularLastCameraPitch = this.lastCameraPitch;
+            this.iris$regularLastCameraYaw = this.lastCameraYaw;
+            this.iris$regularLastFogParameters = this.lastFogParameters;
+            this.iris$regularCullMatrix = this.cullMatrix;
+            this.iris$shadowScopeActive = true;
+            this.lastCameraPos = this.iris$shadowLastCameraPos;
+            this.lastCameraPitch = this.iris$shadowLastCameraPitch;
+            this.lastCameraYaw = this.iris$shadowLastCameraYaw;
+            this.lastFogParameters = this.iris$shadowLastFogParameters == null ? net.caffeinemc.mods.sodium.client.util.FogParameters.NONE : this.iris$shadowLastFogParameters;
+            this.cullMatrix = this.iris$shadowCullMatrix;
+        }
+
+        if (this.renderSectionManager instanceof net.irisshaders.iris.mixinterface.ShadowRenderListAccess shadowRenderListAccess) {
+            shadowRenderListAccess.iris$beginShadowRenderListScope();
+        }
+
+        ((net.irisshaders.iris.mixinterface.ShadowRenderListAccess)this.uniformBufferManager).iris$beginShadowRenderListScope();
+    }
+
+    @Override
+    public void iris$endShadowRenderListScope() {
+        if (this.renderSectionManager instanceof net.irisshaders.iris.mixinterface.ShadowRenderListAccess shadowRenderListAccess) {
+            shadowRenderListAccess.iris$endShadowRenderListScope();
+        }
+
+        ((net.irisshaders.iris.mixinterface.ShadowRenderListAccess)this.uniformBufferManager).iris$endShadowRenderListScope();
+
+        if (this.iris$shadowScopeActive) {
+            this.iris$shadowLastCameraPos = this.lastCameraPos;
+            this.iris$shadowLastCameraPitch = this.lastCameraPitch;
+            this.iris$shadowLastCameraYaw = this.lastCameraYaw;
+            this.iris$shadowLastFogParameters = this.lastFogParameters;
+            this.iris$shadowCullMatrix = this.cullMatrix;
+            this.lastCameraPos = this.iris$regularLastCameraPos;
+            this.lastCameraPitch = this.iris$regularLastCameraPitch;
+            this.lastCameraYaw = this.iris$regularLastCameraYaw;
+            this.lastFogParameters = this.iris$regularLastFogParameters == null ? net.caffeinemc.mods.sodium.client.util.FogParameters.NONE : this.iris$regularLastFogParameters;
+            this.cullMatrix = this.iris$regularCullMatrix;
+            this.iris$regularLastCameraPos = null;
+            this.iris$regularLastFogParameters = null;
+            this.iris$regularCullMatrix = null;
+            this.iris$shadowScopeActive = false;
+        }
+    }
+
+    private final Minecraft client;
+
+    private ClientLevel level;
+    private int renderDistance;
+
+    private Vector3d lastCameraPos;
+    private double lastCameraPitch, lastCameraYaw;
+    private FogParameters lastFogParameters = FogParameters.NONE;
+
+    /**
+     * This matrix is not the same one used for rendering! It does not correspond to anything specific, other than guaranteeing it'll change with rotation.
+     */
+    private Matrix4f cullMatrix;
+
+    private boolean useEntityCulling;
+    private boolean useTranslucencySorting;
+
+    private RenderSectionManager renderSectionManager;
+    private UniformBufferManager uniformBufferManager;
+
+    /**
+     * @return The SodiumWorldRenderer based on the current dimension
+     */
+    public static SodiumWorldRenderer instance() {
+        var instance = instanceNullable();
+
+        if (instance == null) {
+            throw new IllegalStateException("No renderer attached to active level");
+        }
+
+        return instance;
+    }
+
+    /**
+     * @return The SodiumWorldRenderer based on the current dimension, or null if none is attached
+     */
+    public static SodiumWorldRenderer instanceNullable() {
+        var level = Minecraft.getInstance().levelRenderer;
+
+        if (level instanceof LevelRendererExtension extension) {
+            return extension.sodium$getWorldRenderer();
+        }
+
+        return null;
+    }
+
+    public SodiumWorldRenderer(Minecraft client) {
+        this.client = client;
+    }
+
+    public void setLevel(ClientLevel level) {
+        // Check that the level is actually changing
+        if (this.level == level) {
+            return;
+        }
+
+        // If we have a level is already loaded, unload the renderer
+        if (this.level != null) {
+            this.unloadLevel();
+        }
+
+        // If we're loading a new level, load the renderer
+        if (level != null) {
+            this.loadLevel(level);
+        }
+    }
+
+    private void loadLevel(ClientLevel level) {
+        this.level = level;
+
+        this.initRenderer();
+    }
+
+    private void deleteRendererState() {
+        if (this.renderSectionManager != null) {
+            this.renderSectionManager.destroy();
+            this.renderSectionManager = null;
+        }
+        if (this.uniformBufferManager != null) {
+            this.uniformBufferManager.delete();
+            this.uniformBufferManager = null;
+        }
+    }
+
+    private void unloadLevel() {
+        this.deleteRendererState();
+        this.level = null;
+    }
+
+    /**
+     * @return The number of chunk renders which are visible in the current camera's frustum
+     */
+    public int getVisibleChunkCount() {
+        return this.renderSectionManager.getVisibleChunkCount();
+    }
+
+    /**
+     * Notifies the chunk renderer that the graph scene has changed and should be re-computed.
+     */
+    public void scheduleTerrainUpdate() {
+        // MODIFIED for porting: was iris's compat.sodium MixinSodiumWorldRenderer#iris$skipShadowTerrainUpdate
+        // (@Inject HEAD, cancellable)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shadows.ShadowRenderingState.areShadowsCurrentlyBeingRendered()) {
+            return;
+        }
+
+        // BUG: seems to be called before init
+        if (this.renderSectionManager != null) {
+            this.renderSectionManager.markGraphDirty();
+        }
+    }
+
+    /**
+     * @return True if no chunks are pending rebuilds
+     */
+    public boolean isTerrainRenderComplete() {
+        return this.renderSectionManager.getBuilder().isBuildQueueEmpty();
+    }
+
+    public void updateFogColor(Vector4f fogColor) {
+        this.lastFogParameters = new FogParameters(fogColor, this.lastFogParameters);
+    }
+
+    /**
+     * Called prior to any chunk rendering in order to update necessary state.
+     */
+    public void setupTerrain(Camera camera,
+                             Viewport viewport,
+                             FogParameters fogParameters,
+                             boolean useOcclusionCulling,
+                             boolean updateChunksImmediately,
+                             Matrix4f cullMatrix) {
+        NativeBuffer.reclaim(false);
+
+        this.useEntityCulling = SodiumClientMod.options().performance.useEntityCulling;
+        this.processChunkEvents();
+
+        if (this.client.options.getEffectiveRenderDistance() != this.renderDistance) {
+            this.reload();
+        }
+
+
+        ProfilerFiller profiler = Profiler.get();
+        profiler.push("camera_setup");
+
+        LocalPlayer player = this.client.player;
+
+        if (player == null) {
+            throw new IllegalStateException("Client instance has no active player entity");
+        }
+
+        Vec3 posRaw = camera.position();
+        Vector3d pos = new Vector3d(posRaw.x(), posRaw.y(), posRaw.z());
+        float pitch = camera.xRot();
+        float yaw = camera.yRot();
+
+        if (this.lastCameraPos == null) {
+            this.lastCameraPos = pos;
+        }
+        if (this.cullMatrix == null) {
+            this.cullMatrix = new Matrix4f(cullMatrix);
+        }
+        boolean cameraLocationChanged = !pos.equals(this.lastCameraPos);
+        boolean fogDistanceChanged = fogParameters.cullDistance() != this.lastFogParameters.cullDistance();
+        boolean cameraAngleChanged = pitch != this.lastCameraPitch || yaw != this.lastCameraYaw;
+        boolean cameraProjectionChanged = !cullMatrix.equals(this.cullMatrix, 0.0001f);
+
+        this.cullMatrix.set(cullMatrix);
+
+        this.lastCameraPitch = pitch;
+        this.lastCameraYaw = yaw;
+
+        if (cameraLocationChanged || fogDistanceChanged || cameraAngleChanged || cameraProjectionChanged) {
+            this.renderSectionManager.notifyChangedCamera();
+        }
+
+        this.lastFogParameters = fogParameters;
+
+        this.renderSectionManager.prepareFrame(pos);
+        this.uniformBufferManager.prepareFrame();
+
+        if (cameraLocationChanged) {
+            profiler.popPush("translucent_triggering");
+
+            this.renderSectionManager.processGFNIMovement(new CameraMovement(this.lastCameraPos, pos));
+            this.lastCameraPos = pos;
+        }
+
+        int maxChunkUpdates = updateChunksImmediately ? this.renderDistance : 1;
+
+        for (int i = 0; i < maxChunkUpdates; i++) {
+            this.renderSectionManager.prepareRender();
+
+            profiler.popPush("chunk_render_lists");
+
+            this.renderSectionManager.prepareRenderTrees(viewport, fogParameters, useOcclusionCulling);
+
+            profiler.popPush("chunk_update");
+
+            this.renderSectionManager.cleanupAndFlip(uniformBufferManager);
+            this.renderSectionManager.updateChunks(viewport, updateChunksImmediately);
+
+            profiler.popPush("chunk_upload");
+
+            this.renderSectionManager.processChunkBuilds(viewport, this.uniformBufferManager);
+
+            /*
+              MODIFIED for porting: iris has two injections on this single call - #iris$forceChunkGraphRebuildInShadowPass
+              (@Redirect, ordinal 0: return true when the sun angle changed during the shadow pass) and #iris$forceEndGraphRebuild
+              (@WrapOperation: return false during the shadow pass, with the note "TODO: Detect when the sun/moon isn't moving").
+              MixinExtras composes a @WrapOperation *around* an existing @Redirect, so the wrapper is the outer one and
+              short-circuits before the redirect can run: during the shadow pass the result is always false, and the redirect's
+              sun-angle detection is unreachable. That effective behaviour is what is ported here; upstream's own TODO confirms
+              the detection is still considered missing.
+            */
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shadows.ShadowRenderingState.areShadowsCurrentlyBeingRendered()) {
+                break;
+            }
+
+            if (!this.renderSectionManager.needsUpdate()) {
+                break;
+            }
+        }
+
+        profiler.popPush("chunk_render_lists");
+
+        this.renderSectionManager.finalizeRenderLists(camera, viewport, fogParameters, updateChunksImmediately);
+
+        profiler.popPush("chunk_render_tick");
+
+        this.renderSectionManager.tickVisibleRenders();
+
+        profiler.pop();
+
+        Entity.setViewScale(Mth.clamp((double) this.client.options.getEffectiveRenderDistance() / 8.0D, 1.0D, 2.5D) * this.client.options.entityDistanceScaling().get());
+    }
+
+    private void processChunkEvents() {
+        this.renderSectionManager.beforeSectionUpdates();
+        var tracker = ChunkTrackerHolder.get(this.level);
+        tracker.forEachEvent(this.renderSectionManager::onChunkAdded, this.renderSectionManager::onChunkRemoved);
+    }
+
+    /**
+     * Performs a render pass for the given {@link RenderType} and draws all visible chunks for it.
+     */
+    public void drawChunkLayer(ChunkSectionLayerGroup group, ChunkRenderMatrices matrices, double x, double y, double z, GpuSampler terrainSampler) {
+        if (group == ChunkSectionLayerGroup.OPAQUE) {
+            this.renderLayer(matrices, DefaultTerrainRenderPasses.SOLID, x, y, z, this.lastFogParameters, terrainSampler);
+            this.renderLayer(matrices, DefaultTerrainRenderPasses.CUTOUT, x, y, z, this.lastFogParameters, terrainSampler);
+        } else if (group == ChunkSectionLayerGroup.TRANSLUCENT) {
+            this.renderLayer(matrices, DefaultTerrainRenderPasses.TRANSLUCENT, x, y, z, this.lastFogParameters, terrainSampler);
+        }
+    }
+
+    public void renderLayer(ChunkRenderMatrices matrices, TerrainRenderPass pass, double x, double y, double z, FogParameters fogParameters, GpuSampler terrainSampler) {
+        this.uniformBufferManager.update(matrices, fogParameters);
+
+        this.renderSectionManager.getChunkRenderer().render(matrices, this.renderSectionManager.getRenderLists(), pass,
+                new CameraTransform(x, y, z), fogParameters, this.useTranslucencySorting,
+                terrainSampler, this.uniformBufferManager.getUniformBuffer(), this.uniformBufferManager.getSectionTimeInfo());
+    }
+
+    public void reload() {
+        if (this.level == null) {
+            return;
+        }
+
+        this.initRenderer();
+    }
+
+    public void endFrame() {
+        if (this.uniformBufferManager != null) {
+            this.uniformBufferManager.endFrame();
+        }
+    }
+
+    private void initRenderer() {
+        this.deleteRendererState();
+
+        // translucency sorting can be disabled in development environments by setting the debug option in the config file
+        this.useTranslucencySorting = !PlatformRuntimeInformation.getInstance().isDevelopmentEnvironment() || SodiumClientMod.options().debug.terrainSortingEnabled;
+        var sortBehavior = this.useTranslucencySorting ? SortBehavior.DYNAMIC_DEFER_NEARBY_ZERO_FRAMES : SortBehavior.OFF;
+
+        this.renderDistance = this.client.options.getEffectiveRenderDistance();
+
+        this.renderSectionManager = new RenderSectionManager(this.level, this.renderDistance, sortBehavior);
+        this.uniformBufferManager = new UniformBufferManager(this.level, this.renderDistance);
+
+        var tracker = ChunkTrackerHolder.get(this.level);
+        ChunkTracker.forEachChunk(tracker.getReadyChunks(), this.renderSectionManager::onChunkAdded);
+    }
+
+    public void extractBlockEntities(Camera camera, float tickDelta, Long2ObjectMap<SortedSet<BlockDestructionProgress>> progression, LevelRenderState levelRenderState) {
+        PoseStack stack = new PoseStack();
+
+        SortedRenderLists renderLists = this.renderSectionManager.getRenderLists();
+        Iterator<ChunkRenderList> renderListIterator = renderLists.iterator();
+
+        while (renderListIterator.hasNext()) {
+            var renderList = renderListIterator.next();
+
+            var renderRegion = renderList.getRegion();
+            var renderSectionIterator = renderList.sectionsWithEntitiesIterator();
+
+            if (renderSectionIterator == null) {
+                continue;
+            }
+
+            while (renderSectionIterator.hasNext()) {
+                var renderSectionId = renderSectionIterator.nextByteAsInt();
+
+                var blockEntities = renderRegion.getCulledBlockEntities(renderSectionId);
+
+                if (blockEntities == null) {
+                    continue;
+                }
+
+                for (BlockEntity blockEntity : blockEntities) {
+                    this.extractBlockEntity(blockEntity, stack, camera, tickDelta, progression, levelRenderState, false);
+                }
+            }
+        }
+
+        for (var renderSection : this.renderSectionManager.getSectionsWithGlobalEntities()) {
+            var blockEntities = renderSection.getRegion().getGlobalBlockEntities(renderSection.getSectionIndex());
+
+            if (blockEntities == null) {
+                continue;
+            }
+
+            for (var blockEntity : blockEntities) {
+                this.extractBlockEntity(blockEntity, stack, camera, tickDelta, progression, levelRenderState, true);
+            }
+        }
+    }
+
+    private void extractBlockEntity(BlockEntity blockEntity, PoseStack poseStack, Camera camera, float tickDelta, Long2ObjectMap<SortedSet<BlockDestructionProgress>> progression, LevelRenderState levelRenderState, boolean global) {
+        BlockPos blockPos = blockEntity.getBlockPos();
+        SortedSet<BlockDestructionProgress> sortedSet = progression.get(blockPos.asLong());
+        ModelFeatureRenderer.CrumblingOverlay crumblingOverlay;
+        if (sortedSet != null && !sortedSet.isEmpty()) {
+            poseStack.pushPose();
+            poseStack.translate(blockPos.getX() - camera.position().x, blockPos.getY() - camera.position().y, blockPos.getZ() - camera.position().z);
+            crumblingOverlay = new ModelFeatureRenderer.CrumblingOverlay(sortedSet.last().getProgress(), poseStack.last());
+            poseStack.popPose();
+        } else {
+            crumblingOverlay = null;
+        }
+
+        BlockEntityRenderState blockEntityRenderState = Minecraft.getInstance().getBlockEntityRenderDispatcher().tryExtractRenderState(blockEntity, tickDelta, crumblingOverlay, global);
+        if (blockEntityRenderState != null) {
+            levelRenderState.blockEntityRenderStates.add(blockEntityRenderState);
+        }
+    }
+
+    public void iterateVisibleBlockEntities(Consumer<BlockEntity> blockEntityConsumer) {
+        SortedRenderLists renderLists = this.renderSectionManager.getRenderLists();
+        Iterator<ChunkRenderList> renderListIterator = renderLists.iterator();
+
+        while (renderListIterator.hasNext()) {
+            var renderList = renderListIterator.next();
+
+            var renderRegion = renderList.getRegion();
+            var renderSectionIterator = renderList.sectionsWithEntitiesIterator();
+
+            if (renderSectionIterator == null) {
+                continue;
+            }
+
+            while (renderSectionIterator.hasNext()) {
+                var renderSectionId = renderSectionIterator.nextByteAsInt();
+                var blockEntities = renderRegion.getCulledBlockEntities(renderSectionId);
+
+                if (blockEntities == null) {
+                    continue;
+                }
+
+                for (BlockEntity blockEntity : blockEntities) {
+                    blockEntityConsumer.accept(blockEntity);
+                }
+            }
+        }
+
+        for (var renderSection : this.renderSectionManager.getSectionsWithGlobalEntities()) {
+            var blockEntities = renderSection.getRegion().getGlobalBlockEntities(renderSection.getSectionIndex());
+
+            if (blockEntities == null) {
+                continue;
+            }
+
+            for (BlockEntity blockEntity : blockEntities) {
+                blockEntityConsumer.accept(blockEntity);
+            }
+        }
+    }
+
+    // the volume of a section multiplied by the number of sections to be checked at most
+    private static final double MAX_ENTITY_CHECK_VOLUME = 16 * 16 * 16 * 50;
+
+    /**
+     * Returns whether the entity intersects with any visible chunks in the graph.
+     * <p>
+     * Note that this method assumes the entity is within the frustum. It does not perform a frustum check.
+     *
+     * @return True if the entity is visible, otherwise false
+     */
+    public <T extends Entity, S extends EntityRenderState> boolean isEntityVisible(EntityRenderer<T, S> renderer, T entity) {
+        // MODIFIED for porting: was iris's compat.sodium MixinSodiumWorldRenderer#iris$skipEntityCheck
+        // (@Inject HEAD, cancellable) - entity culling uses the camera frustum, which is meaningless in the shadow pass.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.shadows.ShadowRenderingState.areShadowsCurrentlyBeingRendered()) {
+            return true;
+        }
+
+        if (!this.useEntityCulling) {
+            return true;
+        }
+
+        // Ensure entities with outlines or nametags are always visible
+        if (this.client.shouldEntityAppearGlowing(entity) || entity.shouldShowName()) {
+            return true;
+        }
+
+        AABB bb = ((EntityRendererAccessor) renderer).sodium$getBoundingBoxForCulling(entity);
+
+        // bail on very large entities to avoid checking many sections
+        double entityVolume = (bb.maxX - bb.minX) * (bb.maxY - bb.minY) * (bb.maxZ - bb.minZ);
+        if (entityVolume > MAX_ENTITY_CHECK_VOLUME) {
+            // large entities are only frustum tested, their sections are not checked for visibility
+            return true;
+        }
+
+        return this.isBoxVisible(bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ);
+    }
+
+    public boolean isBoxVisible(double x1, double y1, double z1, double x2, double y2, double z2) {
+        // Boxes outside the valid level height will never map to a rendered chunk
+        // Always render these boxes, or they'll be culled incorrectly!
+        if (y2 < this.level.getMinY() + 0.5D || y1 > this.level.getMaxY() - 0.5D) {
+            return true;
+        }
+
+        return this.renderSectionManager.isBoxVisible(x1, y1, z1, x2, y2, z2);
+    }
+
+    @Nullable
+    public String getChunksDebugString() {
+        if (this.renderSectionManager == null) {
+            return null;
+        }
+
+        return this.renderSectionManager.getChunksDebugString();
+    }
+
+    /**
+     * Schedules chunk rebuilds for all chunks in the specified block region.
+     */
+    public void scheduleRebuildForBlockArea(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, boolean playerChanged) {
+        this.scheduleRebuildForChunks(minX >> 4, minY >> 4, minZ >> 4, maxX >> 4, maxY >> 4, maxZ >> 4, playerChanged);
+    }
+
+    /**
+     * Schedules chunk rebuilds for all chunks in the specified chunk region.
+     */
+    public void scheduleRebuildForChunks(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, boolean playerChanged) {
+        for (int chunkX = minX; chunkX <= maxX; chunkX++) {
+            for (int chunkY = minY; chunkY <= maxY; chunkY++) {
+                for (int chunkZ = minZ; chunkZ <= maxZ; chunkZ++) {
+                    this.scheduleRebuildForChunk(chunkX, chunkY, chunkZ, playerChanged);
+                }
+            }
+        }
+    }
+
+    /**
+     * Schedules a chunk rebuild for the render belonging to the given chunk section position.
+     */
+    public void scheduleRebuildForChunk(int x, int y, int z, boolean playerChanged) {
+        this.renderSectionManager.scheduleRebuild(x, y, z, playerChanged);
+    }
+
+    public Collection<String> getDebugStrings(boolean verbose) {
+        return this.renderSectionManager == null ? Collections.emptyList() : this.renderSectionManager.getDebugStrings(verbose);
+    }
+
+    public boolean isSectionReady(int x, int y, int z) {
+        return this.renderSectionManager.isSectionBuilt(x, y, z);
+    }
+}

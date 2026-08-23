@@ -30,12 +30,18 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.system.MemoryStack;
 
 @OnlyIn(Dist.CLIENT)
-public class PostPass implements AutoCloseable {
+public class PostPass implements AutoCloseable, me.flashyreese.mods.sodiumextra.mixin.panini_projection.AccessorPostPass { // MODIFIED for porting: sodium-extra AccessorPostPass
     private static final int UBO_SIZE_PER_SAMPLER = new Std140SizeCalculator().putVec2().get();
     private final String name;
     private final RenderPipeline pipeline;
     private final Identifier outputTargetId;
     private final Map<String, GpuBuffer> customUniforms = new HashMap<>();
+
+    // MODIFIED for porting: was sodium-extra's panini_projection AccessorPostPass @Accessor("customUniforms")
+    @Override
+    public Map<String, GpuBuffer> sodiumExtra$getCustomUniforms() {
+        return this.customUniforms;
+    }
     private final MappableRingBuffer infoUbo;
     private final List<PostPass.Input> inputs;
 

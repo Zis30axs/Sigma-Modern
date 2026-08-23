@@ -49,7 +49,11 @@ public class GuiItemAtlas implements AutoCloseable {
         this.depthTexture = device.createTexture("UI items atlas depth", 9, GpuFormat.D32_FLOAT, textureSize, textureSize, 1, 1);
         this.depthTextureView = device.createTextureView(this.depthTexture);
         this.allocator = new DynamicAtlasAllocator<>(storageSize, storageSize);
+        // MODIFIED for porting: was iris's MixinGuiItemAtlas#iris$endInit (@WrapOperation around
+        // CommandEncoder#clearColorAndDepthTextures) - the GUI item atlas is drawn with a reversed depth range.
+        net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE = true;
         device.createCommandEncoder().clearColorAndDepthTextures(this.texture, GuiRenderer.CLEAR_COLOR, this.depthTexture, 0.0);
+        net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE = false;
     }
 
     public static int computeTextureSizeFor(final int slotTextureSize, final int requiredSlotCount) {
@@ -91,7 +95,23 @@ public class GuiItemAtlas implements AutoCloseable {
         return new GuiItemAtlas.SlotView(this.textureView, u0, v0, u0 + slotUvSize, v0 - slotUvSize);
     }
 
+    /**
+     * MODIFIED for porting: was iris's MixinGuiItemAtlas#iris$beginDraw (@WrapMethod on drawToSlot) - see
+     * {@code iris$endInit} above.
+     */
     private void drawToSlot(final int slotX, final int slotY, final boolean clear, final ItemStackRenderState item) {
+        boolean irisWasReversed = net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE;
+        net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE = true;
+
+        try {
+            this.iris$drawToSlot(slotX, slotY, clear, item);
+        } finally {
+            net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE = irisWasReversed;
+        }
+    }
+
+    // MODIFIED for porting: original vanilla body of drawToSlot, wrapped above
+    private void iris$drawToSlot(final int slotX, final int slotY, final boolean clear, final ItemStackRenderState item) {
         int left = slotX * this.slotTextureSize;
         int top = slotY * this.slotTextureSize;
         int bottom = top + this.slotTextureSize;

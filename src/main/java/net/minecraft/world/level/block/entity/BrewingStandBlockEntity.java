@@ -25,7 +25,24 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import org.jspecify.annotations.Nullable;
 
-public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
+// MODIFIED for porting: lithium world.block_entity_ticking.sleeping.brewing_stand BrewingStandBlockEntityMixin
+public class BrewingStandBlockEntity extends BaseContainerBlockEntity
+    implements WorldlyContainer,
+    net.caffeinemc.mods.lithium.common.block.entity.inventory_change_tracking.InventoryChangeTracker, // MODIFIED for porting: lithium util.inventory_change_listening (events handled in BaseContainerBlockEntity)
+    net.caffeinemc.mods.lithium.api.inventory.LithiumInventory, // MODIFIED for porting: lithium block.hopper InventoryAccessors
+    net.caffeinemc.mods.lithium.common.block.entity.SleepingBlockEntity { // MODIFIED for porting: lithium world.block_entity_ticking.sleeping.brewing_stand
+    // MODIFIED for porting: the next two methods were lithium's block.hopper InventoryAccessors Mixin, which
+    // exposes the raw stack list so lithium can swap in its own LithiumStackList.
+    @Override
+    public NonNullList<ItemStack> getInventoryLithium() {
+        return this.items;
+    }
+
+    @Override
+    public void setInventoryLithium(final NonNullList<ItemStack> inventory) {
+        this.items = inventory;
+    }
+
     private static final int INGREDIENT_SLOT = 3;
     private static final int FUEL_SLOT = 4;
     private static final int[] SLOTS_FOR_UP = new int[]{3};
@@ -40,6 +57,49 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
     private static final Component DEFAULT_NAME = Component.translatable("container.brewing");
     private NonNullList<ItemStack> items = NonNullList.withSize(5, ItemStack.EMPTY);
     private int brewTime;
+
+    // MODIFIED for porting: the following fields/methods were lithium's world.block_entity_ticking.sleeping.brewing_stand BrewingStandBlockEntityMixin
+    // A block entity that has nothing to do parks itself by swapping the ticker inside its tick wrapper for a
+    // no-op one, and is woken up again by the events below.
+    private net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$tickWrapper = null;
+    private net.minecraft.world.level.block.entity.TickingBlockEntity lithium$sleepingTicker = null;
+
+    @Override
+    public net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor lithium$getTickWrapper() {
+        return this.lithium$tickWrapper;
+    }
+
+    @Override
+    public void lithium$setTickWrapper(final net.caffeinemc.mods.lithium.mixin.world.block_entity_ticking.sleeping.WrappedBlockEntityTickInvokerAccessor tickWrapper) {
+        this.lithium$tickWrapper = tickWrapper;
+        this.lithium$setSleepingTicker(null);
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.TickingBlockEntity lithium$getSleepingTicker() {
+        return this.lithium$sleepingTicker;
+    }
+
+    @Override
+    public void lithium$setSleepingTicker(final net.minecraft.world.level.block.entity.TickingBlockEntity sleepingTicker) {
+        this.lithium$sleepingTicker = sleepingTicker;
+    }
+
+    // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#checkSleep
+    private void lithium$checkSleep(final BlockState state) {
+        if (this.brewTime == 0 && state.is(net.minecraft.world.level.block.Blocks.BREWING_STAND) && this.level != null) {
+            this.lithium$startSleeping();
+        }
+    }
+
+    // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#lithium$handleSetChanged
+    @Override
+    public void lithium$handleSetChanged() {
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
+    }
+
     private boolean[] lastPotionCount;
     private Item ingredient;
     private int fuel;
@@ -95,10 +155,13 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
     }
 
     public static void serverTick(final Level level, final BlockPos pos, final BlockState selfState, final BrewingStandBlockEntity entity) {
+        // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#checkSleep (HEAD)
+        entity.lithium$checkSleep(selfState);
         ItemStack fuel = entity.items.get(4);
         if (entity.fuel <= 0 && fuel.is(ItemTags.BREWING_FUEL)) {
             entity.fuel = 20;
             fuel.shrink(1);
+            entity.wakeUpNow(); // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#wakeUpOnMarkDirty
             setChanged(level, pos, selfState);
         }
 
@@ -114,11 +177,13 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
                 entity.brewTime = 0;
             }
 
+            entity.wakeUpNow(); // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#wakeUpOnMarkDirty
             setChanged(level, pos, selfState);
         } else if (brewable && entity.fuel > 0) {
             entity.fuel--;
             entity.brewTime = 400;
             entity.ingredient = ingredient.getItem();
+            entity.wakeUpNow(); // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#wakeUpOnMarkDirty
             setChanged(level, pos, selfState);
         }
 
@@ -203,6 +268,10 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
         }
 
         this.fuel = input.getByteOr("Fuel", (byte)0);
+            // MODIFIED for porting: lithium brewing_stand BrewingStandBlockEntityMixin#wakeUpAfterFromTag (RETURN)
+        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
+            this.wakeUpNow();
+        }
     }
 
     @Override

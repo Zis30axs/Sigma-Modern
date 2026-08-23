@@ -47,7 +47,10 @@ public class PiglinSpecificSensor extends Sensor<LivingEntity> {
     @Override
     protected void doTick(final ServerLevel level, final LivingEntity body) {
         Brain<?> brain = body.getBrain();
-        brain.setMemory(MemoryModuleType.NEAREST_REPELLENT, findNearestRepellent(level, body));
+        // MODIFIED for porting: lithium ai.non_poi_block_search PiglinSpecificSensorMixin#redirectFindNearestRepellent
+        brain.setMemory(
+            MemoryModuleType.NEAREST_REPELLENT, net.caffeinemc.mods.lithium.common.ai.non_poi_block_search.CommonBlockSearchesCheckAndCache.blockPosFindClosestMatch(level, body, 8, 4, LITHIUM_IS_VALID_REPELLENT_PREDICATE, true)
+        );
         Optional<Mob> nemesis = Optional.empty();
         Optional<Hoglin> huntableHoglin = Optional.empty();
         Optional<Hoglin> babyHoglin = Optional.empty();
@@ -110,6 +113,16 @@ public class PiglinSpecificSensor extends Sensor<LivingEntity> {
 
     private static Optional<BlockPos> findNearestRepellent(final ServerLevel level, final LivingEntity body) {
         return BlockPos.findClosestMatch(body.blockPosition(), 8, 4, pos -> isValidRepellent(level, pos));
+    }
+
+    // MODIFIED for porting: lithium ai.non_poi_block_search PiglinSpecificSensorMixin - same condition as
+    // isValidRepellent below, but working on an already resolved BlockState
+    private static final java.util.function.Predicate<BlockState> LITHIUM_IS_VALID_REPELLENT_PREDICATE =
+        PiglinSpecificSensor::lithium$isValidRepellent;
+
+    private static boolean lithium$isValidRepellent(final BlockState blockState) {
+        boolean isPiglinRepellent = blockState.is(BlockTags.PIGLIN_REPELLENTS);
+        return isPiglinRepellent && blockState.is(Blocks.SOUL_CAMPFIRE) ? CampfireBlock.isLitCampfire(blockState) : isPiglinRepellent;
     }
 
     private static boolean isValidRepellent(final ServerLevel level, final BlockPos pos) {

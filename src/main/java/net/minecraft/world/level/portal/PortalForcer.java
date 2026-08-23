@@ -42,11 +42,19 @@ public class PortalForcer {
         PoiManager poiManager = this.level.getPoiManager();
         int radius = toNether ? 16 : 128;
         poiManager.ensureLoadedAndValid(this.level, approximateExitPos, radius);
-        return poiManager.getInSquare(type -> type.is(PoiTypes.NETHER_PORTAL), approximateExitPos, radius, PoiManager.Occupancy.ANY)
-            .map(PoiRecord::getPos)
-            .filter(worldBorder::isWithinBounds)
-            .filter(pos -> this.level.getBlockState(pos).hasProperty(BlockStateProperties.HORIZONTAL_AXIS))
-            .min(Comparator.<BlockPos>comparingDouble(p -> p.distSqr(approximateExitPos)).thenComparingInt(Vec3i::getY));
+        // MODIFIED for porting: lithium ai.poi.fast_portals PortalForcerMixin#findClosestPortalPosition (@Overwrite), by
+        // JellySquid and 2No2Name. [VanillaCopy] of everything but the POI lookup: use the optimized nearest-point search,
+        // which checks the world border and the block state while it walks the POIs closest-first, instead of filtering and
+        // sorting the whole search square.
+        return ((net.caffeinemc.mods.lithium.common.world.interests.PointOfInterestStorageExtended)poiManager).lithium$findNearestForPortalLogic(
+                approximateExitPos,
+                radius,
+                net.caffeinemc.mods.lithium.common.util.POIRegistryEntries.NETHER_PORTAL_ENTRY,
+                PoiManager.Occupancy.ANY,
+                poi -> this.level.getBlockState(poi.getPos()).hasProperty(BlockStateProperties.HORIZONTAL_AXIS),
+                worldBorder
+            )
+            .map(PoiRecord::getPos);
     }
 
     public Optional<BlockUtil.FoundRectangle> createPortal(final BlockPos origin, final Direction.Axis portalAxis) {

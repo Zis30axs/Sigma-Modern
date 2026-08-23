@@ -280,6 +280,59 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         EquipmentSlot.class
     );
     protected final EntityEquipment equipment;
+
+    // MODIFIED for porting: was lithium's entity.collisions.unpushable_cramming LivingEntityMixin. Some entity types are not
+    // pushable while they are inside a climbable block; when that is cached, the entity's section has to be told whenever the
+    // cached feet block state changes so it can keep its "maybe pushable" mask up to date.
+    private boolean lithium$updateClimbingMobCachingSectionOnChange;
+
+    @Override
+    public void lithium$SetClimbingMobCachingSectionUpdateBehavior(final boolean listenForCachedBlockChanges) {
+        this.lithium$updateClimbingMobCachingSectionOnChange = listenForCachedBlockChanges;
+    }
+
+    @Override
+    public void lithium$OnFeetBlockCacheDeleted() {
+        if (this.lithium$updateClimbingMobCachingSectionOnChange) {
+            this.lithium$updateClimbingMobCachingSection(null);
+        }
+    }
+
+    @Override
+    public void lithium$OnFeetBlockCacheSet(final BlockState newState) {
+        if (this.lithium$updateClimbingMobCachingSectionOnChange) {
+            this.lithium$updateClimbingMobCachingSection(newState);
+        }
+    }
+
+    private void lithium$updateClimbingMobCachingSection(final @Nullable BlockState newState) {
+        net.minecraft.world.level.entity.EntitySectionStorage<Entity> entityCacheOrNull = net.caffeinemc.mods.lithium.common.world.WorldHelper.getEntityCacheOrNull(this.level());
+        if (entityCacheOrNull != null) {
+            net.minecraft.world.level.entity.EntitySection<Entity> trackingSection = entityCacheOrNull.getSection(
+                net.minecraft.core.SectionPos.asLong(this.blockPosition())
+            );
+            if (trackingSection != null) {
+                ((net.caffeinemc.mods.lithium.common.world.ClimbingMobCachingSection)trackingSection).lithium$onEntityModifiedCachedBlock(this, newState);
+            } else {
+                this.lithium$updateClimbingMobCachingSectionOnChange = false;
+            }
+        }
+    }
+
+    // MODIFIED for porting: the following two methods were lithium's util.in_world_tracking.entity LivingEntityMixin
+    @Override
+    public void lithium$handleAddedToLevel(final Level level) {
+        if (this.equipment instanceof net.caffeinemc.mods.lithium.common.world.in_world_tracking.MaybeInLevelObject lithium$tracked) {
+            lithium$tracked.lithium$handleAddedToLevel(level);
+        }
+    }
+
+    @Override
+    public void lithium$handleRemovedFromLevel(final Level level) {
+        if (this.equipment instanceof net.caffeinemc.mods.lithium.common.world.in_world_tracking.MaybeInLevelObject lithium$tracked) {
+            lithium$tracked.lithium$handleRemovedFromLevel(level);
+        }
+    }
     private Waypoint.Icon locatorBarIcon = new Waypoint.Icon();
     public @Nullable Vec3 currentImpulseImpactPos;
 
@@ -292,7 +345,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         this.reapplyPosition();
         this.setYRot(this.random.nextFloat() * (float) (Math.PI * 2));
         this.yHeadRot = this.getYRot();
-        this.brain = this.makeBrain(Brain.Packed.EMPTY);
+        // MODIFIED for porting: lithium client_tick.entity.unused_brain LivingEntityMixin#doNotCreateClientBrain
+        // (@WrapOperation). Minecraft clients do not execute mob AI logic, so allocating complete brains is
+        // unnecessary; a shared dummy brain that pretends to have every memory type registered is used instead.
+        this.brain = this.level().isClientSide() ? net.caffeinemc.mods.lithium.common.client.SharedFields.DUMMY_BRAIN : this.makeBrain(Brain.Packed.EMPTY);
     }
 
     @Override
@@ -412,7 +468,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             this.getSleepingPos().ifPresent(this::setPosToBed);
         }
 
-        if (this.level() instanceof ServerLevel serverLevel) {
+        // MODIFIED for porting: lithium entity.equipment_tracking.enchantment_ticking
+        // LivingEntityMixin#maybeHasAnyTickableEnchantments (@WrapWithCondition) - skip the scan over all equipment when
+        // none of the equipped stacks can possibly have a ticking enchantment effect.
+        if (this.level() instanceof ServerLevel serverLevel && (this instanceof Player || this.equipment.lithium$shouldTickEnchantments())) {
             EnchantmentHelper.tickEffects(serverLevel, this);
         }
 
@@ -528,18 +587,20 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         }
     }
 
+    /**
+     * MODIFIED for porting: lithium entity.fast_powder_snow_check LivingEntityMixin. The block state lookup is deferred past
+     * the frozen-ticks test, so it only happens for the few entities that are actually freezing.
+     */
     protected void tryAddFrost() {
-        if (!this.getBlockStateOnLegacy().isAir()) {
-            int ticksFrozen = this.getTicksFrozen();
-            if (ticksFrozen > 0) {
-                AttributeInstance speed = this.getAttribute(Attributes.MOVEMENT_SPEED);
-                if (speed == null) {
-                    return;
-                }
-
-                float slowAmount = -0.05F * this.getPercentFrozen();
-                speed.addTransientModifier(new AttributeModifier(SPEED_MODIFIER_POWDER_SNOW_ID, slowAmount, AttributeModifier.Operation.ADD_VALUE));
+        int ticksFrozen = this.getTicksFrozen();
+        if (ticksFrozen > 0) {
+            AttributeInstance speed = this.getBlockStateOnLegacy().isAir() ? null : this.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (speed == null) {
+                return;
             }
+
+            float slowAmount = -0.05F * this.getPercentFrozen();
+            speed.addTransientModifier(new AttributeModifier(SPEED_MODIFIER_POWDER_SNOW_ID, slowAmount, AttributeModifier.Operation.ADD_VALUE));
         }
     }
 
@@ -2183,6 +2244,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected void updateSwingTime() {
+        // MODIFIED for porting: lithium entity.fast_hand_swing LivingEntityMixin#skipGetDuration - getCurrentSwingDuration()
+        // resolves attributes/effects, which is wasted work while nothing is swinging.
+        if (!this.swinging && this.swingTime == 0) {
+            return;
+        }
+
         int currentSwingDuration = this.getCurrentSwingDuration();
         if (this.swinging) {
             this.swingTime++;
@@ -2948,6 +3015,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     private void detectEquipmentUpdates() {
         Map<EquipmentSlot, ItemStack> changedItems = this.collectEquipmentChanges(this.lastEquipmentItems);
         if (changedItems != null) {
+            // MODIFIED for porting: lithium entity.equipment_tracking.equipment_changes
+            // LivingEntityMixin#resetEquipmentChanged (INVOKE handleHandSwap). Not implemented for player entities.
+            if (!(this instanceof Player)) {
+                this.equipment.lithium$onEquipmentChangesSent();
+            }
+
             this.handleHandSwap(changedItems);
             if (!changedItems.isEmpty()) {
                 this.handleEquipmentChanges(changedItems);
@@ -2956,6 +3029,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected @Nullable Map<EquipmentSlot, ItemStack> collectEquipmentChanges(final Map<EquipmentSlot, ItemStack> lastEquipmentItems) {
+        // MODIFIED for porting: lithium entity.equipment_tracking.equipment_changes
+        // LivingEntityMixin#skipSentEquipmentComparison (HEAD, cancellable) - nothing changed since the last sync, so the
+        // comparison of all equipment slots can be skipped entirely.
+        if (!this.equipment.lithium$hasUnsentEquipmentChanges()) {
+            return null;
+        }
+
         Map<EquipmentSlot, ItemStack> changedItems = null;
 
         for (EquipmentSlot slot : EquipmentSlot.VALUES) {
@@ -3192,6 +3272,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     protected void updateFallFlying() {
         this.checkFallDistanceAccumulation();
         if (!this.level().isClientSide()) {
+            // MODIFIED for porting: lithium entity.fast_elytra_check LivingEntityMixin#skipStopFlying - an entity that is
+            // not gliding and has no glide ticks left has nothing to update here, and canGlide() is not cheap.
+            if (!this.isFallFlying() && this.fallFlyTicks == 0) {
+                return;
+            }
+
             if (!this.canGlide()) {
                 this.setSharedFlag(7, false);
                 return;
@@ -3294,6 +3380,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         super.stopRiding();
         if (oldVehicle != null && oldVehicle != this.getVehicle() && !this.level().isClientSide()) {
             this.dismountVehicle(oldVehicle);
+        }
+
+        // MODIFIED for porting: lithium entity.inactive_navigations LivingEntityMixin#handleStopRiding (RETURN).
+        // Dismounting can replace the navigation instance again.
+        if (this instanceof net.caffeinemc.mods.lithium.common.entity.NavigatingEntity lithium$navigatingEntity) {
+            lithium$navigatingEntity.lithium$updateNavigationRegistration();
         }
     }
 

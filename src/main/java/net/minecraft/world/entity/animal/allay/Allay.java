@@ -294,7 +294,12 @@ public class Allay extends PathfinderMob implements InventoryCarrier, VibrationS
             this.setItemInHand(InteractionHand.MAIN_HAND, itemToGive);
             this.removeInteractionItem(player, interactionItem);
             this.level().playSound(player, this, SoundEvents.ALLAY_ITEM_GIVEN, SoundSource.NEUTRAL, 2.0F, 1.0F);
-            this.getBrain().setMemory(MemoryModuleType.LIKED_PLAYER, player.getUUID());
+            // MODIFIED for porting: lithium client_tick.entity.unused_brain AllayMixin#isServerSide
+            // (@WrapWithCondition) - client side brains are dummies
+            if (!this.level().isClientSide()) {
+                this.getBrain().setMemory(MemoryModuleType.LIKED_PLAYER, player.getUUID());
+            }
+
             return InteractionResult.SUCCESS;
         }
 

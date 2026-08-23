@@ -39,6 +39,39 @@ public abstract class AgeableMob extends PathfinderMob {
     protected int forcedAgeTimer;
     protected int ageLockParticleTimer = 0;
 
+    /**
+     * MODIFIED for porting: lithium ai.useless_sensors.baby_specific_sensors AgeableMobMixin. Sensors that only matter for
+     * baby mobs are switched off while the mob is an adult (and back on when it is a baby), which avoids running them and
+     * keeping their memories up to date for every adult mob.
+     */
+    private void lithium$disableOrEnableParentSensor() {
+        if (this.level().isClientSide()) {
+            return;
+        }
+
+        if (this.isBaby()) {
+            net.caffeinemc.mods.lithium.common.ai.brain.SensorHelper.enableSensor(this, net.minecraft.world.entity.ai.sensing.SensorType.NEAREST_ADULT, true);
+            if (this instanceof net.minecraft.world.entity.npc.villager.Villager) {
+                net.caffeinemc.mods.lithium.common.ai.brain.SensorHelper.enableSensor(this, net.minecraft.world.entity.ai.sensing.SensorType.VILLAGER_BABIES);
+            }
+        } else {
+            // Applies to most brained animals that follow adult animals
+            net.caffeinemc.mods.lithium.common.ai.brain.SensorHelper.disableSensor(this, net.minecraft.world.entity.ai.sensing.SensorType.NEAREST_ADULT);
+            if (this instanceof net.minecraft.world.entity.npc.villager.Villager) {
+                // The villager play package only applies to villager babies
+                net.caffeinemc.mods.lithium.common.ai.brain.SensorHelper.disableSensor(this, net.minecraft.world.entity.ai.sensing.SensorType.VILLAGER_BABIES);
+                if (this.getBrain().hasMemoryValue(net.minecraft.world.entity.ai.memory.MemoryModuleType.VISIBLE_VILLAGER_BABIES)) {
+                    this.getBrain()
+                        .setMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.VISIBLE_VILLAGER_BABIES, com.google.common.collect.ImmutableList.of());
+                }
+            }
+
+            if (this.getBrain().hasMemoryValue(net.minecraft.world.entity.ai.memory.MemoryModuleType.NEAREST_VISIBLE_ADULT)) {
+                this.getBrain().setMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.NEAREST_VISIBLE_ADULT, java.util.Optional.empty());
+            }
+        }
+    }
+
     protected AgeableMob(final EntityType<? extends AgeableMob> type, final Level level) {
         super(type, level);
     }
@@ -187,6 +220,8 @@ public abstract class AgeableMob extends PathfinderMob {
     public void onSyncedDataUpdated(final EntityDataAccessor<?> accessor) {
         if (DATA_BABY_ID.equals(accessor)) {
             this.refreshDimensions();
+            // MODIFIED for porting: lithium ai.useless_sensors.baby_specific_sensors AgeableMobMixin#handleParentSensor
+            this.lithium$disableOrEnableParentSensor();
         }
 
         super.onSyncedDataUpdated(accessor);

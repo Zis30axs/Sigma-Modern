@@ -53,6 +53,15 @@ public class DebugScreenOverlay {
     private static final int MARGIN_RIGHT = 2;
     private static final int MARGIN_LEFT = 2;
     private static final int MARGIN_TOP = 2;
+    // MODIFIED for porting: sodium-extra steady_debug_hud MixinDebugScreenOverlay @Unique fields
+    private final java.util.List<String> sodiumExtra$leftTextCache = new ArrayList<>();
+
+    private final java.util.List<String> sodiumExtra$rightTextCache = new ArrayList<>();
+
+    private long sodiumExtra$nextTime;
+
+    private boolean sodiumExtra$rebuild = true;
+
     private final Minecraft minecraft;
     private final Font font;
     private @Nullable ChunkPos lastPos;
@@ -91,6 +100,20 @@ public class DebugScreenOverlay {
     }
 
     public void extractRenderState(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: was sodium-extra's steady_debug_hud MixinDebugScreenOverlay#preRender (@Inject HEAD)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.STEADY_DEBUG_HUD && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.steadyDebugHud) {
+            long currentTime = net.minecraft.util.Util.getMillis();
+            if (currentTime > this.sodiumExtra$nextTime) {
+                this.sodiumExtra$rebuild = true;
+                this.sodiumExtra$nextTime = currentTime
+                    + me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.steadyDebugHudRefreshInterval * 50L;
+            } else {
+                this.sodiumExtra$rebuild = false;
+            }
+        } else {
+            this.sodiumExtra$rebuild = true;
+        }
+
         Options options = this.minecraft.options;
         if (this.minecraft.isGameLoadFinished() && (!this.minecraft.gui.hud.isHidden() || this.minecraft.gui.screen() != null)) {
             Collection<Identifier> visibleEntries = this.minecraft.debugEntries.getCurrentlyEnabled();
@@ -209,8 +232,27 @@ public class DebugScreenOverlay {
                     leftLines.add("To edit: press " + formatKeybind(keyDebugModifier, options.keyDebugDebugOptions));
                 }
 
-                this.extractLines(graphics, leftLines, true);
-                this.extractLines(graphics, rightLines, false);
+                // MODIFIED for porting: sodium features.gui.hooks.debug
+                // DebugScreenOverlayInsertMixin#sodium$insertFpsPercentiles (injected before the first extractLines call)
+                sodium$insertFpsPercentiles(leftLines);
+                // MODIFIED for porting: was sodium-extra's steady_debug_hud MixinDebugScreenOverlay
+                // #sodiumExtra$redirectDrawLeftText / #sodiumExtra$redirectDrawRightText (@Redirect on extractLines,
+                // ordinals 0 and 1) - the collected lines are only copied into the caches when the refresh interval elapsed,
+                // and the caches are what actually gets drawn.
+                if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.STEADY_DEBUG_HUD) {
+                    if (this.sodiumExtra$rebuild) {
+                        this.sodiumExtra$leftTextCache.clear();
+                        this.sodiumExtra$leftTextCache.addAll(leftLines);
+                        this.sodiumExtra$rightTextCache.clear();
+                        this.sodiumExtra$rightTextCache.addAll(rightLines);
+                    }
+
+                    this.extractLines(graphics, this.sodiumExtra$leftTextCache, true);
+                    this.extractLines(graphics, this.sodiumExtra$rightTextCache, false);
+                } else {
+                    this.extractLines(graphics, leftLines, true);
+                    this.extractLines(graphics, rightLines, false);
+                }
                 graphics.nextStratum();
                 this.profilerPieChart.setBottomOffset(10);
                 if (this.showFpsCharts()) {
@@ -275,6 +317,55 @@ public class DebugScreenOverlay {
             + (keyDebugModifier.isUnbound() ? "" : keyDebugModifier.getTranslatedKeyMessage().getString() + "+")
             + keybind.getTranslatedKeyMessage().getString()
             + "]";
+    }
+
+    /**
+     * MODIFIED for porting: was sodium's features.gui.hooks.debug DebugScreenOverlayInsertMixin#sodium$insertFpsPercentiles.
+     */
+    private static void sodium$insertFpsPercentiles(final List<String> leftLines) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!minecraft.debugEntries.isCurrentlyEnabled(net.caffeinemc.mods.sodium.client.SodiumClientMod.SODIUM_FPS_PERCENTILES)) {
+            return;
+        }
+
+        it.unimi.dsi.fastutil.objects.Reference2LongArrayMap<net.caffeinemc.mods.sodium.client.util.FrameTimeStatistics.Percentile> results = net.caffeinemc.mods.sodium.client.util.FrameTimeStatistics.INSTANCE.get();
+        if (results == null || results.isEmpty()) {
+            return;
+        }
+
+        // Splice the percentile fps display into the debug lines to make sure it's right under the fps string. Without this,
+        // it may be put somewhere else on the screen.
+        int insertAt = 0;
+
+        for (int i = 0; i < leftLines.size(); i++) {
+            String line = leftLines.get(i);
+            if (line != null && line.contains(" fps T:")) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        for (it.unimi.dsi.fastutil.objects.Reference2LongMap.Entry<net.caffeinemc.mods.sodium.client.util.FrameTimeStatistics.Percentile> entry : results.reference2LongEntrySet()) {
+            if (!sb.isEmpty()) {
+                sb.append(' ');
+            }
+
+            sb.append(net.minecraft.ChatFormatting.GRAY)
+                .append(entry.getKey().name())
+                .append('=')
+                .append(net.minecraft.ChatFormatting.RESET)
+                .append(sodium$nanosToFps(entry.getLongValue()));
+        }
+
+        sb.append(net.minecraft.ChatFormatting.GRAY).append(" fps");
+        leftLines.add(insertAt, sb.toString());
+    }
+
+    // MODIFIED for porting: was sodium's features.gui.hooks.debug DebugScreenOverlayInsertMixin#sodium$nanosToFps
+    private static long sodium$nanosToFps(final long ns) {
+        return ns > 0L ? Math.round(1.0E9 / ns) : 0L;
     }
 
     private void extractLines(final GuiGraphicsExtractor graphics, final List<String> lines, final boolean alignLeft) {
@@ -407,6 +498,9 @@ public class DebugScreenOverlay {
     }
 
     public void logFrameDuration(final long frameDuration) {
+        // MODIFIED for porting: sodium features.gui.hooks.debug DebugScreenOverlayLogFrameMixin#sodium$captureFrameDuration
+        // (HEAD) - sodium maintains its own frame-time ring buffer with more samples than vanilla's FPS graph storage.
+        net.caffeinemc.mods.sodium.client.util.FrameTimeStatistics.INSTANCE.logSample(frameDuration);
         this.frameTimeLogger.logSample(frameDuration);
     }
 

@@ -12,7 +12,8 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.level.LevelReader;
 import org.jspecify.annotations.Nullable;
 
-public class BlockPattern {
+// MODIFIED for porting: lithium block_pattern_matching BlockPatternMixin
+public class BlockPattern implements net.caffeinemc.mods.lithium.common.world.block_pattern_matching.BlockPatternExtended {
     private final Predicate<BlockInWorld>[][][] pattern;
     private final int depth;
     private final int height;
@@ -73,9 +74,31 @@ public class BlockPattern {
         return new BlockPattern.BlockPatternMatch(origin, forwards, up, cache, this.width, this.height, this.depth);
     }
 
+    // MODIFIED for porting: lithium block_pattern_matching BlockPatternMixin state
+    private net.minecraft.world.level.block.Block lithium$requiredBlock;
+    private int lithium$requiredBlockCount;
+
+    // MODIFIED for porting: was lithium's BlockPatternMixin#lithium$setRequiredBlock
+    @Override
+    public void lithium$setRequiredBlock(final net.minecraft.world.level.block.Block block, final int count) {
+        this.lithium$requiredBlock = block;
+        this.lithium$requiredBlockCount = count;
+    }
+
     public BlockPattern.@Nullable BlockPatternMatch find(final LevelReader level, final BlockPos origin) {
         LoadingCache<BlockPos, BlockInWorld> cache = createLevelCache(level, false);
         int dist = Math.max(Math.max(this.width, this.height), this.depth);
+        // MODIFIED for porting: lithium block_pattern_matching
+        // BlockPatternMixin#countRequiredBlocksBeforeExpensiveSearch - if the pattern is known to need a certain number
+        // of a specific block, a cheap counting scan can rule the whole area out before the expensive per-position match.
+        if (this.lithium$requiredBlock != null) {
+            net.minecraft.core.BlockBox lithium$searchBox = net.minecraft.core.BlockBox.of(
+                origin.offset(-dist, -dist, -dist), origin.offset(2 * dist - 1, 2 * dist - 1, 2 * dist - 1)
+            );
+            if (!net.caffeinemc.mods.lithium.common.world.block_pattern_matching.BlockSearch.hasAtLeast(level, lithium$searchBox, this.lithium$requiredBlock, this.lithium$requiredBlockCount)) {
+                return null;
+            }
+        }
 
         for (BlockPos testPos : BlockPos.betweenClosed(origin, origin.offset(dist - 1, dist - 1, dist - 1))) {
             for (Direction forwards : Direction.values()) {

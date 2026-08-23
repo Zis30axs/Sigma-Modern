@@ -310,11 +310,10 @@ public abstract class FlowingFluid extends Fluid {
     private boolean isWaterHole(
         final BlockGetter level, final BlockPos topPos, final BlockState topState, final BlockPos bottomPos, final BlockState bottomState
     ) {
-        if (!canPassThroughWall(Direction.DOWN, level, topPos, topState, bottomPos, bottomState)) {
-            return false;
-        } else {
-            return bottomState.getFluidState().getType().isSame(this) ? true : canHoldFluid(level, bottomPos, bottomState, this.getFlowing());
-        }
+        // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#isWaterHole (@Overwrite) - rearranged to have
+        // the cheaper checks first
+        return (bottomState.getFluidState().getType().isSame(this) || canHoldFluid(level, bottomPos, bottomState, this.getFlowing()))
+            && canPassThroughWall(Direction.DOWN, level, topPos, topState, bottomPos, bottomState);
     }
 
     private boolean canPassThrough(
@@ -327,8 +326,10 @@ public abstract class FlowingFluid extends Fluid {
         final BlockState testState,
         final FluidState testFluidState
     ) {
-        return this.canMaybePassThrough(level, sourcePos, sourceState, direction, testPos, testState, testFluidState)
-            && canHoldSpecificFluid(level, testPos, testState, fluid);
+        // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#canPassThrough (@Overwrite) - rearranged to
+        // have the cheaper checks first
+        return canHoldSpecificFluid(level, testPos, testState, fluid)
+            && this.canMaybePassThrough(level, sourcePos, sourceState, direction, testPos, testState, testFluidState);
     }
 
     private boolean canMaybePassThrough(
@@ -366,6 +367,14 @@ public abstract class FlowingFluid extends Fluid {
     }
 
     protected Map<Direction, FluidState> getSpread(final ServerLevel level, final BlockPos pos, final BlockState state) {
+        // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#getSpread (HEAD, cancellable). It returns null
+        // only when the slope find distance is too large for its byte-indexed caches, in which case the vanilla code below
+        // runs unchanged.
+        Map<Direction, FluidState> lithium$spread = this.lithium$getSpread(level, pos, state);
+        if (lithium$spread != null) {
+            return lithium$spread;
+        }
+
         int lowest = 1000;
         Map<Direction, FluidState> result = Maps.newEnumMap(Direction.class);
         FlowingFluid.SpreadContext context = null;
@@ -406,6 +415,246 @@ public abstract class FlowingFluid extends Fluid {
         return result;
     }
 
+
+    /**
+     * MODIFIED for porting: was lithium's block.fluid.flow FlowingFluidMixin#getSpread, by 2No2Name.
+     * <p>
+     * Check the immediate walls to see whether branching is possible (at most 2 walls). If branching is possible, do the
+     * complex flow calculation; otherwise just handle the single possible direction.
+     *
+     * @return the flow result, or null if the search radius is too large and the caller has to fall back to vanilla
+     */
+    private @org.jspecify.annotations.Nullable Map<Direction, FluidState> lithium$getSpread(final ServerLevel world, final BlockPos pos, final BlockState state) {
+        Map<Direction, FluidState> flowResultByDirection = Maps.newEnumMap(Direction.class);
+        int searchRadius = this.getSlopeFindDistance(world) + 1;
+        int numIndicesFromRadius = lithium$getNumIndicesFromRadius(searchRadius);
+        if (numIndicesFromRadius > 256) {
+            // We use bytes to represent the indices, which works with the vanilla search radius of up to 5.
+            // Fall back to vanilla code in case the search radius is too large.
+            return null;
+        }
+
+        BlockState[] blockStateCache = new BlockState[numIndicesFromRadius];
+        Direction onlyPossibleFlowDirection = null;
+        BlockPos onlyBlockPos = null;
+        BlockState onlyBlockState = null;
+
+        for (Direction flowDirection : net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL) {
+            BlockPos flowTargetPos = pos.relative(flowDirection);
+            byte blockIndex = lithium$indexFromDiamondXZOffset(pos, flowTargetPos, searchRadius);
+            BlockState flowTargetBlock = world.getBlockState(flowTargetPos);
+            blockStateCache[blockIndex] = flowTargetBlock;
+            if (this.lithium$canMaybeFlowIntoBlock(world, flowTargetBlock, flowTargetPos)) {
+                if (onlyPossibleFlowDirection == null) {
+                    onlyPossibleFlowDirection = flowDirection;
+                    onlyBlockPos = flowTargetPos;
+                    onlyBlockState = flowTargetBlock;
+                } else {
+                    this.lithium$calculateComplexFluidFlowDirections(world, pos, state, blockStateCache, flowResultByDirection);
+                    return flowResultByDirection;
+                }
+            }
+        }
+
+        if (onlyPossibleFlowDirection != null) {
+            FluidState onlyFluidState = onlyBlockState.getFluidState();
+            if (this.canMaybePassThrough(world, pos, state, onlyPossibleFlowDirection, onlyBlockPos, onlyBlockState, onlyFluidState)) {
+                FluidState targetNewFluidState = this.getNewLiquid(world, onlyBlockPos, onlyBlockState);
+                if (canHoldSpecificFluid(world, onlyBlockPos, onlyBlockState, targetNewFluidState.getType())
+                    && onlyFluidState.canBeReplacedWith(world, onlyBlockPos, targetNewFluidState.getType(), onlyPossibleFlowDirection)) {
+                    flowResultByDirection.put(onlyPossibleFlowDirection, targetNewFluidState);
+                }
+            }
+        }
+
+        return flowResultByDirection;
+    }
+
+    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#getNumIndicesFromRadius
+    private static int lithium$getNumIndicesFromRadius(final int radius) {
+        return (radius + 1) * (2 * radius + 1);
+    }
+
+    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#indexFromDiamondXZOffset
+    private static byte lithium$indexFromDiamondXZOffset(final BlockPos originPos, final BlockPos offsetPos, final int radius) {
+        int xOffset = offsetPos.getX() - originPos.getX();
+        int zOffset = offsetPos.getZ() - originPos.getZ();
+        int row = (xOffset + zOffset + radius) / 2; // Range [0, radius]
+        int column = xOffset - zOffset + radius; // Range [0, 2*radius]
+        int rowLength = 2 * radius + 1;
+        return (byte)(row * rowLength + column);
+    }
+
+    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#getBlock
+    private BlockState lithium$getBlock(final Level world, final BlockPos pos, final BlockState[] blockStateCache, final byte byteKey) {
+        int key = Byte.toUnsignedInt(byteKey);
+        BlockState blockState = blockStateCache[key];
+        if (blockState == null) {
+            blockState = world.getBlockState(pos);
+            blockStateCache[key] = blockState;
+        }
+
+        return blockState;
+    }
+
+    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#removeDirectionsWithoutHoleAccess
+    private void lithium$removeDirectionsWithoutHoleAccess(final byte holeAccess, final Map<Direction, FluidState> flowResultByDirection) {
+        for (int i = 0; i < net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL.length; i++) {
+            if ((holeAccess & 1 << i) == 0) {
+                flowResultByDirection.remove(net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL[i]);
+            }
+        }
+    }
+
+    /**
+     * MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#canMaybeFlowIntoBlock.
+     * Fast check to eliminate some choices for the flow direction.
+     */
+    private boolean lithium$canMaybeFlowIntoBlock(final Level world, final BlockState blockState, final BlockPos flowTargetPos) {
+        return canHoldFluid(world, flowTargetPos, blockState, this.getSource());
+    }
+
+    /**
+     * MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#calculateComplexFluidFlowDirections.
+     * <p>
+     * Search like breadth-first-search for paths the fluid can flow. Only move in directions the fluid can move (e.g. block
+     * can contain / be replaced by fluid) (vanilla conditions). For each node remember the first move step (direction) of the
+     * paths that led to this node. Break when the BFS found all paths of a length up to some length, if any of those paths
+     * found a node with a hole below. Then return the union of the stored first move steps of the nodes with a hole below.
+     * In total, this finds the directions from the starting location which are the first step towards one of the closest
+     * holes, just like vanilla.
+     */
+    private void lithium$calculateComplexFluidFlowDirections(
+        final ServerLevel world,
+        final BlockPos startPos,
+        final BlockState startState,
+        final BlockState[] blockStateCache,
+        final Map<Direction, FluidState> flowResultByDirection
+    ) {
+        // For each relevant position: is there a hole below; what is the shortest path length to the center; which direct
+        // neighbors of the center are on a shortest path to this location (4 bits); which direct neighbors of the position
+        // are the previous node on the path from the center (4 bits).
+        it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap prevPositions = new it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap();
+        it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap currentPositions = new it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap();
+        it.unimi.dsi.fastutil.bytes.Byte2BooleanOpenHashMap holeCache = new it.unimi.dsi.fastutil.bytes.Byte2BooleanOpenHashMap();
+        byte holeAccess = 0;
+        int searchRadius = this.getSlopeFindDistance(world) + 1;
+
+        // Like vanilla, the first iteration is separate, because getNewLiquid is called to check whether a renewable fluid
+        // source block is created in the flow direction.
+        for (int i = 0; i < net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL.length; i++) {
+            Direction flowDirection = net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL[i];
+            BlockPos flowTargetPos = startPos.relative(flowDirection);
+            byte blockIndex = lithium$indexFromDiamondXZOffset(startPos, flowTargetPos, searchRadius);
+            BlockState targetBlockState = this.lithium$getBlock(world, flowTargetPos, blockStateCache, blockIndex);
+            if (this.canMaybePassThrough(world, startPos, startState, flowDirection, flowTargetPos, targetBlockState, targetBlockState.getFluidState())) {
+                FluidState targetNewFluidState = this.getNewLiquid(world, flowTargetPos, targetBlockState);
+                if (canHoldSpecificFluid(world, flowTargetPos, targetBlockState, targetNewFluidState.getType())) {
+                    // Store the resulting fluid state for each direction, remove later if there is no closest hole access
+                    // in this direction. 1.21.2+ speciality: only add the direction if the fluid can replace the other
+                    // fluid. If it cannot, it still counts for the hole search though.
+                    if (targetBlockState.getFluidState().canBeReplacedWith(world, flowTargetPos, targetNewFluidState.getType(), flowDirection)) {
+                        flowResultByDirection.put(flowDirection, targetNewFluidState);
+                    }
+
+                    if (this.canPassThrough(
+                        world,
+                        targetNewFluidState.getType(),
+                        startPos,
+                        startState,
+                        flowDirection,
+                        flowTargetPos,
+                        targetBlockState,
+                        targetBlockState.getFluidState()
+                    )) {
+                        prevPositions.put(blockIndex, (byte)(0b10001 << i));
+                        if (this.lithium$isHoleBelow(world, holeCache, blockIndex, flowTargetPos, targetBlockState)) {
+                            holeAccess |= (byte)(1 << i);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Iterate over the positions and find the shortest path to the center. If a hole is found, stop the iteration.
+        for (int i = 0; i < this.getSlopeFindDistance(world) && holeAccess == 0; i++) {
+            Fluid targetFluid = this.getFlowing();
+
+            for (it.unimi.dsi.fastutil.objects.ObjectIterator<it.unimi.dsi.fastutil.bytes.Byte2ByteMap.Entry> iterator = prevPositions.byte2ByteEntrySet().fastIterator(); iterator.hasNext();) {
+                it.unimi.dsi.fastutil.bytes.Byte2ByteMap.Entry entry = iterator.next();
+                byte blockIndex = entry.getByteKey();
+                byte currentInfo = entry.getByteValue();
+                int rowLength = 2 * searchRadius + 1;
+                int row = blockIndex / rowLength;
+                int column = blockIndex % rowLength;
+                int unevenColumn = column % 2;
+                int xOffset = (row * 2 + column + unevenColumn - searchRadius * 2) / 2;
+                int zOffset = xOffset - column + searchRadius;
+                BlockPos currentPos = startPos.offset(xOffset, 0, zOffset);
+                BlockState currentState = blockStateCache[blockIndex];
+
+                for (int j = 0; j < net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL.length; j++) {
+                    Direction flowDirection = net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL[j];
+                    int oppositeDirection = net.caffeinemc.mods.lithium.common.util.DirectionConstants.HORIZONTAL_OPPOSITE_INDICES[j];
+                    if ((currentInfo >> 4 & 1 << oppositeDirection) != (byte)0) {
+                        // In this direction is one of the disallowed directions
+                        continue;
+                    }
+
+                    BlockPos flowTargetPos = currentPos.relative(flowDirection);
+                    byte targetPosBlockIndex = lithium$indexFromDiamondXZOffset(startPos, flowTargetPos, searchRadius);
+                    if (prevPositions.containsKey(targetPosBlockIndex)) {
+                        continue;
+                    }
+
+                    byte oldInfo = currentPositions.getOrDefault(targetPosBlockIndex, (byte)0);
+                    byte newInfo = oldInfo;
+                    newInfo |= (byte)(0b10000 << j); // Disallow search direction
+                    newInfo |= (byte)(currentInfo & 0b1111); // Shortest-reachable with the starting directions
+                    if ((newInfo & 0b1111) == (oldInfo & 0b1111)) {
+                        currentPositions.put(targetPosBlockIndex, newInfo);
+                        continue;
+                    }
+
+                    BlockState targetBlockState = this.lithium$getBlock(world, flowTargetPos, blockStateCache, targetPosBlockIndex);
+                    if (this.canPassThrough(
+                        world, targetFluid, currentPos, currentState, flowDirection, flowTargetPos, targetBlockState, targetBlockState.getFluidState()
+                    )) {
+                        currentPositions.put(targetPosBlockIndex, newInfo);
+                        if (this.lithium$isHoleBelow(world, holeCache, targetPosBlockIndex, flowTargetPos, targetBlockState)) {
+                            holeAccess |= (byte)(currentInfo & 0b1111);
+                        }
+                    }
+                }
+            }
+
+            it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap tmp = prevPositions;
+            prevPositions = currentPositions;
+            currentPositions = tmp;
+            currentPositions.clear();
+        }
+
+        if (holeAccess != 0) {
+            // Found at least one hole in any iteration, keep the directions which lead to the closest holes.
+            this.lithium$removeDirectionsWithoutHoleAccess(holeAccess, flowResultByDirection);
+        }
+    }
+
+    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#isHoleBelow
+    private boolean lithium$isHoleBelow(
+        final LevelReader world, final it.unimi.dsi.fastutil.bytes.Byte2BooleanOpenHashMap holeCache, final byte key, final BlockPos flowTargetPos, final BlockState targetBlockState
+    ) {
+        if (holeCache.containsKey(key)) {
+            return holeCache.get(key);
+        }
+
+        BlockPos downPos = flowTargetPos.below();
+        BlockState downBlock = world.getBlockState(downPos);
+        boolean holeFound = this.isWaterHole(world, flowTargetPos, targetBlockState, downPos, downBlock);
+        holeCache.put(key, holeFound);
+        return holeFound;
+    }
+
     private static boolean canHoldAnyFluid(final BlockState state) {
         Block block = state.getBlock();
         if (block instanceof LiquidBlockContainer) {
@@ -414,7 +663,9 @@ public abstract class FlowingFluid extends Fluid {
             return state.blocksMotion()
                 ? false
                 : !(block instanceof DoorBlock)
-                    && !state.is(BlockTags.SIGNS)
+                    // MODIFIED for porting: lithium block.fluid.flow FlowingFluidMixin#isSign - the sign check is
+                    // expensive when using the block tag lookup
+                    && !(block instanceof net.minecraft.world.level.block.SignBlock)
                     && !state.is(Blocks.LADDER)
                     && !state.is(Blocks.SUGAR_CANE)
                     && !state.is(Blocks.BUBBLE_COLUMN)
@@ -487,7 +738,38 @@ public abstract class FlowingFluid extends Fluid {
             : this.shapes.computeIfAbsent(state, fluidState -> Shapes.box(0.0, 0.0, 0.0, 1.0, fluidState.getHeight(level, pos), 1.0));
     }
 
-    private record BlockStatePairKey(BlockState first, BlockState second, Direction direction) {
+    // MODIFIED for porting: lithium.accesswidener widened access, and lithium cached_hashcode
+    // FlowingFluid$BlockStatePairKeyMixin caches the hash code (this key is looked up for every fluid spread check).
+    // Upstream could add the extra field to the record through bytecode; in source a record cannot declare instance
+    // fields, so the record is written out as an ordinary final class with the identical accessors, equals and hashCode.
+    public static final class BlockStatePairKey {
+        private final BlockState first;
+        private final BlockState second;
+        private final Direction direction;
+        private final int hash;
+
+        public BlockStatePairKey(final BlockState first, final BlockState second, final Direction direction) {
+            this.first = first;
+            this.second = second;
+            this.direction = direction;
+            // MODIFIED for porting: lithium FlowingFluid$BlockStatePairKeyMixin#generateHash (RETURN of <init>)
+            int hash = System.identityHashCode(first);
+            hash = 31 * hash + System.identityHashCode(second);
+            this.hash = 31 * hash + direction.hashCode();
+        }
+
+        public BlockState first() {
+            return this.first;
+        }
+
+        public BlockState second() {
+            return this.second;
+        }
+
+        public Direction direction() {
+            return this.direction;
+        }
+
         @Override
         public boolean equals(final Object o) {
             return o instanceof FlowingFluid.BlockStatePairKey that
@@ -498,9 +780,13 @@ public abstract class FlowingFluid extends Fluid {
 
         @Override
         public int hashCode() {
-            int result = System.identityHashCode(this.first);
-            result = 31 * result + System.identityHashCode(this.second);
-            return 31 * result + this.direction.hashCode();
+            // MODIFIED for porting: lithium FlowingFluid$BlockStatePairKeyMixin uses the cached value
+            return this.hash;
+        }
+
+        @Override
+        public String toString() {
+            return "BlockStatePairKey[first=" + this.first + ", second=" + this.second + ", direction=" + this.direction + "]";
         }
     }
 

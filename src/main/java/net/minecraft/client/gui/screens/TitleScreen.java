@@ -104,6 +104,9 @@ public class TitleScreen extends Screen {
         return false;
     }
 
+    // MODIFIED for porting: iris MixinTitleScreen @Unique field
+    private static boolean iris$hasFirstInit;
+
     @Override
     protected void init() {
         if (this.splash == null) {
@@ -167,6 +170,16 @@ public class TitleScreen extends Screen {
 
         if (this.realmsNotificationsEnabled()) {
             this.realmsNotificationsScreen.init(this.width, this.height);
+        }
+
+        // MODIFIED for porting: was iris's MixinTitleScreen#iris$firstInit (@Inject RETURN) - iris finishes loading once the
+        // title screen is up for the first time.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            if (!iris$hasFirstInit) {
+                net.irisshaders.iris.Iris.onLoadingComplete();
+            }
+
+            iris$hasFirstInit = true;
         }
     }
 

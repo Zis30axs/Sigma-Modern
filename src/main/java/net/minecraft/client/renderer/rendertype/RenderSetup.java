@@ -22,10 +22,10 @@ import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
 public final class RenderSetup {
-    final RenderPipeline pipeline;
+    public final RenderPipeline pipeline; // MODIFIED for porting: iris.accesswidener
     final Map<String, RenderSetup.TextureBinding> textures;
     final TextureTransform textureTransform;
-    final OutputTarget outputTarget;
+    public final OutputTarget outputTarget; // MODIFIED for porting: iris.accesswidener
     final RenderSetup.OutlineProperty outlineProperty;
     final boolean useLightmap;
     final boolean useOverlay;

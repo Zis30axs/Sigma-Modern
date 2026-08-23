@@ -92,7 +92,35 @@ import org.joml.Vector4fc;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class LevelRenderer implements AutoCloseable {
+// MODIFIED for porting: implements sodium's LevelRendererExtension (core.render.world LevelRendererMixin). Sodium replaces
+// the vanilla terrain renderer: the vanilla section render dispatcher / view area are never allocated, and the render, chunk
+// update and completion queries below are forwarded to SodiumWorldRenderer.
+public class LevelRenderer implements AutoCloseable, net.caffeinemc.mods.sodium.client.world.LevelRendererExtension,
+    net.irisshaders.iris.mixin.LevelRendererAccessor,
+    net.irisshaders.iris.shadows.CullingDataCache { // MODIFIED for porting: iris LevelRendererAccessor + shadows MixinLevelRenderer
+    // MODIFIED for porting: sodium core.render.world LevelRendererMixin @Unique fields
+    private static final EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> SODIUM_STATIC_MAP =
+        new EnumMap<>(ChunkSectionLayer.class);
+
+    private net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer sodium$renderer;
+
+    private net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices sodium$matrices;
+
+    @Override
+    public net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer sodium$getWorldRenderer() {
+        return this.sodium$renderer;
+    }
+
+    @Override
+    public void sodium$setMatrices(final net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices matrices) {
+        this.sodium$matrices = matrices;
+    }
+
+    @Override
+    public net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices sodium$getMatrices() {
+        return this.sodium$matrices;
+    }
+
     private static final Identifier TRANSPARENCY_POST_CHAIN_ID = Identifier.withDefaultNamespace("transparency");
     private static final Identifier ENTITY_OUTLINE_POST_CHAIN_ID = Identifier.withDefaultNamespace("entity_outline");
     private static final int MINIMUM_TRANSPARENT_SORT_COUNT = 15;
@@ -102,7 +130,30 @@ public class LevelRenderer implements AutoCloseable {
     private final GameRenderer gameRenderer;
     private final EntityRenderDispatcher entityRenderDispatcher;
     private final BlockEntityRenderDispatcher blockEntityRenderDispatcher;
-    private final RenderBuffers renderBuffers;
+    // MODIFIED for porting: iris.accesswidener declares `mutable field LevelRenderer renderBuffers`, so it lost its final.
+    private RenderBuffers renderBuffers;
+
+    // MODIFIED for porting: was iris's LevelRendererAccessor @Accessor("entityRenderDispatcher") / @Accessor("renderBuffers")
+    // / @Accessor("levelRenderState")
+    @Override
+    public EntityRenderDispatcher getEntityRenderDispatcher() {
+        return this.entityRenderDispatcher;
+    }
+
+    @Override
+    public RenderBuffers getRenderBuffers() {
+        return this.renderBuffers;
+    }
+
+    @Override
+    public void setRenderBuffers(final RenderBuffers buffers) {
+        this.renderBuffers = buffers;
+    }
+
+    @Override
+    public LevelRenderState getLevelRenderState() {
+        return this.levelRenderState;
+    }
     private final FeatureRenderDispatcher featureRenderDispatcher;
     private final SubmitNodeStorage submitNodeStorage = new SubmitNodeStorage();
     private final ModelManager modelManager;
@@ -110,13 +161,53 @@ public class LevelRenderer implements AutoCloseable {
     private final AtlasManager atlasManager;
     private final ShaderManager shaderManager;
     private final LevelRenderState levelRenderState;
+    /**
+     * MODIFIED for porting: iris MixinLevelRenderer @Unique fields. {@code disableFrustumCulling} is written but never read
+     * upstream either; it is kept so the assignment in the pipeline setup below stays faithful.
+     */
+    private net.irisshaders.iris.pipeline.WorldRenderingPipeline iris$pipeline;
+
+    private boolean iris$warned;
+
+    @SuppressWarnings("unused")
+    private boolean iris$disableFrustumCulling;
+
+    private final org.joml.Matrix4f iris$modelMatrix = new org.joml.Matrix4f();
     private final OptionsRenderState optionsRenderState;
     private @Nullable SkyRenderer skyRenderer;
     private final CloudRenderer cloudRenderer = new CloudRenderer();
     private final WorldBorderRenderer worldBorderRenderer = new WorldBorderRenderer();
     private final WeatherEffectRenderer weatherEffectRenderer = new WeatherEffectRenderer();
     private final SectionOcclusionGraph sectionOcclusionGraph = new SectionOcclusionGraph();
-    private final ObjectArrayList<SectionRenderDispatcher.RenderSection> visibleSections = new ObjectArrayList<>(10000);
+    /**
+     * MODIFIED for porting: iris's shadows MixinLevelRenderer declares this {@code @Mutable @Shadow @Final} and swaps it with a
+     * second list around the shadow pass (its CullingDataCache implementation), so it lost its {@code final}.
+     * <p>
+     * Upstream additionally declares five {@code savedLastCamera*} fields and a {@code double tmp;} local in {@code swap()};
+     * none of them is ever read or written there, so they are not ported. Note also that sodium replaces the vanilla terrain
+     * path entirely, which makes this list unused in practice - the swap is kept because {@code ShadowRenderer} calls it.
+     */
+    private ObjectArrayList<SectionRenderDispatcher.RenderSection> visibleSections = new ObjectArrayList<>(10000);
+
+    // MODIFIED for porting: iris shadows MixinLevelRenderer @Unique field
+    private ObjectArrayList<SectionRenderDispatcher.RenderSection> iris$savedRenderChunks = new ObjectArrayList<>(69696);
+
+    @Override
+    public void saveState() {
+        this.iris$swap();
+    }
+
+    @Override
+    public void restoreState() {
+        this.iris$swap();
+    }
+
+    // MODIFIED for porting: was iris's shadows MixinLevelRenderer#swap (@Unique)
+    private void iris$swap() {
+        ObjectArrayList<SectionRenderDispatcher.RenderSection> tmpList = this.visibleSections;
+        this.visibleSections = this.iris$savedRenderChunks;
+        this.iris$savedRenderChunks = tmpList;
+    }
     private final ObjectArrayList<SectionRenderDispatcher.RenderSection> nearbyVisibleSections = new ObjectArrayList<>(50);
     private @Nullable ViewArea viewArea;
     private final RenderTarget entityOutlineTarget;
@@ -151,6 +242,8 @@ public class LevelRenderer implements AutoCloseable {
         this.levelRenderState = gameRenderer.gameRenderState().levelRenderState;
         this.optionsRenderState = gameRenderer.gameRenderState().optionsRenderState;
         this.entityOutlineTarget = new TextureTarget("Entity Outline", width, height, true, GpuFormat.RGBA8_UNORM);
+        // MODIFIED for porting: sodium core.render.world LevelRendererMixin#init (<init> RETURN)
+        this.sodium$renderer = new net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer(net.minecraft.client.Minecraft.getInstance());
     }
 
     public void render(
@@ -163,6 +256,49 @@ public class LevelRenderer implements AutoCloseable {
         final Vector4f fogColor,
         final boolean shouldRenderSky
     ) {
+        // MODIFIED for porting: was iris's vertices.immediate MixinLevelRenderer#iris$immediateStateBeginLevelRender
+        // (@Inject HEAD). Upstream applies it with a priority of 999 so it runs before the main iris mixins.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel = true;
+        }
+
+        // MODIFIED for porting: was iris's MixinLevelRenderer#iris$setupPipeline (@Inject HEAD). Upstream's comment: begin
+        // shader rendering after buffers have been cleared, so that shaders whose final pass does not write every pixel do not
+        // produce very odd issues.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.compat.dh.DHCompat.checkFrame();
+            this.iris$modelMatrix.set(modelViewMatrix);
+            net.irisshaders.iris.uniforms.IrisTimeUniforms.updateTime();
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setGbufferModelView(modelViewMatrix);
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                .setGbufferProjection(
+                    new org.joml.Matrix4f(
+                        ((net.caffeinemc.mods.sodium.client.util.GameRendererStorage)net.minecraft.client.Minecraft.getInstance().gameRenderer)
+                            .sodium$getProjectionMatrix()
+                    )
+                );
+            float irisFakeTickDelta = deltaTracker.getGameTimeDeltaPartialTick(false);
+            net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setTickDelta(irisFakeTickDelta);
+            if (this.cloudRenderer.getTexture() != null) {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE
+                    .setCloudTime(
+                        (this.levelRenderState.gameTime % (this.cloudRenderer.getTexture().width() * 400) + irisFakeTickDelta) * 0.03F
+                    );
+            } else {
+                net.irisshaders.iris.uniforms.CapturedRenderingState.INSTANCE.setCloudTime(0);
+            }
+
+            this.iris$pipeline = net.irisshaders.iris.Iris.getPipelineManager().preparePipeline(net.irisshaders.iris.Iris.getCurrentDimension());
+            this.iris$disableFrustumCulling = this.iris$pipeline.shouldDisableFrustumCulling();
+            this.iris$pipeline.beginLevelRendering();
+            this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE);
+            net.irisshaders.iris.gl.IrisRenderSystem.backupAndDisableCullingState(this.iris$pipeline.shouldDisableOcclusionCulling());
+
+            if (net.irisshaders.iris.Iris.shouldActivateWireframe() && net.minecraft.client.Minecraft.getInstance().isLocalServer()) {
+                net.irisshaders.iris.gl.IrisRenderSystem.setPolygonMode(org.lwjgl.opengl.GL43C.GL_LINE);
+            }
+        }
+
         float deltaPartialTick = deltaTracker.getGameTimeDeltaPartialTick(false);
         final ProfilerFiller profiler = Profiler.get();
         profiler.push("repositionCamera");
@@ -204,11 +340,50 @@ public class LevelRenderer implements AutoCloseable {
                     );
             }
         );
+        // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginLevelRender (@Inject at the first INVOKE of
+        // FramePass#executes, shift AFTER, with @Local FrameGraphBuilder and @Local(ordinal = 0) FramePass) - an extra frame
+        // graph pass that runs right after the clear pass and lets the pipeline set itself up on a cleared main target.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            FramePass irisSetupPass = frame.addPass("iris_setup");
+            this.targets.main = irisSetupPass.readsAndWrites(this.targets.main);
+            irisSetupPass.requires(clearPass);
+            irisSetupPass.executes(() -> {
+                GpuBufferSlice params = RenderSystem.getShaderFog();
+                this.iris$pipeline.onBeginClear();
+                RenderSystem.setShaderFog(params);
+            });
+        }
+
         if (shouldRenderSky) {
             this.addSkyPass(frame, cameraState, terrainFog);
         }
 
         ChunkSectionsToRender chunkSectionsToRender = this.prepareChunkRenders(this.levelRenderState.cameraRenderState.viewRotationMatrix);
+        // MODIFIED for porting: sodium core.render.world LevelRendererMixin#getRenderState (@WrapOperation around
+        // prepareChunkRenders) - hands sodium's renderer the matrices and camera position for this frame, and refreshes the
+        // fog color with the one actually used to render the sky (the one stored from FogRenderer is outdated by now).
+        this.sodium$matrices = new net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices(
+            ((net.caffeinemc.mods.sodium.client.util.GameRendererStorage)net.minecraft.client.Minecraft.getInstance().gameRenderer).sodium$getProjectionMatrix(),
+            this.levelRenderState.cameraRenderState.viewRotationMatrix
+        );
+        ((net.caffeinemc.mods.sodium.client.util.SodiumChunkSection)chunkSectionsToRender)
+            .sodium$setRendering(
+                this.sodium$renderer,
+                this.sodium$matrices,
+                this.levelRenderState.cameraRenderState.pos.x,
+                this.levelRenderState.cameraRenderState.pos.y,
+                this.levelRenderState.cameraRenderState.pos.z
+            );
+        this.sodium$renderer.updateFogColor(fogColor);
+        // MODIFIED for porting: was iris's MixinLevelRenderer#iris$renderTerrainShadows (@Inject at the INVOKE of
+        // addMainPass; its @Group of two variants exists only to match either the six- or the seven-argument addMainPass
+        // signature, and 26.2 has the six-argument one). Upstream's comment: do this before main pass submission so shadow
+        // maps are ready before terrain draws.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.isPackInUseQuick()) {
+            this.iris$pipeline
+                .renderShadows(this, net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera(), this.levelRenderState.cameraRenderState);
+        }
+
         this.addMainPass(frame, featureFrame, terrainFog, this.levelRenderState, profiler, chunkSectionsToRender);
         PostChain entityOutlineChain = this.shaderManager.getPostChain(ENTITY_OUTLINE_POST_CHAIN_ID, LevelTargetBundle.OUTLINE_TARGETS);
         if (featureFrame.hasAnyOutline() && entityOutlineChain != null) {
@@ -249,6 +424,50 @@ public class LevelRenderer implements AutoCloseable {
         });
         profiler.pop();
         this.targets.clear();
+        /*
+          MODIFIED for porting: was iris's MixinLevelRenderer#iris$endLevelRender (@Inject at the INVOKE of
+          Matrix4fStack#popMatrix). Upstream injects a bit early on purpose, so that iris ends its rendering before mods that
+          inject at RETURN (e.g. VoxelMap) draw their waypoint beams.
+        */
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.pathways.HandRenderer.INSTANCE
+                .renderTranslucent(
+                    modelViewMatrix,
+                    deltaTracker.getGameTimeDeltaPartialTick(true),
+                    net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera(),
+                    this.levelRenderState.cameraRenderState,
+                    net.minecraft.client.Minecraft.getInstance().gameRenderer,
+                    this.iris$pipeline
+                );
+            Profiler.get().popPush("iris_final");
+
+            if (net.irisshaders.iris.Iris.shouldActivateWireframe() && net.minecraft.client.Minecraft.getInstance().isLocalServer()) {
+                net.irisshaders.iris.gl.IrisRenderSystem.setPolygonMode(org.lwjgl.opengl.GL43C.GL_FILL);
+            }
+
+            this.iris$pipeline.finalizeLevelRendering();
+            this.iris$pipeline = null;
+
+            if (!this.iris$warned) {
+                this.iris$warned = true;
+                net.irisshaders.iris.Iris.getUpdateChecker()
+                    .getBetaInfo()
+                    .ifPresent(
+                        info -> net.minecraft.client.Minecraft.getInstance()
+                            .gui
+                            .hud
+                            .getChat()
+                            .addClientSystemMessage(
+                                net.minecraft.network.chat.Component
+                                    .literal("A new beta is out for Iris " + info.betaTag + ". Please redownload it.")
+                                    .withStyle(net.minecraft.ChatFormatting.BOLD, net.minecraft.ChatFormatting.RED)
+                            )
+                    );
+            }
+
+            net.irisshaders.iris.gl.IrisRenderSystem.restoreCullingState();
+        }
+
         modelViewStack.popMatrix();
         featureFrame.close();
         profiler.push("compileSections");
@@ -273,6 +492,12 @@ public class LevelRenderer implements AutoCloseable {
         Runnable playerCompiledSectionCallback = this.levelRenderState.playerCompiledSectionCallback;
         if (playerCompiledSectionCallback != null && this.isSectionCompiledAndVisible(this.levelRenderState.cameraRenderState.blockPos)) {
             playerCompiledSectionCallback.run();
+        }
+
+        // MODIFIED for porting: was iris's vertices.immediate MixinLevelRenderer#iris$immediateStateEndLevelRender
+        // (@Inject RETURN)
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            net.irisshaders.iris.vertices.ImmediateState.isRenderingLevel = false;
         }
     }
 
@@ -328,6 +553,36 @@ public class LevelRenderer implements AutoCloseable {
                 this.targets.main = pass.readsAndWrites(this.targets.main);
                 pass.executes(
                     () -> {
+                        /*
+                          MODIFIED for porting: was iris's MixinLevelRenderer_Sky#preRenderSky (@Inject HEAD of the sky pass
+                          lambda, cancellable). Upstream notes this is a modified copy of a sodium mixin with an added check for
+                          whether a shader pack is active - with a pack loaded the pack draws the sky itself, so the guard only
+                          applies when no pack is in use.
+
+                          It prevents the sky layer from rendering when the fog distance is reduced from the default, which
+                          would otherwise let the sky show through chunks culled by fog occlusion (this is also the cause of
+                          MC-152504). The caveat, quoting upstream, is that the sun/stars/moon become invisible underwater -
+                          consistent with Bedrock Edition, and arguably more correct since underwater fog already covers chunks
+                          outside the water.
+                        */
+                        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.getCurrentPack().isEmpty()) {
+                            net.minecraft.client.Camera irisCamera = net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera();
+                            boolean irisIsSubmersed = irisCamera.getFluidInCamera() != FogType.NONE;
+                            boolean irisBlockSky = this.getLevelRenderState().cameraRenderState.entityRenderState.doesMobEffectBlockSky;
+                            boolean irisUseThickFog = net.minecraft.client.Minecraft.getInstance().gui.hud.getBossOverlay().shouldCreateWorldFog();
+
+                            if (irisIsSubmersed || irisBlockSky || irisUseThickFog) {
+                                return;
+                            }
+                        }
+
+                        // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginSky (@Inject HEAD of the sky pass
+                        // lambda). Upstream's comment: use CUSTOM_SKY until levelFogColor is called, as a heuristic to catch
+                        // FabricSkyboxes.
+                        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                            net.irisshaders.iris.Iris.getPipelineManager().getPipeline().ifPresent(p -> p.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.CUSTOM_SKY));
+                        }
+
                         RenderSystem.setShaderFog(skyFog);
                         if (state.skybox == DimensionType.Skybox.END) {
                             this.skyRenderer.renderEndSky();
@@ -346,6 +601,12 @@ public class LevelRenderer implements AutoCloseable {
                             if (state.shouldRenderDarkDisc) {
                                 this.skyRenderer.renderDarkDisc();
                             }
+                        }
+
+                        // MODIFIED for porting: was iris's MixinLevelRenderer#iris$endSky (@Inject RETURN of the sky pass
+                        // lambda)
+                        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                            net.irisshaders.iris.Iris.getPipelineManager().getPipeline().ifPresent(p -> p.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE));
                         }
                     }
                 );
@@ -399,14 +660,17 @@ public class LevelRenderer implements AutoCloseable {
                     int maxAnisotropy = this.optionsRenderState.textureFiltering == TextureFilteringMethod.ANISOTROPIC
                         ? this.optionsRenderState.maxAnisotropyValue
                         : 1;
+                    // MODIFIED for porting: sodium core.render.world LevelRendererMixin#setFilterMode (@Redirect of the
+                    // FilterMode.LINEAR constant) - allows control of the texture filtering mode.
+                    FilterMode sodium$filterMode = net.caffeinemc.mods.sodium.client.SodiumClientMod.options().quality.pixelFilteringMode;
                     this.chunkLayerSampler = RenderSystem.getDevice()
                         .createSampler(
-                            AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, FilterMode.LINEAR, FilterMode.LINEAR, maxAnisotropy, OptionalDouble.empty()
+                            AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE, sodium$filterMode, sodium$filterMode, maxAnisotropy, OptionalDouble.empty()
                         );
                 }
 
                 profiler.push("solidTerrain");
-                chunkSectionsToRender.renderGroup(ChunkSectionLayerGroup.OPAQUE, this.chunkLayerSampler);
+                this.iris$renderTerrainGroup(chunkSectionsToRender, ChunkSectionLayerGroup.OPAQUE, this.chunkLayerSampler);
                 this.gameRenderer.lighting().setupFor(Lighting.Entry.LEVEL);
                 if (levelRenderState.shouldShowEntityOutlines && entityOutlineTarget != null) {
                     RenderTarget outlineTarget = entityOutlineTarget.get();
@@ -431,11 +695,29 @@ public class LevelRenderer implements AutoCloseable {
                 }
 
                 profiler.push("renderTranslucentFeatures");
+                // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginTranslucents (@Inject at the INVOKE of
+                // PreparedFrame#executeTranslucent inside the main pass lambda) - the solid hand pass runs here, between the
+                // solid and translucent parts of the frame.
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    this.iris$pipeline.beginHand();
+                    net.irisshaders.iris.pathways.HandRenderer.INSTANCE
+                        .renderSolid(
+                            this.iris$modelMatrix,
+                            net.minecraft.client.Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(true),
+                            net.minecraft.client.Minecraft.getInstance().gameRenderer.mainCamera(),
+                            levelRenderState.cameraRenderState,
+                            net.minecraft.client.Minecraft.getInstance().gameRenderer,
+                            this.iris$pipeline
+                        );
+                    Profiler.get().popPush("iris_pre_translucent");
+                    this.iris$pipeline.beginTranslucents();
+                }
+
                 featureFrame.executeTranslucent();
                 profiler.pop();
                 featureFrame.executeOutline();
                 profiler.push("translucentTerrain");
-                chunkSectionsToRender.renderGroup(ChunkSectionLayerGroup.TRANSLUCENT, this.chunkLayerSampler);
+                this.iris$renderTerrainGroup(chunkSectionsToRender, ChunkSectionLayerGroup.TRANSLUCENT, this.chunkLayerSampler);
                 profiler.pop();
                 featureFrame.executeTranslucentAfterTerrain();
             }
@@ -459,7 +741,49 @@ public class LevelRenderer implements AutoCloseable {
             this.targets.main = pass.readsAndWrites(this.targets.main);
         }
 
-        pass.executes(() -> this.cloudRenderer.render(cloudColor, cloudStatus, cloudHeight, cloudRange, cameraPosition, gameTime, partialTicks));
+        pass.executes(() -> {
+            // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginClouds (@Inject HEAD of the clouds pass lambda)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.CLOUDS);
+            }
+
+            // MODIFIED for porting: was sodium-extra's cloud MixinLevelRenderer#modifyCloudHeight
+            // (@Redirect on CloudRenderer#render inside lambda$addCloudsPass$0)
+            float effectiveCloudHeight = me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.CLOUD
+                    && me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.cloudHeightOverride
+                ? me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings.cloudHeight + 0.33F
+                : cloudHeight;
+            this.cloudRenderer.render(cloudColor, cloudStatus, effectiveCloudHeight, cloudRange, cameraPosition, gameTime, partialTicks);
+            // MODIFIED for porting: was iris's MixinLevelRenderer#iris$endClouds (@Inject RETURN of the clouds pass lambda)
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE);
+            }
+        });
+    }
+
+    /**
+     * MODIFIED for porting: merges iris's two wrappers around {@code ChunkSectionsToRender#renderGroup} in the main pass
+     * lambda - {@code skipRenderChunks} (@WrapWithCondition; a pipeline can skip all rendering) and
+     * {@code iris$beginTerrainLayer} (@WrapOperation; the pack needs to know which terrain layer group is being drawn).
+     */
+    private void iris$renderTerrainGroup(
+        final ChunkSectionsToRender chunkSectionsToRender, final ChunkSectionLayerGroup group, final com.mojang.blaze3d.textures.GpuSampler sampler
+    ) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            chunkSectionsToRender.renderGroup(group, sampler);
+            return;
+        }
+
+        boolean skipAll = net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable() instanceof net.irisshaders.iris.pipeline.IrisRenderingPipeline irisPipeline
+            && irisPipeline.skipAllRendering();
+
+        this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.fromTerrainRenderType(group));
+
+        if (!skipAll) {
+            chunkSectionsToRender.renderGroup(group, sampler);
+        }
+
+        this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE);
     }
 
     private void addWeatherPass(final FrameGraphBuilder frame, final GpuBufferSlice fog) {
@@ -473,11 +797,28 @@ public class LevelRenderer implements AutoCloseable {
 
         pass.executes(
             () -> {
+                // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginWeather (@Inject HEAD of the weather pass
+                // lambda)
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.RAIN_SNOW);
+                }
+
                 RenderSystem.setShaderFog(fog);
                 CameraRenderState cameraState = this.levelRenderState.cameraRenderState;
                 this.weatherEffectRenderer.render(cameraState.pos, this.levelRenderState.weatherRenderState);
+                // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginWorldBorder (@Inject at the INVOKE of
+                // WorldBorderRenderer#render inside the weather pass lambda)
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.WORLD_BORDER);
+                }
+
                 this.worldBorderRenderer
                     .render(this.levelRenderState.worldBorderRenderState, cameraState.pos, renderDistance, this.levelRenderState.cameraRenderState.depthFar);
+                // MODIFIED for porting: was iris's MixinLevelRenderer#iris$endWeather (@Inject RETURN of the weather pass
+                // lambda)
+                if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+                    this.iris$pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.NONE);
+                }
             }
         );
     }
@@ -497,7 +838,13 @@ public class LevelRenderer implements AutoCloseable {
                 RenderTarget mainRenderTarget = mainTarget.get();
                 RenderSystem.outputColorTextureOverride = mainRenderTarget.getColorTextureView();
                 RenderSystem.outputDepthTextureOverride = mainRenderTarget.getDepthTextureView();
-                RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(mainRenderTarget.getDepthTexture(), 0.0);
+                // MODIFIED for porting: was iris's MixinLevelRenderer#skip (@WrapOperation around
+                // CommandEncoder#clearDepthTexture inside the always_on_top pass lambda) - with a shader pack in use the depth
+                // buffer must not be cleared here, because the pack's own passes still need it.
+                if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() || !net.irisshaders.iris.api.v0.IrisApi.getInstance().isShaderPackInUse()) {
+                    RenderSystem.getDevice().createCommandEncoder().clearDepthTexture(mainRenderTarget.getDepthTexture(), 0.0);
+                }
+
                 featureFrame.executeAlwaysOnTop();
                 RenderSystem.outputColorTextureOverride = null;
                 RenderSystem.outputDepthTextureOverride = null;
@@ -506,7 +853,22 @@ public class LevelRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelRendererMixin#prepareChunkRenders (@Overwrite) - sodium builds and
+     * submits its own draw batches, so this only has to hand out an empty container bound to the block atlas.
+     */
     public ChunkSectionsToRender prepareChunkRenders(final Matrix4fc modelViewMatrix) {
+        return new ChunkSectionsToRender(
+            net.minecraft.client.Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView(),
+            SODIUM_STATIC_MAP,
+            -1,
+            new GpuBufferSlice[0]
+        );
+    }
+
+    // MODIFIED for porting: original vanilla body of prepareChunkRenders, replaced above
+    @SuppressWarnings("unused")
+    private ChunkSectionsToRender sodium$vanillaPrepareChunkRenders(final Matrix4fc modelViewMatrix) {
         ObjectListIterator<SectionRenderDispatcher.RenderSection> iterator = this.visibleSections.listIterator(0);
         EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroups = new EnumMap<>(ChunkSectionLayer.class);
         int largestIndexCount = 0;
@@ -702,6 +1064,19 @@ public class LevelRenderer implements AutoCloseable {
         }
     }
 
+    // MODIFIED for porting: the body of iris's MixinLevelRenderer#iris$beginBlockOutline
+    private static net.minecraft.client.renderer.rendertype.RenderType iris$wrapOutline(
+        final net.minecraft.client.renderer.rendertype.RenderType type
+    ) {
+        if (!net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
+            return type;
+        }
+
+        return new net.irisshaders.iris.layer.OuterWrappedRenderType(
+            "iris:is_outline", type, net.irisshaders.iris.layer.IsOutlineRenderStateShard.INSTANCE
+        );
+    }
+
     private void submitBlockOutline(final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final LevelRenderState levelRenderState) {
         BlockOutlineRenderState state = levelRenderState.blockOutlineRenderState;
         if (state != null) {
@@ -710,14 +1085,25 @@ public class LevelRenderer implements AutoCloseable {
             poseStack.pushPose();
             poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
             if (state.highContrast()) {
-                this.submitHitOutline(poseStack, submitNodeCollector, RenderTypes.secondaryBlockOutline(), state, -16777216, 7.0F, state.isTranslucent());
+                // MODIFIED for porting: was iris's MixinLevelRenderer#iris$beginBlockOutline (@ModifyArg index 2 on
+                // submitHitOutline, which matches both calls) - the wrapper tells the pack this geometry is the block outline.
+                this.submitHitOutline(
+                    poseStack,
+                    submitNodeCollector,
+                    iris$wrapOutline(RenderTypes.secondaryBlockOutline()),
+                    state,
+                    -16777216,
+                    7.0F,
+                    state.isTranslucent()
+                );
             }
 
             int outlineColor = state.highContrast() ? -11010079 : ARGB.black(102);
+            // MODIFIED for porting: iris MixinLevelRenderer#iris$beginBlockOutline, second of the two submitHitOutline calls
             this.submitHitOutline(
                 poseStack,
                 submitNodeCollector,
-                RenderTypes.lines(),
+                iris$wrapOutline(RenderTypes.lines()),
                 state,
                 outlineColor,
                 this.gameRenderer.gameRenderState().windowRenderState.appropriateLineWidth,
@@ -767,6 +1153,8 @@ public class LevelRenderer implements AutoCloseable {
 
     public void endFrame() {
         this.cloudRenderer.endFrame();
+        // MODIFIED for porting: sodium core.render.world LevelRendererMixin#sodium$endFrame (RETURN)
+        this.sodium$renderer.endFrame();
     }
 
     @Override
@@ -793,7 +1181,26 @@ public class LevelRenderer implements AutoCloseable {
         }
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelRendererMixin#sodium$replace (HEAD, cancellable). The vanilla
+     * section render dispatcher and view area are replaced by no-op stand-ins so nothing is allocated for them, and the
+     * reload is forwarded to sodium's renderer.
+     */
     public void invalidateCompiledGeometry(final ClientLevel level, final Options options, final Camera camera, final BlockColors blockColors) {
+        this.cloudRenderer.markForRebuild();
+        LeavesBlock.setCutoutLeaves(options.cutoutLeaves().get());
+        this.sodium$renderer.reload();
+        this.sectionRenderDispatcher = new net.caffeinemc.mods.sodium.client.util.IgnoringSectionRenderDispatcher(
+            Util.backgroundExecutor(), this.renderBuffers, null, this.sectionOcclusionGraph::schedulePropagationFrom
+        );
+        this.viewArea = new net.caffeinemc.mods.sodium.client.util.IgnoringViewArea(this.sectionRenderDispatcher);
+        this.sectionOcclusionGraph.waitAndReset(this.viewArea);
+        this.clearVisibleSections();
+    }
+
+    // MODIFIED for porting: original vanilla body of invalidateCompiledGeometry, replaced above
+    @SuppressWarnings("unused")
+    private void sodium$vanillaInvalidateCompiledGeometry(final ClientLevel level, final Options options, final Camera camera, final BlockColors blockColors) {
         SectionCompiler sectionCompiler = new SectionCompiler(
             options.ambientOcclusion().get(),
             options.cutoutLeaves().get(),
@@ -880,6 +1287,9 @@ public class LevelRenderer implements AutoCloseable {
     }
 
     public void resetLevelRenderData() {
+        // MODIFIED for porting: sodium core.render.world LevelRendererMixin#onTerrainUpdateScheduled is injected at RETURN;
+        // it is placed here because the vanilla body below has several exit paths only in the sense of early returns - it has
+        // none, so this call happens after the whole body (see the end of this method).
         if (this.viewArea != null) {
             this.viewArea.releaseAllBuffers();
             this.viewArea = null;
@@ -892,21 +1302,24 @@ public class LevelRenderer implements AutoCloseable {
         this.sectionRenderDispatcher = null;
         this.sectionOcclusionGraph.waitAndReset(null);
         this.clearVisibleSections();
+        // MODIFIED for porting: sodium core.render.world LevelRendererMixin#onTerrainUpdateScheduled (RETURN)
+        this.sodium$renderer.scheduleTerrainUpdate();
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelRendererMixin#hasRenderedAllSections (@Overwrite) - redirect the
+     * check to sodium's renderer.
+     */
     public boolean hasRenderedAllSections() {
-        return this.sectionRenderDispatcher == null || this.sectionRenderDispatcher.isQueueEmpty();
+        return this.sodium$renderer.isTerrainRenderComplete();
     }
 
+    /**
+     * MODIFIED for porting: sodium core.render.world LevelRendererMixin#isSectionCompiledAndVisible (@Overwrite) - redirect
+     * chunk updates to sodium's renderer.
+     */
     public boolean isSectionCompiledAndVisible(final BlockPos blockPos) {
-        if (this.viewArea == null) {
-            return false;
-        }
-
-        SectionRenderDispatcher.RenderSection renderSection = this.viewArea.getRenderSectionAt(blockPos);
-        return renderSection != null && renderSection.sectionMesh.get() != CompiledSectionMesh.UNCOMPILED
-            ? renderSection.getVisibility(Util.getMillis()) >= 0.3F
-            : false;
+        return this.sodium$renderer.isSectionReady(blockPos.getX() >> 4, blockPos.getY() >> 4, blockPos.getZ() >> 4);
     }
 
     public @Nullable SectionRenderDispatcher sectionRenderDispatcher() {

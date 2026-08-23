@@ -49,6 +49,12 @@ public abstract class AbstractSignRenderer<S extends SignRenderState> implements
     }
 
     private void submitSignText(final S state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final SignText signText) {
+        // MODIFIED for porting: was iris's AbstractSignRendererMixin#fism$cancelSignTextRendering (@Inject HEAD, cancellable) -
+        // sign text is not visible in the shadow map, so it is not rendered during the shadow pass.
+        if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.apiimpl.IrisApiV0Impl.INSTANCE.isRenderingShadowPass()) {
+            return;
+        }
+
         int darkColor = getDarkColor(signText);
         int signMidpoint = 4 * state.textLineHeight / 2;
         FormattedCharSequence[] formattedLines = signText.getRenderMessages(state.isTextFilteringEnabled, input -> {

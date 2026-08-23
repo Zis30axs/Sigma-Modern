@@ -67,6 +67,12 @@ public class PistonHeadRenderer implements BlockEntityRenderer<PistonMovingBlock
     public void submit(
         final PistonHeadRenderState state, final PoseStack poseStack, final SubmitNodeCollector submitNodeCollector, final CameraRenderState camera
     ) {
+        // MODIFIED for porting: was sodium-extra's render.block.entity MixinPistonBlockEntityRenderer#render
+        // (@Inject HEAD, cancellable)
+        if (me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.RENDER_BLOCK_ENTITY && !me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().renderSettings.piston) {
+            return;
+        }
+
         if (state.block != null) {
             poseStack.pushPose();
             poseStack.translate(state.xOffset, state.yOffset, state.zOffset);

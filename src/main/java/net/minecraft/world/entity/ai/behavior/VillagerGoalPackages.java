@@ -48,7 +48,9 @@ public class VillagerGoalPackages {
             Pair.of(5, GoToWantedItem.create(speedModifier, false, 4)),
             Pair.of(
                 6,
-                AcquirePoi.create(
+                // MODIFIED for porting: lithium ai.useless_behaviors.nitwit_job_search VillagerGoalPackagesMixin
+                // #returnNullIfAcquirePoiIsUseless (@Redirect)
+                lithium$acquireJobSitePoiOrSentinel(
                     profession.value().acquirableJobSite(),
                     MemoryModuleType.JOB_SITE,
                     MemoryModuleType.POTENTIAL_JOB_SITE,
@@ -64,6 +66,31 @@ public class VillagerGoalPackages {
             Pair.of(10, AssignProfessionFromJobSite.create()),
             Pair.of(10, ResetProfession.create())
         );
+    }
+
+    /**
+     * MODIFIED for porting: was lithium's ai.useless_behaviors.nitwit_job_search VillagerGoalPackagesMixin, by jcw780.
+     * <p>
+     * Nitwits still run the AcquirePoi task for job sites even though it will always fail. This replaces that behavior with
+     * the sentinel (which {@link net.minecraft.world.entity.ai.Brain#addActivity} drops) if the acquirable job site is
+     * {@link net.minecraft.world.entity.ai.village.poi.PoiType#NONE}. Villagers refresh their brains when modified via
+     * commands, so this also works for data-modified
+     * professions.
+     */
+    @SuppressWarnings("unchecked")
+    private static BehaviorControl<net.minecraft.world.entity.PathfinderMob> lithium$acquireJobSitePoiOrSentinel(
+        final java.util.function.Predicate<net.minecraft.core.Holder<net.minecraft.world.entity.ai.village.poi.PoiType>> acquirablePoi,
+        final MemoryModuleType<net.minecraft.core.GlobalPos> memory,
+        final MemoryModuleType<net.minecraft.core.GlobalPos> potentialMemory,
+        final boolean onlyIfAdult,
+        final Optional<Byte> entityStatus,
+        final java.util.function.BiPredicate<ServerLevel, net.minecraft.core.BlockPos> poiValidator
+    ) {
+        if (acquirablePoi == net.minecraft.world.entity.ai.village.poi.PoiType.NONE) {
+            return (BehaviorControl<net.minecraft.world.entity.PathfinderMob>)(BehaviorControl<?>)net.caffeinemc.mods.lithium.common.ai.useless_behaviors.LithiumEmptyBehavior.EMPTY_BEHAVIOR_SENTINEL;
+        }
+
+        return AcquirePoi.create(acquirablePoi, memory, potentialMemory, onlyIfAdult, entityStatus, poiValidator);
     }
 
     private static boolean validateBedPoi(final ServerLevel level, final BlockPos blockPos) {

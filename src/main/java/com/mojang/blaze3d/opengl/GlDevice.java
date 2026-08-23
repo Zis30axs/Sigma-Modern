@@ -45,7 +45,7 @@ import org.lwjgl.opengl.GLCapabilities;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-class GlDevice implements GpuDeviceBackend {
+public class GlDevice implements GpuDeviceBackend {
     private static final Logger LOGGER = LogUtils.getLogger();
     protected static boolean USE_GL_ARB_vertex_attrib_binding = true;
     protected static boolean USE_GL_KHR_debug = true;

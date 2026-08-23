@@ -32,7 +32,9 @@ public class Mth {
     private static final int SIN_MASK = 65535;
     private static final int COS_OFFSET = 16384;
     private static final double SIN_SCALE = 10430.378350470453;
-    private static final float[] SIN = Util.make(new float[65536], sin -> {
+    // MODIFIED for porting: lithium.accesswidener widened access and lithium math.sine_lut MthMixin made the
+    // field mutable so it can be released after CompactSineLUT has copied the table it needs.
+    public static float[] SIN = Util.make(new float[65536], sin -> {
         for (int i = 0; i < sin.length; i++) {
             sin[i] = (float)Math.sin(i / 10430.378350470453);
         }
@@ -47,12 +49,14 @@ public class Mth {
     private static final double[] ASIN_TAB = new double[257];
     private static final double[] COS_TAB = new double[257];
 
+    // MODIFIED for porting: lithium math.sine_lut MthMixin replaces the sine table lookup with CompactSineLUT,
+    // which stores only a quarter of the table and mirrors it.
     public static float sin(final double i) {
-        return SIN[(int)((long)(i * 10430.378350470453) & 65535L)];
+        return net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.sin(i);
     }
 
     public static float cos(final double i) {
-        return SIN[(int)((long)(i * 10430.378350470453 + 16384.0) & 65535L)];
+        return net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.cos(i);
     }
 
     public static float sqrt(final float x) {
@@ -775,5 +779,10 @@ public class Mth {
             COS_TAB[ind] = Math.cos(asinv);
             ASIN_TAB[ind] = asinv;
         }
+
+        // MODIFIED for porting: lithium math.sine_lut MthMixin#onClassInit (RETURN of <clinit>). CompactSineLUT reads
+        // Mth.SIN while initializing, afterwards the full-size vanilla table can be released.
+        net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.init();
+        SIN = null;
     }
 }

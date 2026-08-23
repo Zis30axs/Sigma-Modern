@@ -40,6 +40,15 @@ public class FuelValues {
     }
 
     public static FuelValues vanillaBurnTimes(final HolderLookup.Provider registries, final FeatureFlagSet enabledFeatures, final int baseUnit) {
+        // MODIFIED for porting: was lithium-fabric's util.initialization FuelValuesMixin. Fuel values are always rebuilt
+        // after block tags change, which is exactly when lithium's cached per-block-state information (block state flags,
+        // path node types) has to be recomputed, so upstream uses this method as its initialization hook.
+        FuelValues lithium$result = lithium$buildVanillaBurnTimes(registries, enabledFeatures, baseUnit);
+        net.caffeinemc.mods.lithium.common.initialization.BlockInfoInitializer.initializeBlockInfo();
+        return lithium$result;
+    }
+
+    private static FuelValues lithium$buildVanillaBurnTimes(final HolderLookup.Provider registries, final FeatureFlagSet enabledFeatures, final int baseUnit) {
         return new FuelValues.Builder(registries, enabledFeatures)
             .add(Items.LAVA_BUCKET, baseUnit * 100)
             .add(Blocks.COAL_BLOCK, baseUnit * 8 * 10)

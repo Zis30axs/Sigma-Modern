@@ -33,9 +33,16 @@ public enum AxisCycle {
             return axis.choose(z, x, y);
         }
 
+        // MODIFIED for porting: lithium math.fast_util AxisCycleDirectionMixin$ForwardMixin replaces the
+        // array+modulo lookup by a switch on the axis ordinal.
         @Override
         public Direction.Axis cycle(final Direction.Axis axis) {
-            return AXIS_VALUES[Math.floorMod(axis.ordinal() + 1, 3)];
+            return switch (axis.ordinal()) {
+                case 0 -> Direction.Axis.Y;
+                case 1 -> Direction.Axis.Z;
+                case 2 -> Direction.Axis.X;
+                default -> throw new IllegalArgumentException();
+            };
         }
 
         @Override
@@ -54,9 +61,15 @@ public enum AxisCycle {
             return axis.choose(y, z, x);
         }
 
+        // MODIFIED for porting: lithium math.fast_util AxisCycleDirectionMixin$BackwardMixin (see FORWARD above)
         @Override
         public Direction.Axis cycle(final Direction.Axis axis) {
-            return AXIS_VALUES[Math.floorMod(axis.ordinal() - 1, 3)];
+            return switch (axis.ordinal()) {
+                case 0 -> Direction.Axis.Z;
+                case 1 -> Direction.Axis.X;
+                case 2 -> Direction.Axis.Y;
+                default -> throw new IllegalArgumentException();
+            };
         }
 
         @Override

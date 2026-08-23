@@ -10,7 +10,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
 
-public class TransientEntitySectionManager<T extends EntityAccess> {
+public class TransientEntitySectionManager<T extends EntityAccess> implements net.caffeinemc.mods.lithium.mixin.util.accessors.TransientEntitySectionManagerAccessor<T> { // MODIFIED for porting: lithium TransientEntitySectionManagerAccessor
     private static final Logger LOGGER = LogUtils.getLogger();
     private final LevelCallback<T> callbacks;
     private final EntityLookup<T> entityStorage;
@@ -45,6 +45,12 @@ public class TransientEntitySectionManager<T extends EntityAccess> {
                 section.getEntities().filter(e -> !e.isAlwaysTicking()).forEach(this.callbacks::onTickingEnd);
             }
         });
+    }
+
+    // MODIFIED for porting: was lithium's TransientEntitySectionManagerAccessor accessor Mixin
+    @Override
+    public EntitySectionStorage<T> getCache() {
+        return this.sectionStorage;
     }
 
     public LevelEntityGetter<T> getEntityGetter() {

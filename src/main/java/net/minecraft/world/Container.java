@@ -16,7 +16,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jspecify.annotations.Nullable;
 
-public interface Container extends Clearable, Iterable<ItemStack>, SlotProvider {
+// MODIFIED for porting: lithium block.hopper ContainerMixin gives every container the two default hooks that
+// lithium's hopper optimization asks about (cooldown forwarding and the insertion test's stack-size requirement).
+public interface Container
+    extends Clearable, Iterable<ItemStack>, SlotProvider, net.caffeinemc.mods.lithium.api.inventory.LithiumCooldownReceivingInventory, net.caffeinemc.mods.lithium.api.inventory.LithiumTransferConditionInventory {
     float DEFAULT_DISTANCE_BUFFER = 4.0F;
 
     int getContainerSize();

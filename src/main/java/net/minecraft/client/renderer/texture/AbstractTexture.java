@@ -11,7 +11,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public abstract class AbstractTexture implements AutoCloseable {
+// MODIFIED for porting: was iris's texture MixinAbstractTexture (AbstractTextureExtended is a marker interface)
+public abstract class AbstractTexture implements AutoCloseable, net.irisshaders.iris.mixinterface.AbstractTextureExtended {
     protected @Nullable GpuTexture texture;
     protected @Nullable GpuTextureView textureView;
     protected GpuSampler sampler = RenderSystem.getSamplerCache()
@@ -34,10 +35,23 @@ public abstract class AbstractTexture implements AutoCloseable {
         }
     }
 
+    /**
+     * MODIFIED for porting: iris texture MixinAbstractTexture @Unique field plus its #iris$afterGenerateId (@Inject RETURN) -
+     * iris tracks every GL texture id it sees so its PBR system can find the matching texture object again. Upstream's
+     * {@code iris$setFilter} / {@code onSet} pair is not ported: its injection is commented out there, so {@code onSet} is
+     * unreachable (it only logged filter changes).
+     */
+    private GpuTexture iris$lastChecked;
+
     public GpuTexture getTexture() {
         if (this.texture == null) {
             throw new IllegalStateException("Texture does not exist, can't get it before something initializes it");
         } else {
+            if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && this.iris$lastChecked != this.texture) {
+                this.iris$lastChecked = this.texture;
+                net.irisshaders.iris.pbr.TextureTracker.INSTANCE.trackTexture(this.iris$lastChecked.iris$getGlId(), this);
+            }
+
             return this.texture;
         }
     }

@@ -128,7 +128,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
     private volatile Long2ObjectLinkedOpenHashMap<ChunkHolder> visibleChunkMap = this.updatingChunkMap.clone();
     private final Long2ObjectLinkedOpenHashMap<ChunkHolder> pendingUnloads = new Long2ObjectLinkedOpenHashMap<>();
     private final List<ChunkGenerationTask> pendingGenerationTasks = new ArrayList<>();
-    private final ServerLevel level;
+    public final ServerLevel level; // MODIFIED for porting: lithium.accesswidener widened access
     private final ThreadedLevelLightEngine lightEngine;
     private final BlockableEventLoop<Runnable> mainThreadExecutor;
     private final RandomState randomState;
@@ -1323,12 +1323,14 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
         }
     }
 
-    private class TrackedEntity implements ServerEntity.Synchronizer {
+    public class TrackedEntity implements ServerEntity.Synchronizer { // MODIFIED for porting: lithium.accesswidener made this class accessible
         private final ServerEntity serverEntity;
         private final Entity entity;
         private final int range;
         private SectionPos lastSectionPos;
-        private final Set<ServerPlayerConnection> seenBy = Sets.newIdentityHashSet();
+        // MODIFIED for porting: lithium alloc.entity_tracker ChunkMap$TrackedEntityMixin - a ReferenceOpenHashSet uses
+        // less memory than Guava's identity hash set and caches the returned iterator.
+        private final Set<ServerPlayerConnection> seenBy = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
 
         public TrackedEntity(final Entity entity, final int range, final int updateInterval, final boolean trackDelta) {
             this.serverEntity = new ServerEntity(ChunkMap.this.level, entity, updateInterval, trackDelta, this);
