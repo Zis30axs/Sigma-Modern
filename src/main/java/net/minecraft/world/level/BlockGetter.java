@@ -7,6 +7,8 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -246,7 +248,12 @@ public interface BlockGetter extends LevelHeightAccessor {
 
     static boolean forEachBlockIntersectedBetween(final Vec3 from, final Vec3 to, final AABB aabbAtTarget, final BlockGetter.BlockStepVisitor visitor) {
         Vec3 travel = to.subtract(from);
-        if (travel.lengthSqr() < Mth.square(1.0E-5F)) {
+                // MODIFIED for porting: was VFP movement.constants MixinBlockGetter (@ModifyExpressionValue <=1_21_7 uses 0.99999)
+        float vfp$epsilon = 1.0E-5F;
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_7)) {
+            vfp$epsilon = 0.99999F;
+        }
+        if (travel.lengthSqr() < Mth.square(vfp$epsilon)) {
             for (BlockPos blockPos : BlockPos.betweenClosed(aabbAtTarget)) {
                 if (!visitor.visit(blockPos, 0)) {
                     return false;

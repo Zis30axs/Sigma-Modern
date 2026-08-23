@@ -22,6 +22,8 @@ import net.minecraft.client.gui.screens.inventory.TestBlockEditScreen;
 import net.minecraft.client.gui.screens.inventory.TestInstanceBlockEditScreen;
 import net.minecraft.client.gui.screens.options.HasGamemasterPermissionReaction;
 import net.minecraft.client.multiplayer.ClientLevel;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.chat.ChatAbilities;
 import net.minecraft.client.resources.sounds.AmbientSoundHandler;
@@ -285,7 +287,7 @@ public class LocalPlayer extends AbstractClientPlayer
             double deltaYRot = this.getYRot() - this.yRotLast;
             double deltaXRot = this.getXRot() - this.xRotLast;
             this.positionReminder++;
-            boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > Mth.square(2.0E-4) || this.positionReminder >= 20;
+            boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || this.positionReminder >= 20;
             boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0;
             if (move && rot) {
                 this.connection
