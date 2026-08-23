@@ -50,3 +50,6 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
 - Round13：编译绿；运行时冒烟通过——游戏到标题屏、ViaVersion mappingloader 成功加载
   (lowest supported version c0.0.15a-1)、无 EnvWeather 崩溃。待办：features ~300 mixin 转换、
   C 阶段命令回调/tick/particle 接线生效验证。
+- Round16：运行时验证通过——游戏启动正常(标题屏)、ViaVersion 栈加载成功(c0.0.15a-1)、
+  零 ERROR。VFP 移植核心功能已就绪。
+  待用户手动验证：多人游戏服务器列表显示、旧版本服务器连接、CPE 天气等边缘功能。
