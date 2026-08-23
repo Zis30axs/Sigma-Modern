@@ -786,6 +786,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             );
         // MODIFIED for porting: was iris's MixinMinecraft_Images#iris$setupImages (@Inject into <init> at TAIL)
         this.iris$setupImages();
+        // MODIFIED for porting: was VFP event MixinMinecraft#callPostGameLoadEvent (@Inject <init> RETURN)
+        com.viaversion.viafabricplus.ViaFabricPlusImpl.LOADING_CYCLE.invoker().onLoadCycle(
+            com.viaversion.viafabricplus.api.events.LoadingCycleCallback.LoadingCycle.POST_GAME_LOAD);
     }
 
     public boolean hasShiftDown() {

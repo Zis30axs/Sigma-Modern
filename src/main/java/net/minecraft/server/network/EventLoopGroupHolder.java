@@ -23,7 +23,19 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import java.util.concurrent.ThreadFactory;
 import org.jspecify.annotations.Nullable;
 
-public abstract class EventLoopGroupHolder {
+public abstract class EventLoopGroupHolder implements com.viaversion.viafabricplus.injection.access.core.bedrock.IEventLoopGroupHolder {
+    // MODIFIED for porting: was VFP bedrock MixinEventLoopGroupHolder @Unique field
+    private boolean viaFabricPlus$connecting;
+
+    @Override
+    public boolean viaFabricPlus$isConnecting() {
+        return this.viaFabricPlus$connecting;
+    }
+
+    @Override
+    public void viaFabricPlus$setConnecting(final boolean connecting) {
+        this.viaFabricPlus$connecting = connecting;
+    }
     private static final EventLoopGroupHolder NIO = new EventLoopGroupHolder("NIO", NioSocketChannel.class, NioServerSocketChannel.class) {
         @Override
         protected IoHandlerFactory ioHandlerFactory() {
@@ -63,8 +75,11 @@ public abstract class EventLoopGroupHolder {
                 return EPOLL;
             }
         }
-
-        return NIO;
+        final EventLoopGroupHolder holder = NIO;
+        if (holder instanceof com.viaversion.viafabricplus.injection.access.core.bedrock.IEventLoopGroupHolder h) {
+            h.viaFabricPlus$setConnecting(false);
+        }
+        return holder;
     }
 
     public static EventLoopGroupHolder local() {

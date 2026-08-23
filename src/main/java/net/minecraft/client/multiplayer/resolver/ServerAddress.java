@@ -9,7 +9,19 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public final class ServerAddress {
+public final class ServerAddress implements com.viaversion.viafabricplus.injection.access.core.bedrock.IServerAddress {
+    // MODIFIED for porting: was VFP bedrock MixinServerAddress @Unique field
+    private dev.kastle.netty.channel.nethernet.config.NetherNetAddress viaFabricPlus$netherNetAddress;
+
+    @Override
+    public dev.kastle.netty.channel.nethernet.config.NetherNetAddress viaFabricPlus$getNetherNetAddress() {
+        return this.viaFabricPlus$netherNetAddress;
+    }
+
+    @Override
+    public void viaFabricPlus$setNetherNetAddress(final dev.kastle.netty.channel.nethernet.config.NetherNetAddress address) {
+        this.viaFabricPlus$netherNetAddress = address;
+    }
     private static final Logger LOGGER = LogUtils.getLogger();
     private final HostAndPort hostAndPort;
     private static final ServerAddress INVALID = new ServerAddress(HostAndPort.fromParts("server.invalid", 25565));

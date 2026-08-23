@@ -76,6 +76,9 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
+import com.viaversion.viafabricplus.util.network.DataCustomPayload;
+import com.viaversion.viafabricplus.util.network.SyncTasks;
+import net.minecraft.network.FriendlyByteBuf;
 @OnlyIn(Dist.CLIENT)
 public abstract class ClientCommonPacketListenerImpl implements ClientCommonPacketListener {
     private static final Component GENERIC_DISCONNECT_MESSAGE = Component.translatable("disconnect.lost");
@@ -157,6 +160,11 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
 
     @Override
     public void handleCustomPayload(final ClientboundCustomPayloadPacket packet) {
+        // MODIFIED for porting: was VFP sync_tasks MixinClientCommonPacketListenerImpl#handleSyncTask (@Inject HEAD cancellable)
+        if (packet.payload() instanceof com.viaversion.viafabricplus.util.network.DataCustomPayload(FriendlyByteBuf vfpBuf)) {
+            com.viaversion.viafabricplus.util.network.SyncTasks.handleSyncTask(vfpBuf);
+            return;
+        }
         CustomPacketPayload payload = packet.payload();
         if (!(payload instanceof DiscardedPayload)) {
             PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
