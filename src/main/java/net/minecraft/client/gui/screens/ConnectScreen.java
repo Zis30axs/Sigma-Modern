@@ -4,8 +4,17 @@ import com.mojang.logging.LogUtils;
 import io.netty.channel.ChannelFuture;
 import java.net.InetSocketAddress;
 import java.util.Optional;
-import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.viaversion.viafabricplus.ViaFabricPlusImpl;
+import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viafabricplus.injection.access.networking.legacy_chat_signature.IProfilePublicKey_Data;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.connection.UserConnection;
+import com.viaversion.viaversion.api.minecraft.ProfileKey;
+import com.viaversion.viaversion.api.minecraft.signature.storage.ChatSession1_19_0;
+import com.viaversion.viaversion.api.minecraft.signature.storage.ChatSession1_19_1;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import java.security.PrivateKey;
 import net.minecraft.DefaultUncaughtExceptionHandler;
 import net.minecraft.client.GameNarrator;
 import net.minecraft.client.Minecraft;
@@ -120,7 +129,7 @@ public class ConnectScreen extends Screen {
                     }
 
                     address = resolvedAddress.get();
-                    // MODIFIED for porting was VFP srv_resolving MixinConnectScreen_1 getRealAddress/getRealPort (@Redirect <=1_17 uses raw host/port)
+                    // MODIFIED for porting: was VFP srv_resolving MixinConnectScreen_1 getRealAddress/getRealPort (@Redirect <=1_17 uses raw host/port)
                     final boolean vfp$useRawAddress = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17);
                     final String vfp$connectHost = vfp$useRawAddress ? hostAndPort.getHost() : address.getHostName();
                     final int vfp$connectPort = vfp$useRawAddress ? hostAndPort.getPort() : address.getPort();
@@ -159,48 +168,8 @@ public class ConnectScreen extends Screen {
                             com.viaversion.viafabricplus.ViaFabricPlusImpl.INSTANCE.getLogger().error("Could not get public key signature. Joining servers with enforce-secure-profiles enabled will not work!");
                         }
                     }
-                    // MODIFIED for porting: was VFP legacy_chat_signature MixinConnectScreen_1#setupChatSessions (@Inject AFTER syncUninterruptibly)
-                    final UserConnection vfp$viaUser = ((com.viaversion.viafabricplus.injection.access.core.IConnection) pendingConnection).viaFabricPlus$getUserConnection();
-                    if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_19, ProtocolVersion.v1_19_1)) {
-                        final ProfileKeyPair keyPair = minecraft.getProfileKeyPairManager().prepareKeyPair().join().orElse(null);
-                        if (keyPair != null) {
-                            final ProfilePublicKey.Data publicKeyData = keyPair.publicKey().data();
-                            final PrivateKey privateKey = keyPair.privateKey();
-                            final long expiresAt = publicKeyData.expiresAt().toEpochMilli();
-                            final byte[] publicKey = publicKeyData.key().getEncoded();
-                            final UUID uuid = minecraft.getUser().getProfileId();
-                            vfp$viaUser.put(new ChatSession1_19_1(uuid, privateKey, new ProfileKey(expiresAt, publicKey, publicKeyData.keySignature())));
-                            if (ProtocolTranslator.getTargetVersion() == ProtocolVersion.v1_19) {
-                                final byte[] legacyKeySignature = publicKeyData.viafabricplus$getLegacyPublicKeySignature();
-                                if (legacyKeySignature != null) {
-                                    vfp$viaUser.put(new ChatSession1_19_0(uuid, privateKey, new ProfileKey(expiresAt, publicKey, legacyKeySignature)));
-                                }
-                            }
-                        } else {
-                            com.viaversion.viafabricplus.ViaFabricPlusImpl.INSTANCE.getLogger().error("Could not get public key signature. Joining servers with enforce-secure-profiles enabled will not work!");
-                        }
-                    }
-                    // MODIFIED for porting: was VFP legacy_chat_signature MixinConnectScreen_1#setupChatSessions (@Inject AFTER syncUninterruptibly)
-                    final UserConnection vfp$viaUser = ((com.viaversion.viafabricplus.injection.access.core.IConnection) pendingConnection).viaFabricPlus$getUserConnection();
-                    if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_19, ProtocolVersion.v1_19_1)) {
-                        final ProfileKeyPair keyPair = minecraft.getProfileKeyPairManager().prepareKeyPair().join().orElse(null);
-                        if (keyPair != null) {
-                            final ProfilePublicKey.Data publicKeyData = keyPair.publicKey().data();
-                            final PrivateKey privateKey = keyPair.privateKey();
-                            final long expiresAt = publicKeyData.expiresAt().toEpochMilli();
-                            final byte[] publicKey = publicKeyData.key().getEncoded();
-                            final UUID uuid = minecraft.getUser().getProfileId();
-                            vfp$viaUser.put(new ChatSession1_19_1(uuid, privateKey, new ProfileKey(expiresAt, publicKey, publicKeyData.keySignature())));
-                            if (ProtocolTranslator.getTargetVersion() == ProtocolVersion.v1_19) {
-                                final byte[] legacyKeySignature = publicKeyData.viafabricplus$getLegacyPublicKeySignature();
-                                if (legacyKeySignature != null) {
-                                    vfp$viaUser.put(new ChatSession1_19_0(uuid, privateKey, new ProfileKey(expiresAt, publicKey, legacyKeySignature)));
-                                }
-                            }
-                        } else {
-                            com.viaversion.viafabricplus.ViaFabricPlusImpl.INSTANCE.getLogger().error("Could not get public key signature. Joining servers with enforce-secure-profiles enabled will not work!");
-                        }
-                    }
+                    // MODIFIED for porting: srv_resolving raw host/port substitution (<=1_17)
+                    address = new InetSocketAddress(vfp$connectHost, vfp$connectPort);
                     synchronized (ConnectScreen.this) {
                         if (ConnectScreen.this.aborted) {
                             pendingConnection.disconnect(ConnectScreen.ABORT_CONNECTION);
@@ -213,8 +182,8 @@ public class ConnectScreen extends Screen {
 
                     ConnectScreen.this.connection
                         .initiateServerboundPlayConnection(
-                            vfp$connectHost,
-                            vfp$connectPort,
+                            address.getHostName(),
+                            address.getPort(),
                             LoginProtocols.SERVERBOUND,
                             LoginProtocols.CLIENTBOUND,
                             new ClientHandshakePacketListenerImpl(
@@ -272,7 +241,7 @@ public class ConnectScreen extends Screen {
         thread.start();
     }
 
-    public void updateStatus(final Component status) {
+    private void updateStatus(final Component status) {
         this.status = status;
     }
 
@@ -323,4 +292,3 @@ public class ConnectScreen extends Screen {
         graphics.centeredText(this.font, this.status, this.width / 2, this.height / 2 - 50, -1);
     }
 }
-// PERSIST_TEST
