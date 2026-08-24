@@ -412,6 +412,15 @@ public class Cat extends TamableAnimal {
     @Override
     public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
+        // MODIFIED for porting: was VFP MixinCat#interactMob1_20_4 (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+            final ItemStack itemStack = player.getItemInHand(hand);
+            if (this.isTame() && this.isOwnedBy(player)) {
+                return InteractionResult.SUCCESS;
+            } else {
+                return !this.isFood(itemStack) || !(this.getHealth() < this.getMaxHealth()) && this.isTame() ? InteractionResult.PASS : InteractionResult.SUCCESS;
+            }
+        }
         if (this.isTame()) {
             if (this.isOwnedBy(player)) {
                 if (itemStack.is(ItemTags.CAT_COLLAR_DYES)) {
