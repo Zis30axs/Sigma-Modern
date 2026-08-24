@@ -1,6 +1,7 @@
 package net.minecraft.world.entity.animal;
 
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -144,7 +145,7 @@ public abstract class Animal extends AgeableMob {
                 this.usePlayerItem(player, hand, itemStack);
                 this.setInLove(serverPlayer);
                 this.playEatingSound();
-                return InteractionResult.SUCCESS_SERVER;
+                return (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21) ? InteractionResult.SUCCESS : InteractionResult.SUCCESS_SERVER);
             }
 
             if (this.canAgeUp()) {
@@ -154,7 +155,7 @@ public abstract class Animal extends AgeableMob {
                 return InteractionResult.SUCCESS;
             }
 
-            if (this.level().isClientSide()) {
+            if (this.(level().isClientSide() && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_15))) {
                 return InteractionResult.CONSUME;
             }
         }
