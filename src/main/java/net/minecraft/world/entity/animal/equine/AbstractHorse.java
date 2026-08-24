@@ -2,6 +2,8 @@ package net.minecraft.world.entity.animal.equine;
 
 import java.util.function.DoubleSupplier;
 import java.util.function.IntUnaryOperator;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -745,7 +747,9 @@ public abstract class AbstractHorse extends Animal implements PlayerRideableJump
     @Override
     protected void addPassenger(final Entity passenger) {
         super.addPassenger(passenger);
+if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_7)) {
         passenger.absSnapRotationTo(this.getViewYRot(0.0F), this.getViewXRot(0.0F));
+}
     }
 
     @Override
