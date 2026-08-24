@@ -82,3 +82,20 @@ ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
 - Classic CPE 天气类型暂缺（需 ViaLegacy 库类 mixin）
 - Bedrock RakNet/NetherNet 复杂连接待完善
 - Round25：movement 组持续推进。完成 ItemEntity.setUnderwaterMovement、KeyboardInput.tick normalize 门控、BedBlock.getBounceRestitution 版本条件弹跳、Player.canFallAtLeast 版本分支 + maxUpStep 门控、LocalPlayer.isHorizontalCollisionMinor。
+## 剩余工作清单（按优先级排序）
+
+### 高优先级（影响游戏体验）
+- entity 组剩余 (~30)：实体渲染/物理版本行为
+- networking 组剩余 (~10)：NBT 限制、资源包头部、协议切换等
+- movement 组剩余 (~35)：液体物理、碰撞检测、滑翔等
+
+### 中优先级（视觉/边缘功能）
+- block 组 (~45)：方块连接形状/交互
+- item 组 (~28)：物品提示/创造模式过滤
+- interaction 组剩余 (~14)：实体交互版本差异
+- world/classic/limitation 等 (~15)
+
+### 低优先级（cosmetic）
+- screen_changes/signboard/scoreboard/mouse_sensitivity 等 (~10)
+- bedrock 复杂 RakNet/NetherNet 连接 (~6)
+- legacy_tab_completion/execute_inputs_sync (~6)
