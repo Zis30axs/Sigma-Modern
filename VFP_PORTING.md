@@ -53,3 +53,7 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
 - Round16：运行时验证通过——游戏启动正常(标题屏)、ViaVersion 栈加载成功(c0.0.15a-1)、
   零 ERROR。VFP 移植核心功能已就绪。
   待用户手动验证：多人游戏服务器列表显示、旧版本服务器连接、CPE 天气等边缘功能。
+- Round20：运行时深度验证通过。VFP 全部配置文件正确生成：
+  settings.json/viaversion.yml/viabackwards.yml/vialegacy.yml/viabedrock.yml/viaaprilfools.yml
+  协议栈完整加载并持久化设置。5+ 分钟稳定运行零错误。
+  游戏已可正常使用——剩余工作为用户手动测试旧版服务器连接。
