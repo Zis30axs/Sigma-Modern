@@ -58,7 +58,7 @@ public class FireworkRocketItem extends Item implements ProjectileItem {
 
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
-        (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_11) && if (player.isFallFlying())) {
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_11) && player.isFallFlying()) {
             ItemStack itemStack = player.getItemInHand(hand);
             if (level instanceof ServerLevel serverLevel) {
                 if (player.dropAllLeashConnections(null)) {
