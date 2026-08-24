@@ -1,6 +1,8 @@
 package net.minecraft.world.entity;
 
 import java.util.Set;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -45,7 +47,10 @@ public record PositionMoveRotation(Vec3 position, Vec3 deltaMovement, float yRot
         float offsetXRot = relatives.contains(Relative.X_ROT) ? source.xRot : 0.0F;
         Vec3 absolutePosition = new Vec3(offsetX + change.position.x, offsetY + change.position.y, offsetZ + change.position.z);
         float absoluteYRot = offsetYRot + change.yRot;
-        float absoluteXRot = Mth.clamp(offsetXRot + change.xRot, -90.0F, 90.0F);
+                // MODIFIED for porting: was VFP MixinPositionMoveRotation#uncapPlayerPitchMovement (@Redirect Mth.clamp <=1_21_4 uncap)
+        float absoluteXRot = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)
+            ? offsetXRot + change.xRot
+            : Mth.clamp(offsetXRot + change.xRot, -90.0F, 90.0F);
         Vec3 rotatedCurrentMovement = source.deltaMovement;
         if (relatives.contains(Relative.ROTATE_DELTA)) {
             float diffYRot = source.yRot - absoluteYRot;
