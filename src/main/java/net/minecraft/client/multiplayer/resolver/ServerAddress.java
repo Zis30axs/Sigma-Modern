@@ -53,7 +53,11 @@ public final class ServerAddress implements com.viaversion.viafabricplus.injecti
 
         try {
             HostAndPort result = HostAndPort.fromString(input).withDefaultPort(25565);
-            return result.getHost().isEmpty() ? INVALID : new ServerAddress(result);
+            ServerAddress addr = new ServerAddress(result);
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+                return ServerNameResolver.DEFAULT.redirectHandler.lookupRedirect(addr).orElse(addr);
+            }
+            return addr;
         } catch (IllegalArgumentException e) {
             LOGGER.info("Failed to parse URL {}", input, e);
             return INVALID;
