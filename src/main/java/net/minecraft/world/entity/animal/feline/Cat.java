@@ -414,7 +414,6 @@ public class Cat extends TamableAnimal {
         ItemStack itemStack = player.getItemInHand(hand);
         // MODIFIED for porting: was VFP MixinCat#interactMob1_20_4 (@Inject HEAD cancellable)
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
-            final ItemStack itemStack = player.getItemInHand(hand);
             if (this.isTame() && this.isOwnedBy(player)) {
                 return InteractionResult.SUCCESS;
             } else {
