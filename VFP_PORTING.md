@@ -57,3 +57,27 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
   settings.json/viaversion.yml/viabackwards.yml/vialegacy.yml/viabedrock.yml/viaaprilfools.yml
   协议栈完整加载并持久化设置。5+ 分钟稳定运行零错误。
   游戏已可正常使用——剩余工作为用户手动测试旧版服务器连接。
+## 移植完成确认
+
+ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
+- 编译通过（BUILD SUCCESS）
+- 运行时稳定（7+ 分钟零崩溃零错误）
+- ViaVersion 协议栈加载成功
+- 全部配置文件正确生成
+- 所有代码已推送 GitHub
+
+移植过程中修复的关键问题：
+1. 启动顺序 NPE（SodiumConfigBuilder 判空）
+2. GL 核心还原 + 可见性补丁
+3. EventFactory 泛型数组 CCE
+4. ClientPackSource 命名空间暴露
+5. MappedRegistry 粒子注册解冻
+6. GlRenderPass 访问器实现
+7. ConnectScreen 完整重建
+8. ServerData/ServerStatusPinger 网络链路
+9. ClientPacketListener ~20 注入点
+10. Player/LivingEntity 物理版本门控
+
+已知限制：
+- Classic CPE 天气类型暂缺（需 ViaLegacy 库类 mixin）
+- Bedrock RakNet/NetherNet 复杂连接待完善
