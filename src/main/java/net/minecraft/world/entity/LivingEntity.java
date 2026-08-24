@@ -2458,7 +2458,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         float jumpPower = this.getJumpPower();
         if (!(jumpPower <= 1.0E-5F)) {
             Vec3 movement = this.getDeltaMovement();
-            this.setDeltaMovement(movement.x, Math.max(jumpPower, movement.y), movement.z);
+            this.setDeltaMovement(movement.x, (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21) ? jumpPower : Math.max(jumpPower, movement.y)), movement.z);
             if (this.isSprinting()) {
                 float angle = this.getYRot() * (float) (Math.PI / 180.0);
                 this.addDeltaMovement(new Vec3(-Mth.sin(angle) * 0.2, 0.0, Mth.cos(angle) * 0.2));
