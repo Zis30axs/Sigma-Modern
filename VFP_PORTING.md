@@ -81,3 +81,4 @@ ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
 已知限制：
 - Classic CPE 天气类型暂缺（需 ViaLegacy 库类 mixin）
 - Bedrock RakNet/NetherNet 复杂连接待完善
+- Round25：movement 组持续推进。完成 ItemEntity.setUnderwaterMovement、KeyboardInput.tick normalize 门控、BedBlock.getBounceRestitution 版本条件弹跳、Player.canFallAtLeast 版本分支 + maxUpStep 门控、LocalPlayer.isHorizontalCollisionMinor。
