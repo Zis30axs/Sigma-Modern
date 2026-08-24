@@ -6,6 +6,8 @@ import com.mojang.serialization.MapCodec;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Function;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -493,6 +495,10 @@ public class RedStoneWireBlock extends Block {
     protected InteractionResult useWithoutItem(
         final BlockState state, final Level level, final BlockPos pos, final Player player, final BlockHitResult hitResult
     ) {
+        // MODIFIED for porting: was VFP MixinRedStoneWireBlock#disableTogglingState (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+            return InteractionResult.PASS;
+        }
         if (!player.getAbilities().mayBuild) {
             return InteractionResult.PASS;
         }

@@ -1,6 +1,7 @@
 package net.minecraft.world.entity.animal;
 
 import java.util.Optional;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
@@ -155,7 +156,7 @@ public abstract class Animal extends AgeableMob {
                 return InteractionResult.SUCCESS;
             }
 
-            if (this.(level().isClientSide() && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_15))) {
+            if ((level().isClientSide() && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_15))) {
                 return InteractionResult.CONSUME;
             }
         }
