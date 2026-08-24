@@ -556,6 +556,11 @@ public class Bee extends Animal implements NeutralMob {
 
     @Override
     public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
+        // MODIFIED for porting: was VFP MixinBee#removeStatusEffectInteraction (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+            return super.mobInteract(player, hand);
+        }
+
         ItemStack heldItem = player.getItemInHand(hand);
         if (this.isFood(heldItem) && heldItem.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof FlowerBlock flower) {
             MobEffectInstance effect = flower.getBeeInteractionEffect();

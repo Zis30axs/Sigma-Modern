@@ -22,6 +22,8 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.TemptGoal;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.animal.Animal;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUtils;
@@ -88,6 +90,11 @@ public abstract class AbstractCow extends Animal {
 
     @Override
     public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
+        // MODIFIED for porting: was VFP MixinAbstractCow#disableMilkingInCreative (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2) && player.getAbilities().instabuild) {
+            return super.mobInteract(player, hand);
+        }
+
         ItemStack itemStack = player.getItemInHand(hand);
         if (itemStack.is(Items.BUCKET) && !this.isBaby()) {
             player.playSound(SoundEvents.COW_MILK, 1.0F, 1.0F);
