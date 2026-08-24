@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.monster;
 
 import java.util.Collection;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -210,7 +212,7 @@ public class Creeper extends Monster {
     protected InteractionResult mobInteract(final Player player, final InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
         if (itemStack.is(ItemTags.CREEPER_IGNITERS)) {
-            SoundEvent soundEvent = itemStack.is(Items.FIRE_CHARGE) ? SoundEvents.FIRECHARGE_USE : SoundEvents.FLINTANDSTEEL_USE;
+            SoundEvent soundEvent = itemStack.is(Items.FIRE_CHARGE) ? (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_1) ? SoundEvents.FLINTANDSTEEL_USE : SoundEvents.FIRECHARGE_USE) : SoundEvents.FLINTANDSTEEL_USE;
             this.level()
                 .playSound(player, this.getX(), this.getY(), this.getZ(), soundEvent, this.getSoundSource(), 1.0F, this.random.nextFloat() * 0.4F + 0.8F);
             if (!this.level().isClientSide()) {
