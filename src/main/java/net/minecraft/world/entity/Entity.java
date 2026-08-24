@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
@@ -2452,6 +2454,23 @@ public abstract class Entity
     }
 
     public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
+        // MODIFIED for porting: was VFP MixinEntity#removeLeashActions + swingHand (@Redirect/@Inject)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)) {
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                final ItemStack itemStack = player.getItemInHand(hand);
+                if (this.isAlive() && this instanceof Leashable leashable) {
+                    if (leashable.getLeashHolder() != player) {
+                        if (itemStack.is(Items.LEAD) && leashable.canHaveALeashAttachedTo(player)) {
+                            itemStack.shrink(1);
+                            return InteractionResult.SUCCESS;
+                        }
+                    } else {
+                        return InteractionResult.SUCCESS.withoutItem();
+                    }
+                }
+                return InteractionResult.PASS;
+            }
+        }
         if (!this.level().isClientSide()
             && player.isSecondaryUseActive()
             && this instanceof Leashable leashable
