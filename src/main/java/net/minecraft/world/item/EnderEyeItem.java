@@ -82,7 +82,9 @@ public class EnderEyeItem extends Item {
             return InteractionResult.PASS;
         }
 
-        player.startUsingItem(hand);
+if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_11)) {
+                    player.startUsingItem(hand);
+        }
         if (level instanceof ServerLevel serverLevel) {
             BlockPos nearestMapFeature = serverLevel.findNearestMapStructure(StructureTags.EYE_OF_ENDER_LOCATED, player.blockPosition(), 100, false);
             if (nearestMapFeature == null) {

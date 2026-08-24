@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Position;
 import net.minecraft.core.dispenser.BlockSource;
@@ -56,7 +58,7 @@ public class FireworkRocketItem extends Item implements ProjectileItem {
 
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
-        if (player.isFallFlying()) {
+        (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_11) && if (player.isFallFlying())) {
             ItemStack itemStack = player.getItemInHand(hand);
             if (level instanceof ServerLevel serverLevel) {
                 if (player.dropAllLeashConnections(null)) {
