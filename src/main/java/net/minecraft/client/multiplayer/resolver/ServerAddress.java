@@ -7,6 +7,8 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 
 @OnlyIn(Dist.CLIENT)
 public final class ServerAddress implements com.viaversion.viafabricplus.injection.access.core.bedrock.IServerAddress {
