@@ -6,6 +6,7 @@ import java.lang.reflect.Field;
 import net.minecraft.world.level.chunk.EmptyLevelChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+@SuppressWarnings("removal")
 public class ChunkConstants {
     public static final LevelChunk DUMMY_CHUNK;
 

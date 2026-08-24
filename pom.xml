@@ -672,6 +672,7 @@
                     <fork>true</fork>
                     <meminitial>2G</meminitial>
                     <maxmem>8G</maxmem>
+                    <compilerArgs><arg>-nowarn</arg></compilerArgs>
                 </configuration>
             </plugin>
         </plugins>

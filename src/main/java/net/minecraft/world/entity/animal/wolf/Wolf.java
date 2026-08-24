@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.animal.wolf;
 
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
@@ -587,7 +589,8 @@ public class Wolf extends TamableAnimal implements NeutralMob {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+                // MODIFIED for porting: was VFP entity.dimensions Mixin* (@Redirect isBaby)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
     }
 
     public @Nullable Wolf getBreedOffspring(final ServerLevel level, final AgeableMob partner) {

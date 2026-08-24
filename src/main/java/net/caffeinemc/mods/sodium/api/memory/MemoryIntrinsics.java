@@ -5,6 +5,7 @@ import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
 
+@SuppressWarnings("removal")
 public class MemoryIntrinsics {
     private static final Unsafe UNSAFE;
     private static final boolean BITS32 = Pointer.BITS32;

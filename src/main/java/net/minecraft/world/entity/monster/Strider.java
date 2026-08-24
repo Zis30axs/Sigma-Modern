@@ -2,6 +2,8 @@ package net.minecraft.world.entity.monster;
 
 import com.google.common.collect.Sets;
 import java.util.Set;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -183,7 +185,8 @@ public class Strider extends Animal implements ItemSteerable {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+                // MODIFIED for porting: was VFP entity.dimensions Mixin* (@Redirect isBaby)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
     }
 
     @Override
