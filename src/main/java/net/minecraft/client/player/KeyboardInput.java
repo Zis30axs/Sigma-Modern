@@ -1,6 +1,8 @@
 package net.minecraft.client.player;
 
 import net.minecraft.client.Options;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec2;
 import net.minecraftforge.api.distmarker.Dist;
@@ -35,6 +37,11 @@ public class KeyboardInput extends ClientInput {
         );
         float forwardImpulse = calculateImpulse(this.keyPresses.forward(), this.keyPresses.backward());
         float leftImpulse = calculateImpulse(this.keyPresses.left(), this.keyPresses.right());
-        this.moveVector = new Vec2(leftImpulse, forwardImpulse).normalized();
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinKeyboardInput (@Redirect <=1_21_4 skip normalize)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            this.moveVector = new Vec2(leftImpulse, forwardImpulse);
+        } else {
+            this.moveVector = new Vec2(leftImpulse, forwardImpulse).normalized();
+        }
     }
 }

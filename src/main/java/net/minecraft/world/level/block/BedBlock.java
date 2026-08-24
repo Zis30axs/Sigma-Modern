@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.math.OctahedralGroup;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -311,5 +313,13 @@ public class BedBlock extends HorizontalDirectionalBlock {
 
     private static int[][] bedAboveStandUpOffsets(final Direction forward) {
         return new int[][]{{0, 0}, {-forward.getStepX(), -forward.getStepZ()}};
+    }
+    // MODIFIED for porting: was VFP collision MixinBedBlock#getBounceRestitution
+    @Override
+    public float getBounceRestitution() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(com.viaversion.viaversion.api.protocol.version.ProtocolVersion.v1_11_1)) {
+            return 0F;
+        }
+        return 0.66F;
     }
 }
