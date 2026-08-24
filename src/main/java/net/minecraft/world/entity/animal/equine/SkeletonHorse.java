@@ -148,7 +148,11 @@ public class SkeletonHorse extends AbstractHorse {
     }
 
     @Override
-    protected float getWaterSlowDown() {
+        protected float getWaterSlowDown() {
+        // MODIFIED for porting: was VFP liquid MixinSkeletonHorse (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return super.getWaterSlowDown();
+        }
         return 0.96F;
     }
 

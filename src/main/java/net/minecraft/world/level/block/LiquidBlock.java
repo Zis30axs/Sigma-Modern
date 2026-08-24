@@ -9,6 +9,8 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -79,7 +81,11 @@ public class LiquidBlock extends Block implements BucketPickup {
     }
 
     @Override
-    protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP liquid MixinLiquidBlock#useEmptyCollision (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+            return Shapes.empty();
+        }
         if (context.alwaysCollideWithFluid()) {
             return Shapes.block();
         } else {
