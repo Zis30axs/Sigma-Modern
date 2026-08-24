@@ -1119,7 +1119,11 @@ public class LocalPlayer extends AbstractClientPlayer
     }
 
     @Override
-    protected boolean isHorizontalCollisionMinor(final Vec3 movement) {
+        protected boolean isHorizontalCollisionMinor(final Vec3 movement) {
+        // MODIFIED for porting: was VFP collision MixinLocalPlayer#neverCollideSoftly (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17_1)) {
+            return false;
+        }
         float yRotInRadians = this.getYRot() * (float) (Math.PI / 180.0);
         double yRotSin = Mth.sin(yRotInRadians);
         double yRotCos = Mth.cos(yRotInRadians);

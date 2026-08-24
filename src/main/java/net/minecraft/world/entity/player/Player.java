@@ -288,7 +288,8 @@ public abstract class Player extends Avatar implements ContainerUser {
 
     @Override
     protected float getMaxHeadRotationRelativeToBody() {
-        return this.isBlocking() ? 15.0F : super.getMaxHeadRotationRelativeToBody();
+        // MODIFIED for porting: was VFP limitation.rotation MixinPlayer#dontModifyHeadRotationWhenBlocking (@Redirect isBlocking)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_2) && this.isBlocking()) ? 15.0F : super.getMaxHeadRotationRelativeToBody();
     }
 
     public boolean isSecondaryUseActive() {
