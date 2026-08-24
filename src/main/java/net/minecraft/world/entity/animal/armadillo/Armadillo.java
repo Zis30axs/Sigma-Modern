@@ -320,7 +320,7 @@ public class Armadillo extends Animal {
             itemStack.hurtAndBreak(16, player, hand.asEquipmentSlot());
             return InteractionResult.SUCCESS;
         } else {
-            return this.isScared() ? InteractionResult.FAIL : super.mobInteract(player, hand);
+            return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_5) && this.isScared()) ? InteractionResult.FAIL : super.mobInteract(player, hand); // MODIFIED for porting
         }
     }
 

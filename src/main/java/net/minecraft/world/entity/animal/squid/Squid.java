@@ -87,6 +87,10 @@ public class Squid extends AgeableWaterCreature {
 
     @Override
     public boolean canBeLeashed() {
+        // MODIFIED for porting: was VFP interaction MixinSquid#cancelLeashing (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            return false;
+        }
         return true;
     }
 
