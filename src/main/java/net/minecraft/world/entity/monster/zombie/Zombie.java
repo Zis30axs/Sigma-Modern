@@ -3,6 +3,8 @@ package net.minecraft.world.entity.monster.zombie;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.List;
 import java.util.function.Predicate;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;

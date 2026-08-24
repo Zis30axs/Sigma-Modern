@@ -4,6 +4,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -357,7 +359,7 @@ public class Dolphin extends AgeableWaterCreature {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     @Override

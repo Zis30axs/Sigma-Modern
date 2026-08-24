@@ -2,6 +2,8 @@ package net.minecraft.world.entity.monster.hoglin;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -168,7 +170,7 @@ public class Hoglin extends Animal implements Enemy, HoglinBase {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     @Override

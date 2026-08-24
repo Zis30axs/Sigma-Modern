@@ -4,6 +4,8 @@ import com.mojang.serialization.Codec;
 import io.netty.buffer.ByteBuf;
 import java.util.List;
 import java.util.function.IntFunction;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -183,7 +185,7 @@ public class Armadillo extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     private void setupAnimationStates() {

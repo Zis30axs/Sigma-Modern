@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.animal.feline;
 
 import java.util.function.Predicate;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
@@ -222,7 +224,7 @@ public class Ocelot extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     public @Nullable Ocelot getBreedOffspring(final ServerLevel level, final AgeableMob partner) {

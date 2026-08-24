@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.animal.nautilus;
 
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
@@ -59,7 +61,7 @@ public class Nautilus extends AbstractNautilus {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     @Override

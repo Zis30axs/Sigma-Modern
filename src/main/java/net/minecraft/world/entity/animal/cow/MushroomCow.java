@@ -5,6 +5,8 @@ import io.netty.buffer.ByteBuf;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.IntFunction;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponentGetter;
 import net.minecraft.core.component.DataComponentType;
@@ -244,7 +246,7 @@ public class MushroomCow extends AbstractCow implements Shearable {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
     }
 
     public @Nullable MushroomCow getBreedOffspring(final ServerLevel level, final AgeableMob partner) {

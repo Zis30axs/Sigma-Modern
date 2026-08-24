@@ -4,6 +4,8 @@ import com.mojang.serialization.Codec;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.function.IntFunction;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ItemParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
