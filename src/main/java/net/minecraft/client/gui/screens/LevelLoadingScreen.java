@@ -1,5 +1,9 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.util.ChatUtil; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.connection.UserConnection; // MODIFIED for porting: ViaFabricPlus
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.client.GameNarrator;
@@ -17,6 +21,7 @@ import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.progress.ChunkLoadStatusView;
+import net.raphimc.vialegacy.protocol.classic.c0_28_30toa1_0_15.storage.ClassicProgressStorage; // MODIFIED for porting: ViaFabricPlus
 import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.util.Util;
@@ -114,6 +119,25 @@ public class LevelLoadingScreen extends Screen {
         graphics.centeredText(this.font, DOWNLOADING_TERRAIN_TEXT, xCenter, textTop, -1);
         if (this.loadTracker.hasProgress()) {
             this.drawProgressBar(graphics, xCenter - 100, textTop + 9 + 3, 200, 2, this.smoothedProgress);
+        }
+        // MODIFIED for porting: ViaFabricPlus core/gui MixinLevelLoadingScreen#renderClassicProgress (@Inject RETURN of extractRenderState)
+        if (GeneralSettings.INSTANCE.showClassicLoadingProgressInConnectScreen.getValue()) {
+            // Check if ViaVersion is translating
+            final UserConnection viaFabricPlus$userConnection = ProtocolTranslator.getPlayNetworkUserConnection();
+            if (viaFabricPlus$userConnection != null) {
+                // Check if the client is connecting to a classic server
+                final ClassicProgressStorage viaFabricPlus$classicProgressStorage = viaFabricPlus$userConnection.get(ClassicProgressStorage.class);
+                if (viaFabricPlus$classicProgressStorage != null) {
+                    // Draw the classic loading progress
+                    graphics.centeredText(
+                        this.minecraft.font,
+                        ChatUtil.prefixText(viaFabricPlus$classicProgressStorage.getStatus()),
+                        this.width / 2,
+                        this.height / 2 - 30,
+                        -1
+                    );
+                }
+            }
         }
     }
 

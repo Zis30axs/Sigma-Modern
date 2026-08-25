@@ -81,6 +81,12 @@ ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
 已知限制：
 - Classic CPE 天气类型暂缺（需 ViaLegacy 库类 mixin）
 - Bedrock RakNet/NetherNet 复杂连接待完善
+- Round26：定位并修复"多人游戏界面无 ViaFabricPlus 按钮"问题——core/gui 批次尚未转换。完成 core/gui 全组内联：
+  JoinMultiplayerScreen(协议选择按钮 repositionElements 注入 + integration 组 join/directJoinCallback 的
+  BedrockSettings.replaceDefaultPort 与 directConnect 标记)、DirectJoinServerScreen(init 尾部按钮)、
+  ManageServerScreen(set_version 按钮+输入恢复字段)、ServerSelectionList$OnlineServerEntry(状态图标 tooltip
+  追加 target_version/server_version，showAdvertisedServerVersion 门控)、LevelLoadingScreen(extractRenderState
+  尾部 Classic 加载进度，ClassicProgressStorage 来自 ViaLegacy 库)。编译绿(JDK26)。
 - Round25：movement 组持续推进。完成 ItemEntity.setUnderwaterMovement、KeyboardInput.tick normalize 门控、BedBlock.getBounceRestitution 版本条件弹跳、Player.canFallAtLeast 版本分支 + maxUpStep 门控、LocalPlayer.isHorizontalCollisionMinor。
 ## 剩余工作清单（按优先级排序）
 

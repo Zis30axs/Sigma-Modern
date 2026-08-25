@@ -1,5 +1,7 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.screen.impl.ProtocolSelectionScreen; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
 import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -56,6 +58,15 @@ public class DirectJoinServerScreen extends Screen {
                 .build()
         );
         this.updateSelectButtonStatus();
+        // MODIFIED for porting: ViaFabricPlus core/gui MixinDirectJoinServerScreen#addProtocolSelectionButton (@Inject RETURN of init)
+        final int viaFabricPlus$buttonPosition = GeneralSettings.INSTANCE.directConnectScreenButtonOrientation.getIndex();
+        if (viaFabricPlus$buttonPosition != 0) { // Off
+            final Button.Builder viaFabricPlus$builder = Button
+                .builder(Component.nullToEmpty("ViaFabricPlus"), button -> ProtocolSelectionScreen.INSTANCE.open(this))
+                .size(98, 20);
+            GeneralSettings.setOrientation(viaFabricPlus$builder::pos, viaFabricPlus$buttonPosition, width, height);
+            this.addRenderableWidget(viaFabricPlus$builder.build());
+        }
     }
 
     @Override

@@ -1,5 +1,8 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.screen.impl.PerServerVersionScreen; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion; // MODIFIED for porting: ViaFabricPlus
 import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -23,6 +26,8 @@ public class ManageServerScreen extends Screen {
     private EditBox ipEdit;
     private EditBox nameEdit;
     private final Screen lastScreen;
+    private String viaFabricPlus$nameField; // MODIFIED for porting: ViaFabricPlus core/gui MixinManageServerScreen
+    private String viaFabricPlus$addressField; // MODIFIED for porting: ViaFabricPlus core/gui MixinManageServerScreen
 
     public ManageServerScreen(final Screen lastScreen, final Component title, final BooleanConsumer callback, final ServerData serverData) {
         super(title);
@@ -64,6 +69,39 @@ public class ManageServerScreen extends Screen {
                 .build()
         );
         this.updateAddButtonStatus();
+        // MODIFIED for porting: ViaFabricPlus core/gui MixinManageServerScreen#addVersionSetterButton (@Inject RETURN of init)
+        final int viaFabricPlus$buttonPosition = GeneralSettings.INSTANCE.addServerScreenButtonOrientation.getIndex();
+        if (viaFabricPlus$buttonPosition != 0) { // Off
+            final ProtocolVersion viaFabricPlus$forcedVersion = this.serverData.viaFabricPlus$forcedVersion();
+
+            // Restore input if the user cancels the version selection screen (or if the user is editing an existing server)
+            if (this.viaFabricPlus$nameField != null && this.viaFabricPlus$addressField != null) {
+                this.nameEdit.setValue(this.viaFabricPlus$nameField);
+                this.ipEdit.setValue(this.viaFabricPlus$addressField);
+
+                this.viaFabricPlus$nameField = null;
+                this.viaFabricPlus$addressField = null;
+            }
+
+            final Button.Builder viaFabricPlus$buttonBuilder = Button
+                .builder(
+                    viaFabricPlus$forcedVersion == null
+                        ? Component.translatable("base.viafabricplus.set_version")
+                        : Component.nullToEmpty(viaFabricPlus$forcedVersion.getName()),
+                    button -> {
+                        // Store current input in case the user cancels the version selection
+                        this.viaFabricPlus$nameField = this.nameEdit.getValue();
+                        this.viaFabricPlus$addressField = this.ipEdit.getValue();
+
+                        this.minecraft.gui.setScreen(
+                            new PerServerVersionScreen(this, this.serverData::viaFabricPlus$forceVersion, this.serverData::viaFabricPlus$forcedVersion)
+                        );
+                    }
+                )
+                .size(98, 20);
+            GeneralSettings.setOrientation(viaFabricPlus$buttonBuilder::pos, viaFabricPlus$buttonPosition, width, height);
+            this.addRenderableWidget(viaFabricPlus$buttonBuilder.build());
+        }
     }
 
     @Override

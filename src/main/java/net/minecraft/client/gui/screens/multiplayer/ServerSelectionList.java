@@ -30,6 +30,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
 import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Util;
@@ -360,7 +361,18 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 && mouseX <= statusIconX + 10
                 && mouseY >= this.getContentY()
                 && mouseY <= this.getContentY() + 8) {
-                graphics.setTooltipForNextFrame(this.statusIconTooltip, mouseX, mouseY);
+                // MODIFIED for porting: ViaFabricPlus core/gui MixinServerSelectionList_OnlineServerEntry#drawTranslatingState (@WrapOperation)
+                if (GeneralSettings.INSTANCE.showAdvertisedServerVersion.getValue()) {
+                    final List<Component> viaFabricPlus$tooltips = new ArrayList<>();
+                    viaFabricPlus$tooltips.add(this.statusIconTooltip);
+                    viaFabricPlus$tooltips.add(Component.translatable("base.viafabricplus.target_version", this.serverData.viaFabricPlus$translatingVersion()));
+                    viaFabricPlus$tooltips.add(
+                        Component.translatable("base.viafabricplus.server_version", this.serverData.version.getString() + " (" + this.serverData.protocol + ")")
+                    );
+                    graphics.setTooltipForNextFrame(Lists.transform(viaFabricPlus$tooltips, Component::getVisualOrderText), mouseX, mouseY);
+                } else {
+                    graphics.setTooltipForNextFrame(this.statusIconTooltip, mouseX, mouseY);
+                }
             } else if (this.onlinePlayersTooltip != null
                 && mouseX >= statusX
                 && mouseX <= statusX + statusWidth
