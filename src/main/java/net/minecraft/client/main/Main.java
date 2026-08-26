@@ -275,6 +275,7 @@ public class Main {
             // loader runs before the client is constructed. See SodiumBootstrap for the details.
             net.caffeinemc.mods.sodium.client.SodiumBootstrap.bootstrap(gameDir.toPath());
             me.flashyreese.mods.sodiumextra.SodiumExtraBootstrap.bootstrap(gameDir.toPath());
+            net.irisshaders.iris.IrisBootstrap.bootstrap();
             net.caffeinemc.mods.sodium.client.SodiumBootstrap.finishConfigRegistration();
             minecraft = new Minecraft(gameConfig);
         } catch (SilentInitException e) {
