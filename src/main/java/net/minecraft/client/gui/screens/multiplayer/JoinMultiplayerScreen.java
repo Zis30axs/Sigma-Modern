@@ -153,7 +153,7 @@ public class JoinMultiplayerScreen extends Screen {
         if (viaFabricPlus$buttonPosition != 0) { // Off
             if (this.viaFabricPlus$button == null) {
                 this.viaFabricPlus$button = Button
-                    .builder(Component.nullToEmpty("ViaFabricPlus"), button -> ProtocolSelectionScreen.INSTANCE.open(this))
+                    .builder(Component.translatable("base.viafabricplus.viafabricplus"), button -> ProtocolSelectionScreen.INSTANCE.open(this))
                     .size(98, 20)
                     .build();
                 this.addRenderableWidget(this.viaFabricPlus$button);

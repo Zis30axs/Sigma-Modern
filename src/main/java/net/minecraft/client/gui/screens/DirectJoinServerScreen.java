@@ -62,7 +62,7 @@ public class DirectJoinServerScreen extends Screen {
         final int viaFabricPlus$buttonPosition = GeneralSettings.INSTANCE.directConnectScreenButtonOrientation.getIndex();
         if (viaFabricPlus$buttonPosition != 0) { // Off
             final Button.Builder viaFabricPlus$builder = Button
-                .builder(Component.nullToEmpty("ViaFabricPlus"), button -> ProtocolSelectionScreen.INSTANCE.open(this))
+                .builder(Component.translatable("base.viafabricplus.viafabricplus"), button -> ProtocolSelectionScreen.INSTANCE.open(this))
                 .size(98, 20);
             GeneralSettings.setOrientation(viaFabricPlus$builder::pos, viaFabricPlus$buttonPosition, width, height);
             this.addRenderableWidget(viaFabricPlus$builder.build());

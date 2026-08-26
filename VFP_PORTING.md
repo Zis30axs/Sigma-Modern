@@ -81,6 +81,9 @@ ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
 已知限制：
 - Classic CPE 天气类型暂缺（需 ViaLegacy 库类 mixin）
 - Bedrock RakNet/NetherNet 复杂连接待完善
+- Round27：修复 VFP 按钮/界面显示原始翻译键（用户描述为"配置文件名"）的问题。根因是 ClientPackSource 的
+  exposeNamespace 未包含 viafabricplus，导致 assets/viafabricplus 语言文件不加载（与 SodiumExtra 当时修复相同）。
+  已加入 viafabricplus 命名空间；按钮文案改为 base.viafabricplus.viafabricplus 可翻译键，并补充 en_us/zh_cn/de_de。
 - Round26：定位并修复"多人游戏界面无 ViaFabricPlus 按钮"问题——core/gui 批次尚未转换。完成 core/gui 全组内联：
   JoinMultiplayerScreen(协议选择按钮 repositionElements 注入 + integration 组 join/directJoinCallback 的
   BedrockSettings.replaceDefaultPort 与 directConnect 标记)、DirectJoinServerScreen(init 尾部按钮)、

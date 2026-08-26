@@ -71,7 +71,7 @@ public class ClientPackSource extends BuiltInPackSource {
     private static VanillaPackResources createVanillaPackSource(final Path externalAssetRoot) {
         return new VanillaPackResourcesBuilder()
             .setMetadata(BUILT_IN_METADATA)
-            .exposeNamespace("minecraft", "realms", "sodium", "iris", "sodium-extra", "distanthorizons")
+            .exposeNamespace("minecraft", "realms", "sodium", "iris", "sodium-extra", "viafabricplus", "distanthorizons")
             .applyDevelopmentConfig()
             .pushJarResources()
             .pushAssetPath(PackType.CLIENT_RESOURCES, externalAssetRoot)
