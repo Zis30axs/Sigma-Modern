@@ -9,6 +9,12 @@ import java.util.stream.StreamSupport;
 import net.minecraft.client.ClientRecipeBook;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+// Sigma: local player events.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.EventState;
+import com.mentalfrostbyte.jello.event.impl.player.EventLivingUpdate;
+import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookEditScreen;
@@ -244,6 +250,11 @@ public class LocalPlayer extends AbstractClientPlayer
     @Override
     public void tick() {
         if (this.connection.hasClientLoaded()) {
+            // Sigma hook: the player's tick. Cancelling PRE skips it whole, movement packets included.
+            if (EventBus.call(new EventUpdate(EventState.PRE)).isCancelled()) {
+                return;
+            }
+
             this.dropSpamThrottler.tick();
             super.tick();
             if (!this.lastSentInput.equals(this.input.keyPresses)) {
@@ -265,6 +276,9 @@ public class LocalPlayer extends AbstractClientPlayer
             for (AmbientSoundHandler soundHandler : this.ambientSoundHandlers) {
                 soundHandler.tick();
             }
+
+            // Sigma hook: end of the player's tick, after this tick's movement has been reported.
+            EventBus.call(new EventUpdate(EventState.POST));
         }
     }
 
@@ -281,40 +295,62 @@ public class LocalPlayer extends AbstractClientPlayer
     private void sendPosition() {
         this.sendIsSprintingIfNeeded();
         if (this.isControlledCamera()) {
-            double deltaX = this.getX() - this.xLast;
-            double deltaY = this.getY() - this.yLast;
-            double deltaZ = this.getZ() - this.zLast;
-            double deltaYRot = this.getYRot() - this.yRotLast;
-            double deltaXRot = this.getXRot() - this.xRotLast;
+            // Sigma hook: what the client is about to tell the server about where it is and where it is
+            // looking. Every field is writable, and the values a listener leaves behind are both what
+            // gets sent and what the client remembers as last reported - otherwise a spoofed position
+            // would be re-sent as a correction on the following tick. Cancelling sends nothing.
+            EventMotion motion = EventBus.call(new EventMotion(
+                this.getX(), this.getY(), this.getZ(), this.getYRot(), this.getXRot(), this.onGround()));
+            if (motion.isCancelled()) {
+                return;
+            }
+
+            double x = motion.getX();
+            double y = motion.getY();
+            double z = motion.getZ();
+            float yRot = motion.getYaw();
+            float xRot = motion.getPitch();
+            boolean onGround = motion.isOnGround();
+
+            double deltaX = x - this.xLast;
+            double deltaY = y - this.yLast;
+            double deltaZ = z - this.zLast;
+            double deltaYRot = yRot - this.yRotLast;
+            double deltaXRot = xRot - this.xRotLast;
             this.positionReminder++;
             boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || this.positionReminder >= 20;
             boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0;
             if (move && rot) {
                 this.connection
-                    .send(new ServerboundMovePlayerPacket.PosRot(this.position(), this.getYRot(), this.getXRot(), this.onGround(), this.horizontalCollision));
+                    .send(new ServerboundMovePlayerPacket.PosRot(x, y, z, yRot, xRot, onGround, this.horizontalCollision));
             } else if (move) {
-                this.connection.send(new ServerboundMovePlayerPacket.Pos(this.position(), this.onGround(), this.horizontalCollision));
+                this.connection.send(new ServerboundMovePlayerPacket.Pos(x, y, z, onGround, this.horizontalCollision));
             } else if (rot) {
-                this.connection.send(new ServerboundMovePlayerPacket.Rot(this.getYRot(), this.getXRot(), this.onGround(), this.horizontalCollision));
-            } else if (this.lastOnGround != this.onGround() || this.lastHorizontalCollision != this.horizontalCollision) {
-                this.connection.send(new ServerboundMovePlayerPacket.StatusOnly(this.onGround(), this.horizontalCollision));
+                this.connection.send(new ServerboundMovePlayerPacket.Rot(yRot, xRot, onGround, this.horizontalCollision));
+            } else if (this.lastOnGround != onGround || this.lastHorizontalCollision != this.horizontalCollision) {
+                this.connection.send(new ServerboundMovePlayerPacket.StatusOnly(onGround, this.horizontalCollision));
             }
 
             if (move) {
-                this.xLast = this.getX();
-                this.yLast = this.getY();
-                this.zLast = this.getZ();
+                this.xLast = x;
+                this.yLast = y;
+                this.zLast = z;
                 this.positionReminder = 0;
             }
 
             if (rot) {
-                this.yRotLast = this.getYRot();
-                this.xRotLast = this.getXRot();
+                this.yRotLast = yRot;
+                this.xRotLast = xRot;
             }
 
-            this.lastOnGround = this.onGround();
+            this.lastOnGround = onGround;
             this.lastHorizontalCollision = this.horizontalCollision;
             this.autoJumpEnabled = this.minecraft.options.autoJump().get();
+
+            // Sigma hook: the same event again, once the packet is out, so a listener can put back
+            // whatever it spoofed.
+            motion.setState(EventState.POST);
+            EventBus.call(motion);
         }
     }
 
@@ -783,6 +819,8 @@ public class LocalPlayer extends AbstractClientPlayer
 
     @Override
     public void aiStep() {
+        // Sigma hook: the physics step, before input becomes movement flags.
+        EventBus.call(new EventLivingUpdate(EventState.PRE));
         if (this.sprintTriggerTime > 0) {
             this.sprintTriggerTime--;
         }
@@ -934,6 +972,9 @@ public class LocalPlayer extends AbstractClientPlayer
             abilities.flying = false;
             this.onUpdateAbilities();
         }
+
+        // Sigma hook: the physics step is done and the player has moved.
+        EventBus.call(new EventLivingUpdate(EventState.POST));
     }
 
     private boolean shouldStopRunSprinting() {

@@ -44,6 +44,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.BundlerInfo;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
+// Sigma: packet events.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
+import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.network.protocol.handshake.ClientIntent;
 import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
@@ -163,14 +167,27 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                 throw new IllegalStateException("Received a packet before the packet listener was initialized");
             }
 
-            if (packetListener.shouldHandleMessage(packet)) {
+            // Sigma hook: inbound packets, client side only. In singleplayer the integrated server
+            // reuses this class, and letting a module cancel or rewrite its traffic corrupts the local
+            // connection - so only the side that receives clientbound packets publishes events.
+            Packet<?> incoming = packet;
+            if (this.receiving == PacketFlow.CLIENTBOUND) {
+                EventReceivePacket event = EventBus.call(new EventReceivePacket(packet));
+                if (event.isCancelled()) {
+                    return;
+                }
+
+                incoming = event.getPacket();
+            }
+
+            if (packetListener.shouldHandleMessage(incoming)) {
                 try {
-                    genericsFtw(packet, packetListener);
+                    genericsFtw(incoming, packetListener);
                 } catch (RunningOnDifferentThreadException var5) {
                 } catch (RejectedExecutionException ignored) {
                     this.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
                 } catch (ClassCastException exception) {
-                    LOGGER.error("Received {} that couldn't be processed", packet.getClass(), exception);
+                    LOGGER.error("Received {} that couldn't be processed", incoming.getClass(), exception);
                     this.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
                 }
 
@@ -292,11 +309,24 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
     }
 
     public void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush) {
+        // Sigma hook: outbound packets. Client side only, for the reason given in channelRead0. Every
+        // send overload funnels through here, so this is the one choke point modules need.
+        Packet<?> outgoing = packet;
+        if (this.receiving == PacketFlow.CLIENTBOUND) {
+            EventSendPacket event = EventBus.call(new EventSendPacket(packet));
+            if (event.isCancelled()) {
+                return;
+            }
+
+            outgoing = event.getPacket();
+        }
+
         if (this.isConnected()) {
             this.flushQueue();
-            this.sendPacket(packet, listener, flush);
+            this.sendPacket(outgoing, listener, flush);
         } else {
-            this.pendingActions.add(connection -> connection.sendPacket(packet, listener, flush));
+            final Packet<?> queued = outgoing;
+            this.pendingActions.add(connection -> connection.sendPacket(queued, listener, flush));
         }
     }
 

@@ -3,6 +3,10 @@ package net.minecraft.client;
 import com.mojang.blaze3d.Blaze3D;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.Window;
+// Sigma: raw mouse input events.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
+import com.mentalfrostbyte.jello.event.impl.game.action.EventMouseScroll;
 import com.mojang.logging.LogUtils;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -64,6 +68,14 @@ public class MouseHandler {
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
+            // Sigma hook: mouse buttons take the same route as keys, so a keybind can be bound to one.
+            // Gated on nothing being on screen for the same reason as the keyboard hook.
+            if (this.minecraft.gui.screen() == null && this.minecraft.gui.overlay() == null
+                && EventBus.call(new EventKeyPress(
+                    InputConstants.Type.MOUSE.getOrCreate(rawButtonInfo.button()), action == 1)).isCancelled()) {
+                return;
+            }
+
             if (this.minecraft.gui.screen() != null) {
                 this.minecraft.setLastInputType(InputType.MOUSE);
             }
@@ -189,6 +201,12 @@ public class MouseHandler {
     private void onScroll(final long handle, final double xoffset, final double yoffset) {
         if (handle == this.minecraft.getWindow().handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
+            // Sigma hook: raw wheel movement, before sensitivity and the discrete-scroll option apply.
+            if (this.minecraft.gui.screen() == null && this.minecraft.gui.overlay() == null
+                && EventBus.call(new EventMouseScroll(xoffset, yoffset)).isCancelled()) {
+                return;
+            }
+
             boolean discreteScroll = this.minecraft.options.discreteMouseScroll().get();
             double scrollSensitivity = this.minecraft.options.mouseWheelSensitivity().get();
             double scaledXOffset = (discreteScroll ? Math.signum(xoffset) : xoffset) * scrollSensitivity;

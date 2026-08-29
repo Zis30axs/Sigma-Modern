@@ -130,6 +130,9 @@ import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+// Sigma: jump event.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.scores.PlayerTeam;
@@ -2456,11 +2459,24 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     @VisibleForTesting
     public void jumpFromGround() {
         float jumpPower = this.getJumpPower();
+        float yRot = this.getYRot();
+        // Sigma hook: the local player's jump, before the impulse lands. The power sets the height and
+        // the yaw steers the sprint boost vanilla adds on top; cancelling suppresses the jump.
+        if (this instanceof net.minecraft.client.player.LocalPlayer) {
+            EventJump jump = EventBus.call(new EventJump(jumpPower, yRot));
+            if (jump.isCancelled()) {
+                return;
+            }
+
+            jumpPower = jump.getJumpPower();
+            yRot = jump.getYaw();
+        }
+
         if (!(jumpPower <= 1.0E-5F)) {
             Vec3 movement = this.getDeltaMovement();
             this.setDeltaMovement(movement.x, (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21) ? jumpPower : Math.max(jumpPower, movement.y)), movement.z);
             if (this.isSprinting()) {
-                float angle = this.getYRot() * (float) (Math.PI / 180.0);
+                float angle = yRot * (float) (Math.PI / 180.0);
                 this.addDeltaMovement(new Vec3(-Mth.sin(angle) * 0.2, 0.0, Mth.cos(angle) * 0.2));
             }
 

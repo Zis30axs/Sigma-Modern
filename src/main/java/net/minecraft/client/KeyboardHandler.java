@@ -5,6 +5,9 @@ import com.mojang.blaze3d.Blaze3D;
 import com.mojang.blaze3d.platform.ClipboardManager;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.TextureUtil;
+// Sigma: raw key input event.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.logging.LogUtils;
 import java.nio.file.Path;
@@ -428,6 +431,14 @@ public class KeyboardHandler {
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
+            // Sigma hook: raw keyboard input, only while nothing is on screen - a listener must not be
+            // able to eat keystrokes meant for chat or a menu. Action 0 is a release, 1 a press, 2 GLFW's
+            // auto-repeat.
+            if (this.minecraft.gui.screen() == null && this.minecraft.gui.overlay() == null
+                && EventBus.call(new EventKeyPress(InputConstants.getKey(event), action != 0)).isCancelled()) {
+                return;
+            }
+
             Options options = this.minecraft.options;
             boolean modifierAndOverlayIsSame = options.keyDebugModifier.key.getValue() == options.keyDebugOverlay.key.getValue();
             boolean debugModifierDown = options.keyDebugModifier.isDown();

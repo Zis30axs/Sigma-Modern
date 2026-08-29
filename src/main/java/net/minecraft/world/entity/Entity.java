@@ -141,6 +141,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
+// Sigma: movement event.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventMove;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
@@ -752,6 +755,18 @@ public abstract class Entity
     }
 
     public void move(final MoverType moverType, Vec3 delta) {
+        // Sigma hook: the local player's movement delta, before collision resolves. Fully qualified so
+        // this common class does not gain a client-only import; the check costs one instanceof for
+        // every other entity in the level.
+        if (this instanceof net.minecraft.client.player.LocalPlayer) {
+            EventMove move = EventBus.call(new EventMove(moverType, delta));
+            if (move.isCancelled()) {
+                return;
+            }
+
+            delta = move.getDelta();
+        }
+
         if (this.noPhysics) {
             this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
             this.horizontalCollision = false;

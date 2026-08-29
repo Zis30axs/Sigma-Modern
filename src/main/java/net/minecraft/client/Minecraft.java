@@ -257,6 +257,14 @@ import org.apache.commons.io.FileUtils;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
+// Sigma: the client entry point, and the events this class publishes.
+import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.EventState;
+import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
+import com.mentalfrostbyte.jello.event.impl.game.EventRunLoop;
+import com.mentalfrostbyte.jello.event.impl.game.EventTick;
+import com.mentalfrostbyte.jello.event.impl.game.action.EventClick;
 
 @OnlyIn(Dist.CLIENT)
 public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
@@ -825,6 +833,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         showScreen.run();
         this.options.startedCleanly = true;
         this.options.save();
+        // Sigma hook: start the client once the game is fully constructed - the window, the options and
+        // the Minecraft singleton all exist by this point.
+        Client.getInstance().start();
     }
 
     public boolean isGameLoadFinished() {
@@ -1201,6 +1212,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
     @Override
     public void close() {
+        // Sigma hook: let the client persist its state while the game is still intact.
+        Client.getInstance().shutdown();
         Util.shutdownTimeSource();
 
         try {
@@ -1270,6 +1283,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     private void runTick(final boolean advanceGameTime) {
         // MODIFIED for porting: was sodium-extra's gui MixinMinecraftClient#onRunTick (@Inject HEAD)
         me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.onTick(this);
+        // Sigma hook: once per frame, ahead of this frame's game ticks.
+        EventBus.call(new EventRunLoop());
         this.window.setErrorSection("Pre render");
         if (this.window.shouldClose()) {
             this.stop();
@@ -1736,6 +1751,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private boolean startAttack() {
+        // Sigma hook: left click - attack an entity, or start breaking a block.
+        if (EventBus.call(new EventClick(EventClick.Button.LEFT)).isCancelled()) {
+            return false;
+        }
+
         if (this.missTime > 0) {
             return false;
         }
@@ -1810,6 +1830,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private void startUseItem() {
+        // Sigma hook: right click - use the held item, or interact with what is being looked at.
+        if (EventBus.call(new EventClick(EventClick.Button.RIGHT)).isCancelled()) {
+            return;
+        }
+
         if (!this.gameMode.isDestroying()) {
             this.rightClickDelay = 4;
             if (!this.player.isHandsBusy()) {
@@ -1880,6 +1905,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     public void tick() {
+        // Sigma hook: start of the game tick, before keybinds are polled and before the level ticks.
+        EventBus.call(new EventTick(EventState.PRE));
         this.clientTickCount++;
         if (this.level != null && !this.pause) {
             this.level.tickRateManager().tick();
@@ -1987,6 +2014,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         }
 
         profiler.pop();
+        // Sigma hook: end of the game tick.
+        EventBus.call(new EventTick(EventState.POST));
     }
 
     private boolean isLevelRunningNormally() {
@@ -2207,6 +2236,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
         this.level = level;
         this.updateLevelInEngines(level);
+        // Sigma hook: a level was attached - joining a world, or crossing into another dimension.
+        EventBus.call(new EventLoadWorld(level));
     }
 
     public void disconnectFromWorld(final Component message) {
@@ -2522,6 +2553,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private void pickBlockOrEntity() {
+        // Sigma hook: middle click - pick the block or entity being looked at.
+        if (EventBus.call(new EventClick(EventClick.Button.MIDDLE)).isCancelled()) {
+            return;
+        }
+
         if (this.hitResult != null && this.hitResult.getType() != HitResult.Type.MISS) {
             boolean includeData = this.hasControlDown();
             switch (this.hitResult) {

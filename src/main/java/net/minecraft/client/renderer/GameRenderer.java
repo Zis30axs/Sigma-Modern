@@ -25,6 +25,9 @@ import java.util.List;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+// Sigma: world render event.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.game.render.EventRender3D;
 import net.minecraft.client.Options;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.TextureFilteringMethod;
@@ -735,6 +738,10 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
                 cameraState.fogData.color,
                 !shouldCreateBossFog
             );
+        // Sigma hook: the level is drawn but the held item and screen effects are not, which is where
+        // world-space overlays belong. The model-view matrix handed over is the one this frame actually
+        // used - view bobbing and the portal spin folded in - so anything drawn with it lines up.
+        EventBus.call(new EventRender3D(cameraState, iris$levelModelView, projectionMatrix, worldPartialTicks));
         profiler.popPush("hand");
         boolean isSleeping = cameraState.entityRenderState.isSleeping;
         this.hudProjection

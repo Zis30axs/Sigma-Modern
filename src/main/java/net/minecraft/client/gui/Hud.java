@@ -14,6 +14,10 @@ import net.minecraft.Optionull;
 import net.minecraft.client.AttackIndicatorStatus;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+// Sigma: HUD render event.
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.EventState;
+import com.mentalfrostbyte.jello.event.impl.game.render.EventRender2D;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.BossHealthOverlay;
 import net.minecraft.client.gui.components.ChatComponent;
@@ -245,6 +249,13 @@ public class Hud {
 
     // MODIFIED for porting: original vanilla body of extractRenderState, wrapped above
     private void iris$extractRenderState(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
+        // Sigma hook: the HUD pass. Cancelling PRE suppresses the vanilla HUD; POST is fired either way,
+        // so hiding the HUD does not also hide the client's own overlays.
+        if (EventBus.call(new EventRender2D(EventState.PRE, graphics, deltaTracker)).isCancelled()) {
+            EventBus.call(new EventRender2D(EventState.POST, graphics, deltaTracker));
+            return;
+        }
+
         this.minecraft.gameRenderer.gameRenderState().guiRenderState.isHudHidden = this.isHidden;
         if (!(this.minecraft.gui.screen() instanceof LevelLoadingScreen)) {
             if (!this.isHidden) {
@@ -269,6 +280,9 @@ public class Hud {
                 this.extractSubtitleOverlay(graphics, true);
             }
         }
+
+        // Sigma hook: after the vanilla HUD, so client overlays draw on top of it.
+        EventBus.call(new EventRender2D(EventState.POST, graphics, deltaTracker));
     }
 
     private void extractBossOverlay(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
