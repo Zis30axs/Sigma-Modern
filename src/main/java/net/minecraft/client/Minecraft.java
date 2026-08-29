@@ -855,6 +855,14 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private String createTitle() {
+        // Sigma hook: the client may own the window title. Asking it here rather than setting the title
+        // behind the game's back means the two never fight over it - every path that rebuilds the title,
+        // this one included, ends up with the same text.
+        String clientTitle = com.mentalfrostbyte.jello.util.game.WindowTitle.get();
+        if (clientTitle != null) {
+            return clientTitle;
+        }
+
         StringBuilder builder = new StringBuilder("Minecraft");
         if (checkModStatus().shouldReportAsModified()) {
             builder.append("*");

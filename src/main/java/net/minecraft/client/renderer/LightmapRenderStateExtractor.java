@@ -1,5 +1,7 @@
 package net.minecraft.client.renderer;
 
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -105,6 +107,15 @@ public class LightmapRenderStateExtractor {
 
                 renderState.nightVisionColor = ARGB.vector3fFromRGB24(camera.attributeProbe().getValue(EnvironmentAttributes.NIGHT_VISION_COLOR, partialTicks));
                 renderState.bossOverlayWorldDarkening = this.renderer.bossOverlayWorldDarkening(partialTicks);
+                // Sigma hook: Fullbright rewrites the finished lightmap state. It goes here, and not into the
+                // brightness option, because that option is validated 0..1 and an out-of-range write replaces
+                // the user's own brightness with the default. Nothing needs restoring either - this whole body
+                // runs again next tick.
+                Fullbright fullbright = Modules.enabled(Fullbright.class);
+                if (fullbright != null) {
+                    fullbright.apply(renderState);
+                }
+
                 profiler.pop();
                 this.needsUpdate = false;
             }

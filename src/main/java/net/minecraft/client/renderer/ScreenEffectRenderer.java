@@ -1,5 +1,7 @@
 package net.minecraft.client.renderer;
 
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.LowFire;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -192,8 +194,18 @@ public class ScreenEffectRenderer {
     }
 
     private static void buildFireQuad(final TextureAtlasSprite sprite, final VertexConsumer builder, final Matrix4f pose) {
-        float size = 1.0F;
-        buildSpriteQuad(builder, pose, sprite, -0.5F, -0.5F, 0.5F, 0.5F, -0.5F, -436207617);
+        // Sigma hook: LowFire shrinks the quad and fades its vertex colour - the two literals below are the
+        // whole of the overlay's height and opacity. Anchored at the bottom edge, so the flames get shorter
+        // rather than sliding off the screen.
+        float height = 1.0F;
+        int color = -436207617;
+        LowFire lowFire = Modules.enabled(LowFire.class);
+        if (lowFire != null) {
+            height = lowFire.getHeight();
+            color = ARGB.white(lowFire.getOpacity());
+        }
+
+        buildSpriteQuad(builder, pose, sprite, -0.5F, -0.5F, 0.5F, -0.5F + height, -0.5F, color);
     }
 
     private static void buildSpriteQuad(

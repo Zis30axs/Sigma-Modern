@@ -432,10 +432,11 @@ public class KeyboardHandler {
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
             // Sigma hook: raw keyboard input, only while nothing is on screen - a listener must not be
-            // able to eat keystrokes meant for chat or a menu. Action 0 is a release, 1 a press, 2 GLFW's
-            // auto-repeat.
+            // able to eat keystrokes meant for chat or a menu. GLFW's action code carries the press,
+            // the release and the auto-repeat, and the event keeps all three apart.
             if (this.minecraft.gui.screen() == null && this.minecraft.gui.overlay() == null
-                && EventBus.call(new EventKeyPress(InputConstants.getKey(event), action != 0)).isCancelled()) {
+                && EventBus.call(new EventKeyPress(
+                    InputConstants.getKey(event), EventKeyPress.Action.fromGlfw(action))).isCancelled()) {
                 return;
             }
 

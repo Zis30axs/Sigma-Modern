@@ -15,6 +15,8 @@ import net.minecraft.client.AttackIndicatorStatus;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 // Sigma: HUD render event.
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.EventState;
 import com.mentalfrostbyte.jello.event.impl.game.render.EventRender2D;
@@ -1109,6 +1111,14 @@ public class Hud {
     private void updateVignetteBrightness(final Entity camera) {
         BlockPos blockPos = BlockPos.containing(camera.getX(), camera.getEyeY(), camera.getZ());
         float levelBrightness = Lightmap.getBrightness(camera.level().dimensionType(), camera.level().getMaxLocalRawBrightness(blockPos));
+        // Sigma hook: the vignette darkens from world light, not from the lightmap, so Fullbright would
+        // otherwise brighten a cave and leave its dark edges in place. Pretending the light is full lets
+        // vanilla's own easing fade the vignette out instead of snapping it.
+        Fullbright fullbright = Modules.enabled(Fullbright.class);
+        if (fullbright != null && fullbright.hidesVignette()) {
+            levelBrightness = 1.0F;
+        }
+
         float brightness = Mth.clamp(1.0F - levelBrightness, 0.0F, 1.0F);
         this.vignetteBrightness = this.vignetteBrightness + (brightness - this.vignetteBrightness) * 0.01F;
     }

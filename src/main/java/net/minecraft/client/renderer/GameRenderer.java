@@ -26,6 +26,8 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 // Sigma: world render event.
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.render.EventRender3D;
 import net.minecraft.client.Options;
@@ -834,6 +836,12 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
         optionsState.glintSpeed = options.glintSpeed().get();
         optionsState.glintStrength = options.glintStrength().get();
         optionsState.damageTiltStrength = options.damageTiltStrength().get();
+        // Sigma hook: NoHurtCam scales the damage tilt here, at the one place it is extracted. That covers the
+        // world view, the vanilla held item and a shader pack's own hand pass, which all read this one value.
+        NoHurtCam noHurtCam = Modules.enabled(NoHurtCam.class);
+        if (noHurtCam != null) {
+            optionsState.damageTiltStrength *= noHurtCam.getTilt();
+        }
         optionsState.backgroundForChatOnly = options.backgroundForChatOnly().get();
         optionsState.textBackgroundOpacity = options.textBackgroundOpacity().get().floatValue();
         optionsState.cloudStatus = options.getCloudStatus();

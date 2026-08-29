@@ -1,5 +1,7 @@
 package net.minecraft.client;
 
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.Arrays;
 import net.minecraft.client.entity.ClientAvatarState;
@@ -356,6 +358,13 @@ public class Camera implements TrackedWaypoint.Camera {
     }
 
     private float getMaxZoom(float cameraDist) {
+        // Sigma hook: CameraNoClip leaves the camera at the distance the attributes asked for instead of
+        // pulling it in to the first wall behind the player. Skipping the sweep is the whole feature - every
+        // consumer downstream reads the camera position this method decides.
+        if (Modules.enabled(CameraNoClip.class) != null) {
+            return cameraDist;
+        }
+
         float jitterScale = 0.1F;
 
         for (int i = 0; i < 8; i++) {

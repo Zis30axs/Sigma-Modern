@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer;
 
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.world.Weather;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -443,6 +445,43 @@ public class ClientLevel extends Level
 
         Biome biome = this.getBiome(pos).value();
         return biome.getPrecipitationAt(pos, this.getSeaLevel());
+    }
+
+    // Sigma hook: the Weather module shows a different sky without lying to the rest of the game. These two
+    // getters are what everything visual reads - sky and fog colour, clouds, stars, rain columns, splash
+    // particles - so overriding them is the whole feature. The server's own values stay in the fields, which
+    // is why switching the module off restores the real weather with nothing to put back.
+    @Override
+    public float getRainLevel(final float a) {
+        Weather weather = this.forcedWeather();
+        return weather == null ? super.getRainLevel(a) : weather.rainLevel();
+    }
+
+    @Override
+    public float getThunderLevel(final float a) {
+        Weather weather = this.forcedWeather();
+        return weather == null ? super.getThunderLevel(a) : weather.thunderLevel();
+    }
+
+    // Sigma hook: and these two are what the game asks when it wants to know whether it is *actually*
+    // raining - riptide, fire spread, mob behaviour. They read the server's values straight out of the
+    // fields, so the client keeps agreeing with the server about the world while disagreeing about the view.
+    @Override
+    public boolean isRaining() {
+        return this.canHaveWeather() && this.rainLevel > 0.2F;
+    }
+
+    @Override
+    public boolean isThundering() {
+        return this.canHaveWeather() && this.thunderLevel * this.rainLevel > 0.9F;
+    }
+
+    /**
+     * The Weather module, if it is on and this dimension has weather at all. Dimensions without weather never
+     * install the attributes that a forced rain level would feed, so they are left alone.
+     */
+    private @Nullable Weather forcedWeather() {
+        return this.canHaveWeather() ? Modules.enabled(Weather.class) : null;
     }
 
     private void removeBlockBreakingProgress() {

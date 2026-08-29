@@ -69,10 +69,12 @@ public class MouseHandler {
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
             // Sigma hook: mouse buttons take the same route as keys, so a keybind can be bound to one.
-            // Gated on nothing being on screen for the same reason as the keyboard hook.
+            // Gated on nothing being on screen for the same reason as the keyboard hook. A button has no
+            // auto-repeat, so it is only ever a press or a release.
             if (this.minecraft.gui.screen() == null && this.minecraft.gui.overlay() == null
                 && EventBus.call(new EventKeyPress(
-                    InputConstants.Type.MOUSE.getOrCreate(rawButtonInfo.button()), action == 1)).isCancelled()) {
+                    InputConstants.Type.MOUSE.getOrCreate(rawButtonInfo.button()),
+                    action == 1 ? EventKeyPress.Action.PRESS : EventKeyPress.Action.RELEASE)).isCancelled()) {
                 return;
             }
 
