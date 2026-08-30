@@ -1,5 +1,7 @@
 package net.minecraft.network.protocol.game;
 
+import io.netty.handler.codec.DecoderException;
+
 import it.unimi.dsi.fastutil.shorts.ShortSet;
 import java.util.function.BiConsumer;
 import net.minecraft.core.BlockPos;
@@ -40,6 +42,11 @@ public class ClientboundSectionBlocksUpdatePacket implements Packet<ClientGamePa
     private ClientboundSectionBlocksUpdatePacket(final FriendlyByteBuf input) {
         this.sectionPos = SectionPos.STREAM_CODEC.decode(input);
         int count = input.readVarInt();
+        // A section has 4096 positions; anything above that is malformed and can only exist to make the
+        // client allocate short[]/BlockState[] arrays before the remaining bytes have been checked.
+        if (count < 0 || count > 4096) {
+            throw new DecoderException("Invalid section block update count: " + count);
+        }
         this.positions = new short[count];
         this.states = new BlockState[count];
 

@@ -8,6 +8,7 @@ import com.mojang.blaze3d.platform.TextureUtil;
 // Sigma: raw key input event.
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
+import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.logging.LogUtils;
 import java.nio.file.Path;
@@ -431,6 +432,12 @@ public class KeyboardHandler {
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
+            // Sigma hook: global ClickGUI hotkey. This runs even while another screen is open, so the GUI
+            // can be summoned from the title screen, pause menu, or normal gameplay.
+            if (ClickGuiHandler.handleKey(InputConstants.getKey(event), EventKeyPress.Action.fromGlfw(action))) {
+                return;
+            }
+
             // Sigma hook: raw keyboard input, only while nothing is on screen - a listener must not be
             // able to eat keystrokes meant for chat or a menu. GLFW's action code carries the press,
             // the release and the auto-repeat, and the event keeps all three apart.

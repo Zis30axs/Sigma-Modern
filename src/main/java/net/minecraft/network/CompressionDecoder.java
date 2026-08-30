@@ -28,13 +28,16 @@ public class CompressionDecoder extends ByteToMessageDecoder {
         if (uncompressedLength == 0) {
             out.add(in.readBytes(in.readableBytes()));
         } else {
+            // Sigma hardening: client connections configure this decoder with validateDecompressed=false.
+            // Protocol maximums are still protocol maximums, so reject an impossible claimed size before
+            // Netty attempts to allocate a direct buffer of that size.
+            if (uncompressedLength < 0 || uncompressedLength > MAXIMUM_UNCOMPRESSED_LENGTH) {
+                throw new DecoderException("Badly compressed packet - size of " + uncompressedLength
+                    + " is outside the protocol range of 0.." + MAXIMUM_UNCOMPRESSED_LENGTH);
+            }
             if (this.validateDecompressed) {
                 if (uncompressedLength < this.threshold) {
                     throw new DecoderException("Badly compressed packet - size of " + uncompressedLength + " is below server threshold of " + this.threshold);
-                }
-
-                if (uncompressedLength > 8388608) {
-                    throw new DecoderException("Badly compressed packet - size of " + uncompressedLength + " is larger than protocol maximum of 8388608");
                 }
             }
 

@@ -288,8 +288,12 @@ public class Scoreboard {
         }
     }
 
+    public boolean isPlayerOnTeam(final String player, final PlayerTeam team) {
+        return this.getPlayersTeam(player) == team;
+    }
+
     public void removePlayerFromTeam(final String player, final PlayerTeam team) {
-        if (this.getPlayersTeam(player) != team) {
+        if (!this.isPlayerOnTeam(player, team)) {
             throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
         }
 

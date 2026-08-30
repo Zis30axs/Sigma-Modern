@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.module;
 
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
@@ -32,6 +33,7 @@ public final class ModuleManager {
 
     /** Registers every module the client ships with. */
     public void registerAll() {
+        this.register(new ModuleAntiExploit());
         this.register(new CameraNoClip());
         this.register(new CustomTitle());
         this.register(new Fullbright());

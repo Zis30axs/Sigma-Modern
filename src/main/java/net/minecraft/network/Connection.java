@@ -493,6 +493,8 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                 ChannelPipeline pipeline = channel.pipeline().addLast("timeout", new ReadTimeoutHandler(30));
                 Connection.configureSerialization(pipeline, PacketFlow.CLIENTBOUND, false, connection.bandwidthDebugMonitor);
                 connection.configurePacketHandler(pipeline);
+                // MODIFIED for porting: was VFP MixinConnection_1#injectViaIntoPipeline (@Inject RETURN)
+                ProtocolTranslator.injectViaPipeline(connection, channel);
             }
         }).channel(eventLoopGroupHolder.channelCls()).connect(address.getAddress(), address.getPort());
     }

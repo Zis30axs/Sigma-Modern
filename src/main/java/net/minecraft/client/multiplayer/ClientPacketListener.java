@@ -1,12 +1,13 @@
 package net.minecraft.client.multiplayer;
 
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
 import com.viaversion.viafabricplus.injection.access.networking.downloading_terrain.ILevelLoadingScreen;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.connection.ConnectionDetails;import com.google.common.collect.Lists;
-import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -1513,7 +1514,14 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             );
         this.minecraft.level.addParticle(packet.explosionParticle(), center.x(), center.y(), center.z(), 1.0, 0.0, 0.0);
         this.minecraft.level.trackExplosionEffects(center, packet.radius(), packet.blockCount(), packet.blockParticles());
-        packet.playerKnockback().ifPresent(this.minecraft.player::addDeltaMovement);
+        ModuleAntiExploit antiExploit = Modules.enabled(ModuleAntiExploit.class);
+        if (antiExploit != null) {
+            packet.playerKnockback()
+                .map(antiExploit::limitExplosionKnockback)
+                .ifPresent(this.minecraft.player::addDeltaMovement);
+        } else {
+            packet.playerKnockback().ifPresent(this.minecraft.player::addDeltaMovement);
+        }
     }
 
     @Override
@@ -1683,6 +1691,7 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleGameEvent(final ClientboundGameEventPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         LocalPlayer player = Objects.requireNonNull(this.minecraft.player);
+        ModuleAntiExploit antiExploit = Modules.enabled(ModuleAntiExploit.class);
         ClientboundGameEventPacket.Type event = packet.getEvent();
         float paramFloat = packet.getParam();
         int param = Mth.floor(paramFloat + 0.5F);
@@ -1713,6 +1722,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 }));
             }
         } else if (event == ClientboundGameEventPacket.DEMO_EVENT) {
+            if (antiExploit != null && antiExploit.cancelDemoHint()) {
+                antiExploit.reportCancelledDemoHint();
+                return;
+            }
+
             Options options = this.minecraft.options;
             Component message = null;
             if (paramFloat == 0.0F) {
@@ -2434,6 +2448,7 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleSetPlayerTeamPacket(final ClientboundSetPlayerTeamPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        ModuleAntiExploit antiExploit = Modules.enabled(ModuleAntiExploit.class);
         ClientboundSetPlayerTeamPacket.Action teamAction = packet.getTeamAction();
         PlayerTeam team;
         if (teamAction == ClientboundSetPlayerTeamPacket.Action.ADD) {
@@ -2468,6 +2483,13 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             }
         } else if (playerAction == ClientboundSetPlayerTeamPacket.Action.REMOVE) {
             for (String player : packet.getPlayers()) {
+                if (antiExploit != null
+                        && antiExploit.ignoreInvalidTeamRemoval()
+                        && !this.scoreboard.isPlayerOnTeam(player, team)) {
+                    antiExploit.reportIgnoredTeamRemoval(player, team.getName());
+                    continue;
+                }
+
                 this.scoreboard.removePlayerFromTeam(player, team);
             }
         }
@@ -2480,10 +2502,13 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleParticleEvent(final ClientboundLevelParticlesPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
-        if (packet.getCount() == 0) {
-            double xa = packet.getMaxSpeed() * packet.getXDist();
-            double ya = packet.getMaxSpeed() * packet.getYDist();
-            double za = packet.getMaxSpeed() * packet.getZDist();
+        ModuleAntiExploit antiExploit = Modules.enabled(ModuleAntiExploit.class);
+        int count = antiExploit == null ? packet.getCount() : antiExploit.limitParticleCount(packet.getCount());
+        float maxSpeed = antiExploit == null ? packet.getMaxSpeed() : antiExploit.limitParticleSpeed(packet.getMaxSpeed());
+        if (count == 0) {
+            double xa = maxSpeed * packet.getXDist();
+            double ya = maxSpeed * packet.getYDist();
+            double za = maxSpeed * packet.getZDist();
 
             try {
                 this.level
@@ -2492,13 +2517,13 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 LOGGER.warn("Could not spawn particle effect {}", packet.getParticle());
             }
         } else {
-            for (int i = 0; i < packet.getCount(); i++) {
+            for (int i = 0; i < count; i++) {
                 double xVarience = this.random.nextGaussian() * packet.getXDist();
                 double yVarience = this.random.nextGaussian() * packet.getYDist();
                 double zVarience = this.random.nextGaussian() * packet.getZDist();
-                double xa = this.random.nextGaussian() * packet.getMaxSpeed();
-                double ya = this.random.nextGaussian() * packet.getMaxSpeed();
-                double za = this.random.nextGaussian() * packet.getMaxSpeed();
+                double xa = this.random.nextGaussian() * maxSpeed;
+                double ya = this.random.nextGaussian() * maxSpeed;
+                double za = this.random.nextGaussian() * maxSpeed;
 
                 try {
                     this.level
