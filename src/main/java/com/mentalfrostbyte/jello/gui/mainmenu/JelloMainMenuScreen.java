@@ -2,26 +2,30 @@ package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
+import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
 import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
-import com.mentalfrostbyte.jello.util.math.Easing;
+import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
-/** Modern 26.2 Jello main menu with backend-neutral blur, bloom-like glow and reversible hover motion. */
+/**
+ * Source-native 26.2 presentation of Sigma's Jello main menu.
+ *
+ * <p>The layout and motion intentionally follow the old client: a centred Sigma mark, five 128px menu
+ * slots on a 122px stride, simple top text actions, light-grey-blue tinting and a soft hover shadow.
+ * The old fixed-function OpenGL implementation is not carried forward.</p>
+ */
 public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
+
     private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/sigma/back.png");
     private static final Identifier LOGO = Identifier.withDefaultNamespace("textures/gui/sigma/logo.png");
-    private static final int TEXT = 0xFFF1FAFF;
-    private static final int TEXT_DIM = 0xFFA9C7D6;
-    private static final int CARD_TOP = 0xA8143543;
-    private static final int CARD_BOTTOM = 0xB809202B;
-    private static final int CARD_HOVER_TOP = 0xDC276A82;
-    private static final int CARD_HOVER_BOTTOM = 0xD7194A60;
-    private static final int BORDER = 0x8066D9FF;
-    private static final int ACCENT = 0x0066D9FF;
+
+    private static final int LIGHT = ClientColors.LIGHT_GREYISH_BLUE.getColor();
+    private static final int DEEP_TEAL = ClientColors.DEEP_TEAL.getColor();
+    private static final int TEXT_DIM = withAlpha(LIGHT, 178);
     private static final String[] ACTIONS = {"Singleplayer", "Multiplayer", "Realms", "Options", "Language"};
 
     private final Animation[] actionHover = new Animation[ACTIONS.length];
@@ -31,101 +35,114 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
     public JelloMainMenuScreen() {
         super(Component.literal("Sigma Jello"));
         for (int i = 0; i < this.actionHover.length; i++) {
-            this.actionHover[i] = new Animation(180, 145, Animation.Direction.BACKWARDS);
+            this.actionHover[i] = new Animation(160, 140, Animation.Direction.BACKWARDS);
         }
     }
 
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
         graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, 0, 0, 0.0F, 0.0F, this.width, this.height, 1280, 720, 1280, 720);
-        graphics.fill(0, 0, this.width, this.height, 0x2E001018);
-        GuiVisuals.blurBackground(graphics);
-        graphics.fillGradient(0, 0, this.width, this.height, 0x300A2733, 0x6B020A0E);
+        graphics.fill(0, 0, this.width, this.height, withAlpha(DEEP_TEAL, 48));
 
-        int logoWidth = Math.min(420, Math.max(180, this.width - 80));
-        int logoHeight = logoWidth * 156 / 910;
+        int logoWidth = Math.min(455, Math.max(180, this.width - 40));
+        int logoHeight = logoWidth * 78 / 455;
         int logoX = (this.width - logoWidth) / 2;
-        int logoY = Math.max(24, this.height / 8);
-        GuiVisuals.softGlow(graphics, logoX + logoWidth / 8, logoY + logoHeight / 4, logoWidth * 3 / 4, Math.max(1, logoHeight / 2), ACCENT, 18, 0.10F);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F, logoWidth, logoHeight, 910, 156, 910, 156);
+        int logoY = Math.max(28, this.height / 2 - logoHeight);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
+            logoWidth, logoHeight, 910, 156, 910, 156, LIGHT);
 
-        int gap = 10;
-        int available = Math.max(250, this.width - 40);
-        int cardWidth = Math.min(116, (available - gap * (ACTIONS.length - 1)) / ACTIONS.length);
-        int cardHeight = Math.max(72, Math.min(112, this.height / 4));
-        int totalWidth = cardWidth * ACTIONS.length + gap * (ACTIONS.length - 1);
-        int startX = (this.width - totalWidth) / 2;
-        int cardY = Math.min(this.height - cardHeight - 70, logoY + logoHeight + Math.max(36, this.height / 10));
-
+        MenuLayout layout = this.menuLayout();
         for (int i = 0; i < ACTIONS.length; i++) {
-            int x = startX + i * (cardWidth + gap);
-            boolean hovered = inside(mouseX, mouseY, x, cardY, cardWidth, cardHeight);
+            int x = layout.startX + i * layout.stride;
+            boolean hovered = inside(mouseX, mouseY, x, layout.y, layout.size, layout.size);
             Animation animation = this.actionHover[i];
             animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
-            float hover = Easing.easeOutCubic(animation.calcPercent(), 0.0F, 1.0F, 1.0F);
-            int grow = Math.round(3.0F * hover);
-            int lift = Math.round(4.0F * hover);
+
+            float progress = animation.calcPercent();
+            float motion = animation.getDirection() == Animation.Direction.FORWARDS
+                ? SmoothInterpolator.interpolate(progress, 0.24, 0.88, 0.30, 1.00)
+                : SmoothInterpolator.interpolate(progress, 0.45, 0.02, 0.59, 0.28);
+
+            int grow = Math.round(layout.size * motion * 0.10F);
+            int lift = Math.round(layout.size * motion * 0.10F);
             int drawX = x - grow;
-            int drawY = cardY - lift - grow;
-            int drawWidth = cardWidth + grow * 2;
-            int drawHeight = cardHeight + grow * 2;
+            int drawY = layout.y - grow - lift;
+            int drawSize = layout.size + grow * 2;
 
-            GuiVisuals.softShadow(graphics, drawX, drawY + 3, drawWidth, drawHeight, 14, 0.62F + hover * 0.20F);
-            if (hover > 0.01F) {
-                GuiVisuals.softGlow(graphics, drawX, drawY, drawWidth, drawHeight, ACCENT, 15, 0.08F + hover * 0.18F);
+            if (progress > 0.001F) {
+                GuiVisuals.softGlow(graphics, drawX, drawY, drawSize, drawSize, LIGHT, Math.max(10, layout.size * 2 / 3), progress * 0.22F);
             }
-            graphics.fillGradient(drawX, drawY, drawX + drawWidth, drawY + drawHeight,
-                hover > 0.01F ? CARD_HOVER_TOP : CARD_TOP, hover > 0.01F ? CARD_HOVER_BOTTOM : CARD_BOTTOM);
-            graphics.outline(drawX, drawY, drawWidth, drawHeight, hover > 0.01F ? 0xFF8BE7FF : BORDER);
+
+            // The original slot is icon-driven. Until the original binary icon set is brought across,
+            // keep the slot visually neutral rather than inventing a replacement card or border.
             String label = ACTIONS[i];
-            graphics.text(this.font, label, drawX + (drawWidth - this.font.width(label)) / 2, drawY + drawHeight / 2 - 4, TEXT);
+            int textX = drawX + (drawSize - this.font.width(label)) / 2;
+            int textY = drawY + drawSize - Math.max(14, drawSize / 5);
+            graphics.text(this.font, label, textX + 1, textY + 1, withAlpha(DEEP_TEAL, 128), false);
+            graphics.text(this.font, label, textX, textY, LIGHT, false);
         }
 
-        this.drawTopAction(graphics, "Exit", 22, mouseX, mouseY, this.exitHover);
-        this.drawTopAction(graphics, "Switch", 78, mouseX, mouseY, this.switchHover);
-        String version = "Sigma " + Client.FULL_VERSION + "  •  Jello";
-        graphics.text(this.font, version, this.width - this.font.width(version) - 10, this.height - 16, TEXT_DIM);
-        graphics.text(this.font, "© Sigma Prod", 10, this.height - 16, TEXT_DIM);
+        this.drawTopAction(graphics, "Exit", 30, mouseX, mouseY, this.exitHover, 0.40F);
+        this.drawTopAction(graphics, "Switch", 90, mouseX, mouseY, this.switchHover, 0.70F);
+
+        String version = "Jello for Sigma " + Client.FULL_VERSION + "  -  Minecraft " + this.minecraft.getLaunchedVersion();
+        graphics.text(this.font, "© Sigma Prod", 10, this.height - 16, LIGHT, true);
+        graphics.text(this.font, version, this.width - this.font.width(version) - 9, this.height - 16, LIGHT, true);
     }
 
-    private void drawTopAction(final GuiGraphicsExtractor graphics, final String text, final int x, final int mouseX, final int mouseY, final Animation animation) {
-        int width = this.font.width(text) + 12;
-        boolean hovered = inside(mouseX, mouseY, x - 6, 12, width, 18);
+    private void drawTopAction(
+        final GuiGraphicsExtractor graphics,
+        final String text,
+        final int x,
+        final int mouseX,
+        final int mouseY,
+        final Animation animation,
+        final float baseAlpha
+    ) {
+        int width = this.font.width(text);
+        boolean hovered = inside(mouseX, mouseY, x, 20, width + 8, 20);
         animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
-        float hover = Easing.easeOutCubic(animation.calcPercent(), 0.0F, 1.0F, 1.0F);
-        if (hover > 0.01F) {
-            GuiVisuals.softGlow(graphics, x - 6, 12, width, 18, ACCENT, 9, 0.10F * hover);
-            graphics.fill(x - 6, 12, x - 6 + width, 30, alpha(0x33B5D6, Math.round(72.0F * hover)));
-        }
-        graphics.text(this.font, text, x, 17 - Math.round(hover), hover > 0.05F ? TEXT : TEXT_DIM);
+        float progress = animation.calcPercent();
+        float alpha = Math.min(1.0F, baseAlpha + progress * (1.0F - baseAlpha));
+        graphics.text(this.font, text, x, 24 - Math.round(progress), withAlpha(LIGHT, Math.round(255.0F * alpha)), false);
     }
 
-    private static int alpha(final int rgb, final int alpha) {
-        return Math.max(0, Math.min(255, alpha)) << 24 | rgb & 0x00FFFFFF;
+    private MenuLayout menuLayout() {
+        int size = Math.min(128, Math.max(64, (this.width - 36) / 5));
+        int overlap = Math.max(3, Math.round(size * 6.0F / 128.0F));
+        int stride = size - overlap;
+        int totalWidth = size + stride * (ACTIONS.length - 1);
+        int startX = (this.width - totalWidth) / 2;
+        int y = this.height / 2 + 14;
+        y = Math.min(y, this.height - size - 36);
+        y = Math.max(80, y);
+        return new MenuLayout(size, stride, startX, y);
     }
 
     @Override
     public boolean mouseClicked(final MouseButtonEvent event, final boolean doubleClick) {
-        if (event.button() != 0) return super.mouseClicked(event, doubleClick);
+        if (event.button() != 0) {
+            return super.mouseClicked(event, doubleClick);
+        }
+
         int mouseX = (int) event.x();
         int mouseY = (int) event.y();
-        if (inside(mouseX, mouseY, 16, 12, 50, 18)) { this.quitGame(); return true; }
-        if (inside(mouseX, mouseY, 72, 12, 62, 18)) { this.openModeSelect(); return true; }
+        if (inside(mouseX, mouseY, 26, 18, 54, 24)) {
+            this.quitGame();
+            return true;
+        }
+        if (inside(mouseX, mouseY, 86, 18, 70, 24)) {
+            this.openModeSelect();
+            return true;
+        }
 
-        int gap = 10;
-        int available = Math.max(250, this.width - 40);
-        int cardWidth = Math.min(116, (available - gap * (ACTIONS.length - 1)) / ACTIONS.length);
-        int cardHeight = Math.max(72, Math.min(112, this.height / 4));
-        int totalWidth = cardWidth * ACTIONS.length + gap * (ACTIONS.length - 1);
-        int startX = (this.width - totalWidth) / 2;
-        int logoWidth = Math.min(420, Math.max(180, this.width - 80));
-        int logoHeight = logoWidth * 156 / 910;
-        int logoY = Math.max(24, this.height / 8);
-        int cardY = Math.min(this.height - cardHeight - 70, logoY + logoHeight + Math.max(36, this.height / 10));
-
+        MenuLayout layout = this.menuLayout();
         for (int i = 0; i < ACTIONS.length; i++) {
-            int x = startX + i * (cardWidth + gap);
-            if (!inside(mouseX, mouseY, x, cardY, cardWidth, cardHeight)) continue;
+            int x = layout.startX + i * layout.stride;
+            if (!inside(mouseX, mouseY, x, layout.y, layout.size, layout.size)) {
+                continue;
+            }
+
             switch (i) {
                 case 0 -> this.openSingleplayer();
                 case 1 -> this.openMultiplayer();
@@ -136,6 +153,14 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
             }
             return true;
         }
+
         return super.mouseClicked(event, doubleClick);
+    }
+
+    private static int withAlpha(final int color, final int alpha) {
+        return Math.max(0, Math.min(255, alpha)) << 24 | color & 0x00FFFFFF;
+    }
+
+    private record MenuLayout(int size, int stride, int startX, int y) {
     }
 }
