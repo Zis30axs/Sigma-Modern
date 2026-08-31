@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 
@@ -19,6 +20,6 @@ public final class MainMenuRouter {
     }
 
     public static void openSelected() {
-        Client.getInstance().mc.gui.setScreen(createSelected());
+        Minecraft.getInstance().gui.setScreen(createSelected());
     }
 }
