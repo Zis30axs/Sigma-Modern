@@ -30,6 +30,31 @@ jobs:
           java-version: '25'
           cache: maven
 
+      - name: Fix staging matcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_sigma_loading_hot_switch.py')
+          source = path.read_text(encoding='utf-8')
+          pairs = [
+              (
+                  '    "    private void useLauncherAccount() {\\n        this.accounts.useLauncherIdentity();\\n",',
+                  '    "private void useLauncherAccount() {\\n        this.accounts.useLauncherIdentity();\\n",'
+              ),
+              (
+                  '    "    private void useLauncherAccount() {\\n        if (this.switchInProgress) {\\n            return;\\n        }\\n        this.accounts.useLauncherIdentity();\\n",',
+                  '    "private void useLauncherAccount() {\\n        if (this.switchInProgress) {\\n            return;\\n        }\\n        this.accounts.useLauncherIdentity();\\n",'
+              ),
+          ]
+          for old, new in pairs:
+              if source.count(old) != 1:
+                  raise SystemExit(f'staging matcher patch expected one occurrence, got {source.count(old)}')
+              source = source.replace(old, new, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+
       - name: Apply source-native Sigma migration
         run: python3 .github/scripts/apply_sigma_loading_hot_switch.py
 
