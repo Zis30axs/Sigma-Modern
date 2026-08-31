@@ -264,63 +264,63 @@ public final class SigmaAccountScreen extends Screen {
         }
     }
 
-private void useSelected() {
-    AccountEntry account = this.selectedRow();
-    if (account == null) {
-        this.status = "Select an account first.";
-        return;
-    }
-    if (this.switchInProgress) {
-        return;
-    }
-    if (this.minecraft.level != null || this.minecraft.player != null || this.minecraft.getConnection() != null) {
-        this.status = "Hot switching is only available from the title screen.";
-        return;
-    }
-
-    this.switchInProgress = true;
-    this.status = "Logging in...";
-    this.updateControls();
-    Thread thread = new Thread(() -> {
-        try {
-            SigmaAccountManager.LaunchIdentity identity = this.accounts.resolveForUse(account.getId());
-            User user = new User(identity.name(), identity.profileId(), identity.accessToken(), Optional.empty(), Optional.empty());
-            this.minecraft.sigmaSwitchUser(user, account.getType() == AccountType.OFFLINE).whenComplete((switched, failure) ->
-                this.minecraft.execute(() -> {
-                    this.switchInProgress = false;
-                    if (failure != null) {
-                        Client.logger.error("Sigma hot account switch failed", failure);
-                        this.status = "Login failed: " + concise(failure);
-                    } else if (!switched) {
-                        this.status = "Return to the title screen before switching accounts.";
-                    } else {
-                        this.accounts.selectForNextLaunch(account.getId());
-                        this.status = "Logged in. (" + identity.name() + ")";
-                    }
-                    this.updateControls();
-                })
-            );
-        } catch (Throwable failure) {
-            Client.logger.error("Sigma account refresh failed", failure);
-            this.minecraft.execute(() -> {
-                this.switchInProgress = false;
-                this.status = "Login failed: " + concise(failure);
-                this.updateControls();
-            });
+    private void useSelected() {
+        AccountEntry account = this.selectedRow();
+        if (account == null) {
+            this.status = "Select an account first.";
+            return;
         }
-    }, "Sigma-Account-Switch");
-    thread.setDaemon(true);
-    thread.start();
-}
-
-private void useLauncherAccount() {
         if (this.switchInProgress) {
             return;
         }
-        this.accounts.useLauncherIdentity();
-        this.status = "Launcher identity will be used on the next launch.";
+        if (this.minecraft.level != null || this.minecraft.player != null || this.minecraft.getConnection() != null) {
+            this.status = "Hot switching is only available from the title screen.";
+            return;
+        }
+
+        this.switchInProgress = true;
+        this.status = "Logging in...";
         this.updateControls();
+        Thread thread = new Thread(() -> {
+            try {
+                SigmaAccountManager.LaunchIdentity identity = this.accounts.resolveForUse(account.getId());
+                User user = new User(identity.name(), identity.profileId(), identity.accessToken(), Optional.empty(), Optional.empty());
+                this.minecraft.sigmaSwitchUser(user, account.getType() == AccountType.OFFLINE).whenComplete((switched, failure) ->
+                    this.minecraft.execute(() -> {
+                        this.switchInProgress = false;
+                        if (failure != null) {
+                            Client.logger.error("Sigma hot account switch failed", failure);
+                            this.status = "Login failed: " + concise(failure);
+                        } else if (!switched) {
+                            this.status = "Return to the title screen before switching accounts.";
+                        } else {
+                            this.accounts.selectForNextLaunch(account.getId());
+                            this.status = "Logged in. (" + identity.name() + ")";
+                        }
+                        this.updateControls();
+                    })
+                );
+            } catch (Throwable failure) {
+                Client.logger.error("Sigma account refresh failed", failure);
+                this.minecraft.execute(() -> {
+                    this.switchInProgress = false;
+                    this.status = "Login failed: " + concise(failure);
+                    this.updateControls();
+                });
+            }
+        }, "Sigma-Account-Switch");
+        thread.setDaemon(true);
+        thread.start();
     }
+
+    private void useLauncherAccount() {
+            if (this.switchInProgress) {
+                return;
+            }
+            this.accounts.useLauncherIdentity();
+            this.status = "Launcher identity will be used on the next launch.";
+            this.updateControls();
+        }
 
     private void deleteSelected() {
         if (this.switchInProgress) {

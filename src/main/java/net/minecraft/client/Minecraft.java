@@ -888,36 +888,36 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         return builder.toString();
     }
 
-private static UserApiService createUserApiService(
-    final YggdrasilAuthenticationService authService,
-    final User user,
-    final boolean offline
-) {
-    return offline ? UserApiService.OFFLINE : authService.createUserApiService(user.getAccessToken());
-}
-
-private static CompletableFuture<UserProperties> fetchUserProperties(final UserApiService service, final boolean offline) {
-    if (offline) {
-        return CompletableFuture.completedFuture(UserApiService.OFFLINE_PROPERTIES);
+    private static UserApiService createUserApiService(
+        final YggdrasilAuthenticationService authService,
+        final User user,
+        final boolean offline
+    ) {
+        return offline ? UserApiService.OFFLINE : authService.createUserApiService(user.getAccessToken());
     }
-    return CompletableFuture.supplyAsync(() -> {
-        try {
-            return service.fetchProperties();
-        } catch (AuthenticationException failure) {
-            LOGGER.warn("Failed to fetch user properties", failure);
-            return UserApiService.OFFLINE_PROPERTIES;
-        }
-    }, Util.nonCriticalIoPool());
-}
 
-public boolean isOfflineDeveloperMode() {
-    return this.offlineDeveloperMode;
-}
+    private static CompletableFuture<UserProperties> fetchUserProperties(final UserApiService service, final boolean offline) {
+        if (offline) {
+            return CompletableFuture.completedFuture(UserApiService.OFFLINE_PROPERTIES);
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return service.fetchProperties();
+            } catch (AuthenticationException failure) {
+                LOGGER.warn("Failed to fetch user properties", failure);
+                return UserApiService.OFFLINE_PROPERTIES;
+            }
+        }, Util.nonCriticalIoPool());
+    }
+
+    public boolean isOfflineDeveloperMode() {
+        return this.offlineDeveloperMode;
+    }
 
 /** Sigma offline accounts use local identity semantics even when the normal client is online-capable. */
-public boolean isSigmaOfflineUser() {
-    return this.sigmaOfflineUser;
-}
+    public boolean isSigmaOfflineUser() {
+        return this.sigmaOfflineUser;
+    }
 
     public static ModCheck checkModStatus() {
         return ModCheck.identify("vanilla", ClientBrandRetriever::getClientModName, "Client", Minecraft.class);
@@ -2786,88 +2786,88 @@ public boolean isSigmaOfflineUser() {
         return profileId.equals(this.getUser().getProfileId());
     }
 
-public User getUser() {
-    return this.user;
-}
+    public User getUser() {
+        return this.user;
+    }
 
 /**
  * Switch the active identity without restarting. This is deliberately title-screen-only: changing the user while
  * a world, connection or integrated server is alive would mix two identities inside one network session.
  */
-public CompletableFuture<Boolean> sigmaSwitchUser(final User newUser, final boolean offlineAccount) {
-    if (!this.sigmaCanSwitchUser()) {
-        return CompletableFuture.completedFuture(false);
+    public CompletableFuture<Boolean> sigmaSwitchUser(final User newUser, final boolean offlineAccount) {
+        if (!this.sigmaCanSwitchUser()) {
+            return CompletableFuture.completedFuture(false);
+        }
+
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        Util.nonCriticalIoPool().execute(() -> {
+            try {
+                boolean offlineServices = this.offlineDeveloperMode || offlineAccount;
+                YggdrasilAuthenticationService authService = offlineServices
+                    ? YggdrasilAuthenticationService.createOffline(this.proxy)
+                    : new YggdrasilAuthenticationService(this.proxy);
+                UserApiService userApi = createUserApiService(authService, newUser, offlineServices);
+                UserProperties properties = offlineServices ? UserApiService.OFFLINE_PROPERTIES : fetchUserProperties(userApi, false).join();
+                FriendsService friendsService = authService.createFriendsService(newUser.getAccessToken());
+                ProfileResult profile = offlineServices ? null : this.services.sessionService().fetchProfile(newUser.getProfileId(), true);
+
+                this.execute(() -> {
+                    try {
+                        if (!this.sigmaCanSwitchUser()) {
+                            result.complete(false);
+                            return;
+                        }
+
+                        if (this.remoteFriendListUpdateHandler != null) {
+                            this.remoteFriendListUpdateHandler.close();
+                        }
+                        if (this.telemetryManager != null) {
+                            this.telemetryManager.close();
+                        }
+
+                        this.user = newUser;
+                        this.sigmaOfflineUser = offlineAccount;
+                        this.profileFuture = CompletableFuture.completedFuture(profile);
+                        this.userApiService = userApi;
+                        this.userPropertiesFuture = CompletableFuture.completedFuture(properties);
+                        this.remoteFriendListUpdateHandler = new RemoteFriendListUpdateHandler(friendsService, this);
+                        this.playerSocialManager = new PlayerSocialManager(
+                            this, this.userApiService, friendsService, this.remoteFriendListUpdateHandler
+                        );
+                        if (this.playerSocialManager.isFriendListEnabled()) {
+                            this.remoteFriendListUpdateHandler.start();
+                        }
+
+                        this.telemetryManager = new ClientTelemetryManager(this, this.userApiService, this.user);
+                        this.profileKeyPairManager = offlineServices
+                            ? ProfileKeyPairManager.EMPTY_KEY_MANAGER
+                            : ProfileKeyPairManager.create(this.userApiService, this.user, this.gameDirectory.toPath());
+                        this.reportingContext = ReportingContext.create(ReportEnvironment.local(), this.userApiService);
+
+                        RealmsAvailability.reset();
+                        this.realmsDataFetcher = new RealmsDataFetcher(RealmsClient.getOrCreate(this));
+                        this.updateTitle();
+                        LOGGER.info("Sigma hot-switched user to {} ({})", this.user.getName(), this.user.getProfileId());
+                        result.complete(true);
+                    } catch (Throwable failure) {
+                        result.completeExceptionally(failure);
+                    }
+                });
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+            }
+        });
+        return result;
     }
 
-    CompletableFuture<Boolean> result = new CompletableFuture<>();
-    Util.nonCriticalIoPool().execute(() -> {
-        try {
-            boolean offlineServices = this.offlineDeveloperMode || offlineAccount;
-            YggdrasilAuthenticationService authService = offlineServices
-                ? YggdrasilAuthenticationService.createOffline(this.proxy)
-                : new YggdrasilAuthenticationService(this.proxy);
-            UserApiService userApi = createUserApiService(authService, newUser, offlineServices);
-            UserProperties properties = offlineServices ? UserApiService.OFFLINE_PROPERTIES : fetchUserProperties(userApi, false).join();
-            FriendsService friendsService = authService.createFriendsService(newUser.getAccessToken());
-            ProfileResult profile = offlineServices ? null : this.services.sessionService().fetchProfile(newUser.getProfileId(), true);
-
-            this.execute(() -> {
-                try {
-                    if (!this.sigmaCanSwitchUser()) {
-                        result.complete(false);
-                        return;
-                    }
-
-                    if (this.remoteFriendListUpdateHandler != null) {
-                        this.remoteFriendListUpdateHandler.close();
-                    }
-                    if (this.telemetryManager != null) {
-                        this.telemetryManager.close();
-                    }
-
-                    this.user = newUser;
-                    this.sigmaOfflineUser = offlineAccount;
-                    this.profileFuture = CompletableFuture.completedFuture(profile);
-                    this.userApiService = userApi;
-                    this.userPropertiesFuture = CompletableFuture.completedFuture(properties);
-                    this.remoteFriendListUpdateHandler = new RemoteFriendListUpdateHandler(friendsService, this);
-                    this.playerSocialManager = new PlayerSocialManager(
-                        this, this.userApiService, friendsService, this.remoteFriendListUpdateHandler
-                    );
-                    if (this.playerSocialManager.isFriendListEnabled()) {
-                        this.remoteFriendListUpdateHandler.start();
-                    }
-
-                    this.telemetryManager = new ClientTelemetryManager(this, this.userApiService, this.user);
-                    this.profileKeyPairManager = offlineServices
-                        ? ProfileKeyPairManager.EMPTY_KEY_MANAGER
-                        : ProfileKeyPairManager.create(this.userApiService, this.user, this.gameDirectory.toPath());
-                    this.reportingContext = ReportingContext.create(ReportEnvironment.local(), this.userApiService);
-
-                    RealmsAvailability.reset();
-                    this.realmsDataFetcher = new RealmsDataFetcher(RealmsClient.getOrCreate(this));
-                    this.updateTitle();
-                    LOGGER.info("Sigma hot-switched user to {} ({})", this.user.getName(), this.user.getProfileId());
-                    result.complete(true);
-                } catch (Throwable failure) {
-                    result.completeExceptionally(failure);
-                }
-            });
-        } catch (Throwable failure) {
-            result.completeExceptionally(failure);
-        }
-    });
-    return result;
-}
-
-private boolean sigmaCanSwitchUser() {
-    return this.level == null
-        && this.player == null
-        && this.gameMode == null
-        && this.pendingConnection == null
-        && this.singleplayerServer == null
-        && this.getConnection() == null;
-}
+    private boolean sigmaCanSwitchUser() {
+        return this.level == null
+            && this.player == null
+            && this.gameMode == null
+            && this.pendingConnection == null
+            && this.singleplayerServer == null
+            && this.getConnection() == null;
+    }
 
     public @Nullable ProfileResult getProfileResult() {
         return this.profileFuture.join();
