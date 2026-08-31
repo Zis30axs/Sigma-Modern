@@ -1,7 +1,7 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
-import com.mojang.realmsclient.gui.screens.RealmsMainScreen;
+import com.mojang.realmsclient.RealmsMainScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.client.gui.screens.multiplayer.SafetyScreen;
