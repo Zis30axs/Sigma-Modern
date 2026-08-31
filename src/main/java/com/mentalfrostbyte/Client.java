@@ -9,6 +9,7 @@ import com.mentalfrostbyte.jello.gui.GuiInteractionSmoke;
 import com.mentalfrostbyte.jello.gui.GuiScreenInteractionSmoke;
 import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
 import com.mentalfrostbyte.jello.gui.PresentationManager;
+import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRedirectHandler;
 import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRouter;
 import com.mentalfrostbyte.jello.input.KeybindHandler;
 import com.mentalfrostbyte.jello.module.Module;
@@ -21,10 +22,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * The client itself: one instance, created on demand, started once the game has finished loading and shut
- * down with it.
- */
+/** The Sigma client root: lifecycle, persistent config and the single module registry. */
 public class Client implements MinecraftInstance {
 
     public static final Logger logger = LoggerFactory.getLogger("Sigma");
@@ -38,6 +36,7 @@ public class Client implements MinecraftInstance {
     private final Path directory;
     private final ModuleManager moduleManager = new ModuleManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
+    private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
     private final ClientModeManager clientModeManager = new ClientModeManager();
     private final PresentationManager presentationManager = new PresentationManager(this.clientModeManager);
 
@@ -75,11 +74,11 @@ public class Client implements MinecraftInstance {
             logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
         }
         EventBus.register(this.keybindHandler);
+        EventBus.register(this.mainMenuRedirectHandler);
         logger.info("Started with {} modules.", this.moduleManager.all().size());
 
-        // Sigma's mode is a title-screen presentation choice, not an in-game ClickGUI option. When the
-        // normal initial title screen is showing, a saved mode goes straight to its own main menu. A fresh
-        // config must choose once before a main menu is shown.
+        // The mode is a title-screen presentation choice, not an in-game ClickGUI setting. A saved mode
+        // goes straight to its main menu; a fresh config chooses once before any Sigma main menu appears.
         if (mc.gui.screen() instanceof TitleScreen) {
             if (hasClientMode) {
                 MainMenuRouter.openSelected();
@@ -142,6 +141,7 @@ public class Client implements MinecraftInstance {
 
         logger.info("Shutting down...");
         this.saveConfig();
+        EventBus.unregister(this.mainMenuRedirectHandler);
         EventBus.unregister(this.keybindHandler);
         for (Module module : this.moduleManager.all()) {
             if (module.isEnabled()) {
