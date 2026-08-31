@@ -2,6 +2,7 @@ package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
+import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -35,10 +36,10 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
         graphics.fill(0, 0, this.width, this.height, withAlpha(DEEP_TEAL, 82));
 
         ClassicLayout layout = this.layout();
-        int markWidth = Math.min(300, Math.max(180, this.width - 80));
-        int markHeight = markWidth * 97 / 300;
+        int markWidth = Math.min(LegacyUiScale.size(300), Math.max(1, this.width - LegacyUiScale.size(80)));
+        int markHeight = Math.max(1, markWidth * 97 / 300);
         int markX = (this.width - markWidth) / 2;
-        int markY = Math.max(20, layout.firstRowY - markHeight - 22);
+        int markY = Math.max(LegacyUiScale.px(20), this.height / 2 + LegacyUiScale.px(-200));
         graphics.blit(RenderPipelines.GUI_TEXTURED, CLASSIC_MARK, markX, markY, 0.0F, 0.0F,
             markWidth, markHeight, 264, 61, 264, 61, LIGHT);
 
@@ -57,41 +58,36 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
                 ? SmoothInterpolator.interpolate(progress, 0.68, 2.32, 0.06, 0.48)
                 : SmoothInterpolator.interpolate(progress, 0.81, 0.38, 0.32, -1.53);
 
-            // Classic's historical BoxedButton was icon-led and had no stroke. Keep these interaction
-            // zones transparent until the original uglygui PNG set can be transferred rather than
-            // inventing a modern card. The tiny text offset keeps the old background-motion feedback.
             String label = ACTIONS[i];
             int textX = box.x + (box.width - this.font.width(label)) / 2;
-            int textY = box.y + box.height - 28 - Math.round(Math.max(-2.0F, Math.min(2.0F, motion)));
+            int textY = box.y + box.height - LegacyUiScale.size(28)
+                - Math.round(LegacyUiScale.px(Math.max(-2.0F, Math.min(2.0F, motion))));
             graphics.text(this.font, label, textX, textY + 1, withAlpha(DEEP_TEAL, 128), false);
             graphics.text(this.font, label, textX, textY, LIGHT, false);
         }
 
         String hello = "Hello," + this.minecraft.getUser().getName();
-        graphics.text(this.font, hello, 10, this.height - 28, LIGHT, false);
-        graphics.text(this.font, "You are using the latest version", 10, this.height - 16, LIGHT, false);
+        graphics.text(this.font, hello, LegacyUiScale.px(10), this.height - LegacyUiScale.size(28), LIGHT, false);
+        graphics.text(this.font, "You are using the latest version", LegacyUiScale.px(10), this.height - LegacyUiScale.size(16), LIGHT, false);
         String version = "Sigma " + Client.FULL_VERSION + " for Minecraft " + this.minecraft.getLaunchedVersion();
-        graphics.text(this.font, version, this.width - this.font.width(version) - 9, this.height - 16, LIGHT, false);
+        graphics.text(this.font, version, this.width - this.font.width(version) - LegacyUiScale.size(9), this.height - LegacyUiScale.size(16), LIGHT, false);
     }
 
     private ClassicLayout layout() {
-        int width = Math.min(114, Math.max(72, (this.width - 32) / 4));
-        int height = Math.round(width * 140.0F / 114.0F);
-
-        int firstOverlap = Math.max(3, Math.round(width * 6.0F / 114.0F));
-        int firstStride = width - firstOverlap;
+        int width = LegacyUiScale.size(114);
+        int height = LegacyUiScale.size(140);
+        int firstStride = LegacyUiScale.size(116);
         int firstTotal = width + firstStride * 3;
         int firstStartX = (this.width - firstTotal) / 2;
 
-        int secondGap = Math.max(4, Math.round(width * 6.0F / 114.0F));
-        int secondStride = width + secondGap;
+        int secondStride = LegacyUiScale.size(128);
         int secondTotal = width + secondStride * 2;
         int secondStartX = (this.width - secondTotal) / 2;
 
-        int firstRowY = Math.max(118, this.height / 2 - 86);
-        int secondRowY = firstRowY + height + Math.max(8, Math.round(10.0F * width / 114.0F));
-        if (secondRowY + height > this.height - 42) {
-            int shift = secondRowY + height - (this.height - 42);
+        int firstRowY = this.height / 2 + LegacyUiScale.px(-80);
+        int secondRowY = firstRowY + LegacyUiScale.size(150);
+        if (secondRowY + height > this.height - LegacyUiScale.size(42)) {
+            int shift = secondRowY + height - (this.height - LegacyUiScale.size(42));
             firstRowY -= shift;
             secondRowY -= shift;
         }
@@ -151,8 +147,6 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
                 return new ButtonBox(this.firstStartX + index * this.firstStride, this.firstRowY, this.width, this.height);
             }
 
-            // The old second row was Accounts / Switch / Exit. Accounts is not implemented in Modern
-            // yet, so leave its historical first slot empty and keep Switch/Exit in slots two and three.
             int historicalSecondIndex = index - 3;
             return new ButtonBox(
                 this.secondStartX + historicalSecondIndex * this.secondStride,
