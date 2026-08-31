@@ -10,6 +10,7 @@ import com.mentalfrostbyte.jello.gui.GuiScreenInteractionSmoke;
 import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
 import com.mentalfrostbyte.jello.gui.PresentationManager;
 import com.mentalfrostbyte.jello.input.KeybindHandler;
+import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.util.game.MinecraftInstance;
 import com.mentalfrostbyte.jello.util.io.JsonFileUtil;
@@ -45,11 +46,15 @@ public class Client implements MinecraftInstance {
 
     private final ModuleManager moduleManager = new ModuleManager();
 
+    private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
+
     private final ClientModeManager clientModeManager = new ClientModeManager();
 
     private final PresentationManager presentationManager = new PresentationManager(this.clientModeManager);
 
     private JsonObject config = new JsonObject();
+
+    private boolean modulesRegistered;
 
     private boolean started;
 
@@ -80,13 +85,16 @@ public class Client implements MinecraftInstance {
             logger.info("Sigma debug: opening first-run mode select");
             mc.gui.setScreen(new ModeSelectScreen(mc.gui.screen(), true));
         }
-        this.moduleManager.registerAll();
+        if (!this.modulesRegistered) {
+            this.moduleManager.registerAll();
+            this.modulesRegistered = true;
+        }
         ModuleConfig.read(this.config, this.moduleManager);
         this.applyDebugClientModeIfRequested();
         if (Boolean.getBoolean("sigma.debug.logMode")) {
             logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
         }
-        EventBus.register(new KeybindHandler(this.moduleManager));
+        EventBus.register(this.keybindHandler);
         logger.info("Started with {} modules.", this.moduleManager.all().size());
         this.openDebugGuiIfRequested();
     }
@@ -139,9 +147,15 @@ public class Client implements MinecraftInstance {
             return;
         }
 
-        this.started = false;
         logger.info("Shutting down...");
         this.saveConfig();
+        EventBus.unregister(this.keybindHandler);
+        for (Module module : this.moduleManager.all()) {
+            if (module.isEnabled()) {
+                module.setEnabled(false);
+            }
+        }
+        this.started = false;
         logger.info("Done.");
     }
 
