@@ -1,0 +1,85 @@
+name: Sync Legacy Sigma Assets
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/sync-legacy-sigma-assets.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sigma-modern-legacy-assets
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vendor verified original Sigma menu artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_COMMIT="50adab3315983819cddf1bc01d547047b665f8e6"
+          SOURCE_ROOT="https://raw.githubusercontent.com/juzibujiji/SigmaClient/${SOURCE_COMMIT}/src/main/resources/assets/minecraft/com/mentalfrostbyte/gui/resources"
+          DEST_ROOT="src/main/resources/assets/minecraft/textures/gui/sigma/legacy"
+
+          mkdir -p "$DEST_ROOT"
+
+          # source path | destination path | exact Git blob SHA from the historical Sigma repository
+          while IFS='|' read -r source relative expected; do
+            [ -n "$source" ] || continue
+            destination="$DEST_ROOT/$relative"
+            mkdir -p "$(dirname "$destination")"
+            curl --retry 3 --retry-all-errors -fsSL "$SOURCE_ROOT/$source" -o "$destination"
+
+            actual="$(git hash-object "$destination")"
+            if [ "$actual" != "$expected" ]; then
+              echo "Blob verification failed for $source" >&2
+              echo "expected: $expected" >&2
+              echo "actual:   $actual" >&2
+              exit 1
+            fi
+          done <<'ASSETS'
+          jello/icons/singleplayer.png|jello/icons/singleplayer.png|64d21041338e09059dd74dbfe7ab24399250c617
+          jello/icons/multiplayer.png|jello/icons/multiplayer.png|37283d9cbc313ff668404b8e3fa13910b9a26aa7
+          jello/icons/shop.png|jello/icons/shop.png|1711fa9b370662cc081580d328a3d5fc8f4c2fcb
+          jello/icons/options.png|jello/icons/options.png|7f52c572552fffa7c3682ef73ad9f79b3d2986d2
+          jello/icons/alt.png|jello/icons/alt.png|fb3a5c708d437521c0c8f32063f9d975c4d68c54
+          jello/logo_large.png|jello/logo_large.png|0649a37d8fb5e16e22f3f82daa4704d5910dc254
+          jello/logo_large@2x.png|jello/logo_large@2x.png|edabe8e589d9d72553b3999a707afcf83647d967
+          alt/shadow.png|jello/shadow.png|a410f5f89145442f149c52a126a4649f1aac8911
+          background/background.png|jello/background/background.png|366e71b54dff2c6cc8ae97a992e5ed0d6db3259d
+          background/middle.png|jello/background/middle.png|3105b2400ecc88da9fa5e731c0b740854cb64814
+          background/foreground.png|jello/background/foreground.png|cf3a8c8f38906780c296a28db356253e3b754de4
+          background/panorama5.png|jello/background/panorama5.png|464846b8dec956aa6bacac850c5a4eac51195ed2
+          sigma/uglygui/mainmenubackground.png|classic/mainmenubackground.png|2befd28617af3c837ee881bf4b3b9e973e358576
+          sigma/uglygui/big.png|classic/big.png|be911e0ac7af8be771e2b9ad5dc784b0d4831f27
+          sigma/uglygui/singleplayer.png|classic/singleplayer.png|9654206186c5b84f4274e94ed327017187d15af7
+          sigma/uglygui/multiplayer.png|classic/multiplayer.png|2992ab6b801c08233759ad311ca1ff0e8581d78e
+          sigma/uglygui/options.png|classic/options.png|1615d19cb858f6d4df8e62ceba9b00e225b625f1
+          sigma/uglygui/language.png|classic/language.png|c83643be7df5f179d132edce5777abeb23b83bae
+          sigma/uglygui/accounts.png|classic/accounts.png|8c72fa37c74b42702f57ad32b6874ca5a967682f
+          sigma/uglygui/switch.png|classic/switch.png|1bfefe49aa7e1b46d92c3604698fcb3f345e923d
+          sigma/uglygui/exit.png|classic/exit.png|ba883e4beed8573aac5df1cec2e0d50851f52db2
+          ASSETS
+
+          git add "$DEST_ROOT"
+          if git diff --cached --quiet; then
+            echo "Legacy Sigma menu assets already match the pinned originals."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Vendor original Sigma menu assets"
+          git push origin HEAD:main

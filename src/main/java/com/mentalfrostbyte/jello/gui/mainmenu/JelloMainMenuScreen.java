@@ -1,9 +1,10 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.account.SigmaAccountScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
+import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
-import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -12,24 +13,37 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 /**
- * Source-native 26.2 presentation of Sigma's Jello main menu.
+ * Source-native 26.2 presentation of Sigma's original Jello main menu.
  *
- * <p>The layout and motion intentionally follow the old client: a centred Sigma mark, five 128px menu
- * slots on a 122px stride, simple top text actions, light-grey-blue tinting and a soft hover shadow.
- * The old fixed-function OpenGL implementation is not carried forward.</p>
+ * <p>The artwork, button order, historical framebuffer-pixel measurements and hover motion come from
+ * the old client. Rendering itself stays on Minecraft 26.2's backend-neutral GUI pipeline.</p>
  */
 public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
 
-    private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/sigma/back.png");
-    private static final Identifier LOGO = Identifier.withDefaultNamespace("textures/gui/sigma/logo.png");
+    private static final Identifier BACKGROUND = legacy("jello/background/background.png");
+    private static final Identifier MIDDLE = legacy("jello/background/middle.png");
+    private static final Identifier FOREGROUND = legacy("jello/background/foreground.png");
+    private static final Identifier LOGO = legacy("jello/logo_large.png");
+    private static final Identifier LOGO_2X = legacy("jello/logo_large@2x.png");
+    private static final Identifier SHADOW = legacy("jello/shadow.png");
+
+    private static final Identifier[] ICONS = {
+        legacy("jello/icons/singleplayer.png"),
+        legacy("jello/icons/multiplayer.png"),
+        legacy("jello/icons/shop.png"),
+        legacy("jello/icons/options.png"),
+        legacy("jello/icons/alt.png")
+    };
+
+    private static final String[] ACTIONS = {"Singleplayer", "Multiplayer", "Realms", "Options", "Alt Manager"};
 
     private static final int LIGHT = ClientColors.LIGHT_GREYISH_BLUE.getColor();
     private static final int DEEP_TEAL = ClientColors.DEEP_TEAL.getColor();
     private static final int TEXT_DIM = withAlpha(LIGHT, 178);
-    private static final String[] ACTIONS = {"Singleplayer", "Multiplayer", "Realms", "Options", "Language"};
 
     private final Animation[] actionHover = new Animation[ACTIONS.length];
     private final Animation exitHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
+    private final Animation changelogHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
     private final Animation switchHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
 
     public JelloMainMenuScreen() {
@@ -41,15 +55,17 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
 
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
-        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, 0, 0, 0.0F, 0.0F, this.width, this.height, 1280, 720, 1280, 720);
-        graphics.fill(0, 0, this.width, this.height, withAlpha(DEEP_TEAL, 48));
+        drawFullScreen(graphics, BACKGROUND);
+        drawFullScreen(graphics, MIDDLE);
+        drawFullScreen(graphics, FOREGROUND);
 
-        int logoWidth = Math.min(455, Math.max(180, this.width - 40));
-        int logoHeight = logoWidth * 78 / 455;
+        int logoWidth = LegacyUiScale.size(336);
+        int logoHeight = LegacyUiScale.size(178);
         int logoX = (this.width - logoWidth) / 2;
-        int logoY = Math.max(28, this.height / 2 - logoHeight);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
-            logoWidth, logoHeight, 910, 156, 910, 156, LIGHT);
+        int logoY = this.height / 2 - logoHeight;
+        Identifier logo = this.minecraft.getWindow().getGuiScale() > 1 ? LOGO_2X : LOGO;
+        graphics.blit(RenderPipelines.GUI_TEXTURED, logo, logoX, logoY, 0.0F, 0.0F,
+            logoWidth, logoHeight, logoWidth, logoHeight, LIGHT);
 
         MenuLayout layout = this.menuLayout();
         for (int i = 0; i < ACTIONS.length; i++) {
@@ -63,59 +79,78 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
                 ? SmoothInterpolator.interpolate(progress, 0.24, 0.88, 0.30, 1.00)
                 : SmoothInterpolator.interpolate(progress, 0.45, 0.02, 0.59, 0.28);
 
-            int grow = Math.round(layout.size * motion * 0.10F);
-            int lift = Math.round(layout.size * motion * 0.10F);
-            int drawX = x - grow;
-            int drawY = layout.y - grow - lift;
-            int drawSize = layout.size + grow * 2;
+            int drawSize = Math.max(1, Math.round(layout.size * (1.0F + motion * 0.20F)));
+            int drawX = x - (drawSize - layout.size) / 2;
+            int drawY = layout.y - (drawSize - layout.size) / 2
+                - Math.round((layout.size / 2.0F) * motion * 0.20F);
 
             if (progress > 0.001F) {
-                GuiVisuals.softGlow(graphics, drawX, drawY, drawSize, drawSize, LIGHT, Math.max(10, layout.size * 2 / 3), progress * 0.22F);
+                int shadowPad = LegacyUiScale.size(85);
+                int shadowAlpha = Math.round(255.0F * Math.min(1.0F, progress * 0.70F));
+                graphics.blit(RenderPipelines.GUI_TEXTURED, SHADOW,
+                    drawX - shadowPad, drawY - shadowPad, 0.0F, 0.0F,
+                    drawSize + shadowPad * 2, drawSize + shadowPad * 2,
+                    drawSize + shadowPad * 2, drawSize + shadowPad * 2,
+                    withAlpha(LIGHT, shadowAlpha));
             }
 
-            // The original slot is icon-driven. Until the original binary icon set is brought across,
-            // keep the slot visually neutral rather than inventing a replacement card or border.
-            String label = ACTIONS[i];
-            int textX = drawX + (drawSize - this.font.width(label)) / 2;
-            int textY = drawY + drawSize - Math.max(14, drawSize / 5);
-            graphics.text(this.font, label, textX + 1, textY + 1, withAlpha(DEEP_TEAL, 128), false);
-            graphics.text(this.font, label, textX, textY, LIGHT, false);
+            graphics.blit(RenderPipelines.GUI_TEXTURED, ICONS[i], drawX, drawY, 0.0F, 0.0F,
+                drawSize, drawSize, drawSize, drawSize, LIGHT);
+
+            if (progress > 0.001F) {
+                String label = ACTIONS[i];
+                int labelX = x + (layout.size - this.font.width(label)) / 2;
+                int labelY = layout.y + layout.size - LegacyUiScale.size(40);
+                graphics.text(this.font, label, labelX + 1, labelY + 1,
+                    withAlpha(DEEP_TEAL, Math.round(progress * 96.0F)), false);
+                graphics.text(this.font, label, labelX, labelY,
+                    withAlpha(LIGHT, Math.round(progress * 153.0F)), false);
+            }
         }
 
         this.drawTopAction(graphics, "Exit", 30, mouseX, mouseY, this.exitHover, 0.40F);
-        this.drawTopAction(graphics, "Switch", 90, mouseX, mouseY, this.switchHover, 0.70F);
+        this.drawTopAction(graphics, "Changelog", 90, mouseX, mouseY, this.changelogHover, 0.70F);
+        this.drawTopAction(graphics, "Switch", 220, mouseX, mouseY, this.switchHover, 0.70F);
 
         String version = "Jello for Sigma " + Client.FULL_VERSION + "  -  Minecraft " + this.minecraft.getLaunchedVersion();
-        graphics.text(this.font, "© Sigma Prod", 10, this.height - 16, LIGHT, true);
-        graphics.text(this.font, version, this.width - this.font.width(version) - 9, this.height - 16, LIGHT, true);
+        graphics.text(this.font, "© Sigma Prod", LegacyUiScale.px(10), this.height - LegacyUiScale.size(16), LIGHT, true);
+        graphics.text(this.font, version, this.width - this.font.width(version) - LegacyUiScale.size(9),
+            this.height - LegacyUiScale.size(16), TEXT_DIM, true);
+    }
+
+    private static void drawFullScreen(final GuiGraphicsExtractor graphics, final Identifier texture) {
+        int width = graphics.guiWidth();
+        int height = graphics.guiHeight();
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, 0, 0, 0.0F, 0.0F,
+            width, height, width, height);
     }
 
     private void drawTopAction(
         final GuiGraphicsExtractor graphics,
         final String text,
-        final int x,
+        final int legacyX,
         final int mouseX,
         final int mouseY,
         final Animation animation,
         final float baseAlpha
     ) {
+        int x = LegacyUiScale.px(legacyX);
+        int top = LegacyUiScale.px(20);
         int width = this.font.width(text);
-        boolean hovered = inside(mouseX, mouseY, x, 20, width + 8, 20);
+        boolean hovered = inside(mouseX, mouseY, x, top, width + LegacyUiScale.size(8), LegacyUiScale.size(20));
         animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
         float progress = animation.calcPercent();
         float alpha = Math.min(1.0F, baseAlpha + progress * (1.0F - baseAlpha));
-        graphics.text(this.font, text, x, 24 - Math.round(progress), withAlpha(LIGHT, Math.round(255.0F * alpha)), false);
+        graphics.text(this.font, text, x, LegacyUiScale.px(24) - Math.round(LegacyUiScale.px(1.0F) * progress),
+            withAlpha(LIGHT, Math.round(255.0F * alpha)), false);
     }
 
     private MenuLayout menuLayout() {
-        int size = Math.min(128, Math.max(64, (this.width - 36) / 5));
-        int overlap = Math.max(3, Math.round(size * 6.0F / 128.0F));
-        int stride = size - overlap;
+        int size = LegacyUiScale.size(128);
+        int stride = LegacyUiScale.size(122);
         int totalWidth = size + stride * (ACTIONS.length - 1);
         int startX = (this.width - totalWidth) / 2;
-        int y = this.height / 2 + 14;
-        y = Math.min(y, this.height - size - 36);
-        y = Math.max(80, y);
+        int y = this.height / 2 + LegacyUiScale.px(14);
         return new MenuLayout(size, stride, startX, y);
     }
 
@@ -127,11 +162,13 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
 
         int mouseX = (int) event.x();
         int mouseY = (int) event.y();
-        if (inside(mouseX, mouseY, 26, 18, 54, 24)) {
+        if (inside(mouseX, mouseY, LegacyUiScale.px(30), LegacyUiScale.px(20),
+            Math.max(this.font.width("Exit") + LegacyUiScale.size(8), LegacyUiScale.size(50)), LegacyUiScale.size(24))) {
             this.quitGame();
             return true;
         }
-        if (inside(mouseX, mouseY, 86, 18, 70, 24)) {
+        if (inside(mouseX, mouseY, LegacyUiScale.px(220), LegacyUiScale.px(20),
+            Math.max(this.font.width("Switch") + LegacyUiScale.size(8), LegacyUiScale.size(50)), LegacyUiScale.size(24))) {
             this.openModeSelect();
             return true;
         }
@@ -148,13 +185,17 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
                 case 1 -> this.openMultiplayer();
                 case 2 -> this.openRealms();
                 case 3 -> this.openOptions();
-                case 4 -> this.openLanguage();
+                case 4 -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.JELLO));
                 default -> throw new IllegalStateException("Unexpected Jello menu action " + i);
             }
             return true;
         }
 
         return super.mouseClicked(event, doubleClick);
+    }
+
+    private static Identifier legacy(final String path) {
+        return Identifier.withDefaultNamespace("textures/gui/sigma/legacy/" + path);
     }
 
     private static int withAlpha(final int color, final int alpha) {

@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.gui;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRouter;
+import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -26,6 +27,7 @@ public final class ModeSelectScreen extends Screen {
     private static final Identifier REDDIT_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/reddit.png");
     private static final Identifier GUILDED_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/guilded.png");
 
+    // Historical SwitchScreen measurements are framebuffer pixels, not modern GUI units.
     private static final int NO_ADDONS_WIDTH = 537;
     private static final int NO_ADDONS_HEIGHT = 93;
     private static final int SMALL_WIDTH = 264;
@@ -63,10 +65,10 @@ public final class ModeSelectScreen extends Screen {
         graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, 0, 0, 0.0F, 0.0F, this.width, this.height, 1280, 720, 1280, 720);
         graphics.fill(0, 0, this.width, this.height, withAlpha(DEEP_TEAL, 77));
 
-        int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
-        int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
+        int logoWidth = Math.min(LegacyUiScale.size(LOGO_WIDTH), Math.max(1, this.width - LegacyUiScale.size(40)));
+        int logoHeight = Math.max(1, logoWidth * LOGO_HEIGHT / LOGO_WIDTH);
         int logoX = (this.width - logoWidth) / 2;
-        int logoY = 24;
+        int logoY = LegacyUiScale.px(24);
         graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
             logoWidth, logoHeight, 910, 156, 910, 156, LIGHT);
 
@@ -103,7 +105,7 @@ public final class ModeSelectScreen extends Screen {
         float motion = animation.getDirection() == Animation.Direction.FORWARDS
             ? SmoothInterpolator.interpolate(progress, 0.07, 0.73, 0.63, 1.01)
             : SmoothInterpolator.interpolate(progress, 0.71, 0.18, 0.95, 0.57);
-        int lift = Math.round(motion * 3.0F);
+        int lift = Math.round(LegacyUiScale.px(3.0F) * motion);
         int drawY = y - lift;
 
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, drawY, 0.0F, 0.0F,
@@ -117,30 +119,41 @@ public final class ModeSelectScreen extends Screen {
     }
 
     private ModeLayout layout(final int logoY, final int logoHeight) {
-        float scale = Math.min(1.0F, (this.width - 24) / (float) NO_ADDONS_WIDTH);
-        int bigWidth = (int) (NO_ADDONS_WIDTH * scale);
-        int bigHeight = (int) (NO_ADDONS_HEIGHT * scale);
-        int smallWidth = (int) (SMALL_WIDTH * scale);
-        int smallHeight = (int) (SMALL_HEIGHT * scale);
-        int gap = Math.max(4, (int) (GAP * scale));
-        int cardsTop = logoY + logoHeight + 28;
+        int sourceBigWidth = LegacyUiScale.size(NO_ADDONS_WIDTH);
+        int sourceBigHeight = LegacyUiScale.size(NO_ADDONS_HEIGHT);
+        int sourceSmallWidth = LegacyUiScale.size(SMALL_WIDTH);
+        int sourceSmallHeight = LegacyUiScale.size(SMALL_HEIGHT);
+        int sourceGap = LegacyUiScale.size(GAP);
+
+        float fitScale = Math.min(1.0F, Math.max(0.1F, (this.width - LegacyUiScale.size(24)) / (float) sourceBigWidth));
+        int bigWidth = Math.max(1, Math.round(sourceBigWidth * fitScale));
+        int bigHeight = Math.max(1, Math.round(sourceBigHeight * fitScale));
+        int smallWidth = Math.max(1, Math.round(sourceSmallWidth * fitScale));
+        int smallHeight = Math.max(1, Math.round(sourceSmallHeight * fitScale));
+        int gap = Math.max(1, Math.round(sourceGap * fitScale));
+
+        int cardsTop = logoY + logoHeight + LegacyUiScale.size(28);
         int cardsTotalHeight = bigHeight + gap + smallHeight;
-        int y = cardsTop + Math.max(0, (this.height - cardsTop - cardsTotalHeight - 40) / 2);
+        int footerReserve = LegacyUiScale.size(70);
+        int y = cardsTop + Math.max(0, (this.height - cardsTop - cardsTotalHeight - footerReserve) / 2);
         int x = (this.width - bigWidth) / 2;
         return new ModeLayout(x, y, bigWidth, bigHeight, smallWidth, smallHeight, gap);
     }
 
     private void drawSocialButtons(final GuiGraphicsExtractor graphics) {
-        int totalWidth = 174;
+        int totalWidth = LegacyUiScale.size(174);
         int x = (this.width - totalWidth) / 2;
-        int y = this.height - 44;
+        int y = this.height - LegacyUiScale.size(70);
         if (y < 0 || x < 0) {
             return;
         }
 
-        graphics.blit(RenderPipelines.GUI_TEXTURED, YOUTUBE_IMAGE, x, y, 0.0F, 0.0F, 65, 34, 65, 34, 65, 34, LIGHT);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, REDDIT_IMAGE, x + 85, y, 0.0F, 0.0F, 36, 34, 36, 34, 36, 34, LIGHT);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, GUILDED_IMAGE, x + 142, y, 0.0F, 0.0F, 32, 34, 32, 34, 32, 34, LIGHT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, YOUTUBE_IMAGE, x, y, 0.0F, 0.0F,
+            LegacyUiScale.size(65), LegacyUiScale.size(34), 65, 34, 65, 34, LIGHT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, REDDIT_IMAGE, x + LegacyUiScale.px(85), y, 0.0F, 0.0F,
+            LegacyUiScale.size(36), LegacyUiScale.size(34), 36, 34, 36, 34, LIGHT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, GUILDED_IMAGE, x + LegacyUiScale.px(142), y, 0.0F, 0.0F,
+            LegacyUiScale.size(32), LegacyUiScale.size(34), 32, 34, 32, 34, LIGHT);
     }
 
     @Override
@@ -149,9 +162,9 @@ public final class ModeSelectScreen extends Screen {
             return super.mouseClicked(event, doubleClick);
         }
 
-        int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
-        int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
-        ModeLayout layout = this.layout(24, logoHeight);
+        int logoWidth = Math.min(LegacyUiScale.size(LOGO_WIDTH), Math.max(1, this.width - LegacyUiScale.size(40)));
+        int logoHeight = Math.max(1, logoWidth * LOGO_HEIGHT / LOGO_WIDTH);
+        ModeLayout layout = this.layout(LegacyUiScale.px(24), logoHeight);
         int mouseX = (int) event.x();
         int mouseY = (int) event.y();
 

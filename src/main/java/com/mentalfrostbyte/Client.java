@@ -1,6 +1,7 @@
 package com.mentalfrostbyte;
 
 import com.google.gson.JsonObject;
+import com.mentalfrostbyte.jello.account.SigmaAccountManager;
 import com.mentalfrostbyte.jello.config.ModuleConfig;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.gui.ClientMode;
@@ -34,6 +35,7 @@ public class Client implements MinecraftInstance {
     private static final Client INSTANCE = new Client();
 
     private final Path directory;
+    private final SigmaAccountManager accountManager;
     private final ModuleManager moduleManager = new ModuleManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
@@ -46,6 +48,7 @@ public class Client implements MinecraftInstance {
 
     private Client() {
         this.directory = mc.gameDirectory.toPath().resolve("sigma5");
+        this.accountManager = new SigmaAccountManager(this.directory.resolve("accounts.json"));
     }
 
     public static Client getInstance() {
@@ -61,6 +64,7 @@ public class Client implements MinecraftInstance {
         this.started = true;
         logger.info("Starting {} {} for Minecraft {}", NAME, FULL_VERSION, mc.getLaunchedVersion());
         this.config = JsonFileUtil.read(this.getConfigFile());
+        this.accountManager.load();
         boolean hasClientMode = this.config.has("clientMode");
         this.clientModeManager.read(this.config);
 
@@ -168,6 +172,10 @@ public class Client implements MinecraftInstance {
 
     public ModuleManager getModuleManager() {
         return this.moduleManager;
+    }
+
+    public SigmaAccountManager getAccountManager() {
+        return this.accountManager;
     }
 
     public ClientModeManager getClientModeManager() {

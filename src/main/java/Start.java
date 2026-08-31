@@ -1,3 +1,4 @@
+import com.mentalfrostbyte.jello.account.SigmaAccountManager;
 import net.minecraft.client.main.Main;
 
 import java.io.File;
@@ -5,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.HttpURLConnection;
@@ -20,6 +22,7 @@ import java.util.regex.Pattern;
 public final class Start {
 
     private static final String VERSION = "26.2";
+    private static final String[] IDENTITY_ARGUMENTS = {"username", "uuid", "accessToken", "xuid", "clientId"};
 
     private Start() {
     }
@@ -38,11 +41,16 @@ public final class Start {
         String assetIndex = findAssetIndex(assetsDirectory);
         ensureVanillaAssets(assetsDirectory, assetIndex);
 
+        Optional<SigmaAccountManager.LaunchIdentity> sigmaIdentity = SigmaAccountManager.resolveSelectedForLaunch(
+                runDirectory.toPath().resolve("sigma5").resolve("accounts.json")
+        );
+
         System.out.println("Minecraft " + VERSION);
         System.out.println("Java: " + System.getProperty("java.version"));
         System.out.println("Game directory: " + runDirectory.getAbsolutePath());
         System.out.println("Assets directory: " + assetsDirectory.getAbsolutePath());
         System.out.println("Asset index: " + assetIndex);
+        sigmaIdentity.ifPresent(identity -> System.out.println("Sigma account: " + identity.name() + " (selected account)"));
 
         if (Runtime.version().feature() != 25) {
             System.err.println(
@@ -61,11 +69,62 @@ public final class Start {
         launchArgs.add(assetsDirectory.getAbsolutePath());
         launchArgs.add("--assetIndex");
         launchArgs.add(assetIndex);
-        launchArgs.add("--accessToken");
-        launchArgs.add("0");
-        launchArgs.addAll(Arrays.asList(args));
+
+        if (sigmaIdentity.isPresent()) {
+            SigmaAccountManager.LaunchIdentity identity = sigmaIdentity.get();
+            // A Sigma-selected account deliberately replaces launcher identity arguments so that username,
+            // UUID and token stay coherent. xuid/clientId are omitted instead of reusing values from a
+            // different launcher account.
+            launchArgs.add("--username");
+            launchArgs.add(identity.name());
+            launchArgs.add("--uuid");
+            launchArgs.add(identity.profileId().toString());
+            launchArgs.add("--accessToken");
+            launchArgs.add(identity.accessToken());
+            launchArgs.addAll(withoutIdentityArguments(args));
+        } else {
+            if (!hasOption(args, "accessToken")) {
+                launchArgs.add("--accessToken");
+                launchArgs.add("0");
+            }
+            launchArgs.addAll(Arrays.asList(args));
+        }
 
         Main.main(launchArgs.toArray(String[]::new));
+    }
+
+    private static List<String> withoutIdentityArguments(final String[] args) {
+        List<String> filtered = new ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            String option = identityOption(args[i]);
+            if (option == null) {
+                filtered.add(args[i]);
+                continue;
+            }
+
+            if (args[i].equals("--" + option) && i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                i++;
+            }
+        }
+        return filtered;
+    }
+
+    private static boolean hasOption(final String[] args, final String name) {
+        for (String arg : args) {
+            if (arg.equals("--" + name) || arg.startsWith("--" + name + "=")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String identityOption(final String arg) {
+        for (String name : IDENTITY_ARGUMENTS) {
+            if (arg.equals("--" + name) || arg.startsWith("--" + name + "=")) {
+                return name;
+            }
+        }
+        return null;
     }
 
     private static File resolveAssetsDirectory(File runDirectory) {
