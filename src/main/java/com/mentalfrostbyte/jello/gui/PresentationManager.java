@@ -1,7 +1,7 @@
 package com.mentalfrostbyte.jello.gui;
 
-import com.mentalfrostbyte.jello.gui.classic.ClassicClickGuiScreen;
-import com.mentalfrostbyte.jello.gui.jello.JelloClickGuiScreen;
+import com.mentalfrostbyte.jello.gui.classic.ClassicModuleScreen;
+import com.mentalfrostbyte.jello.gui.jello.JelloModuleScreen;
 import com.mentalfrostbyte.jello.gui.noaddons.NoAddonsScreen;
 import com.mentalfrostbyte.jello.module.ModuleManager;
 import net.minecraft.client.gui.screens.Screen;
@@ -23,8 +23,8 @@ public final class PresentationManager {
 
     public Screen createClickGui(final ModuleManager modules) {
         return switch (this.clientModeManager.get()) {
-            case JELLO -> new JelloClickGuiScreen(modules);
-            case CLASSIC -> new ClassicClickGuiScreen(modules);
+            case JELLO -> new JelloModuleScreen(modules);
+            case CLASSIC -> new ClassicModuleScreen(modules);
             case NO_ADDONS -> new NoAddonsScreen();
         };
     }
