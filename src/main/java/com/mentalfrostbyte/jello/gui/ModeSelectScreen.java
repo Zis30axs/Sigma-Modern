@@ -1,8 +1,7 @@
 package com.mentalfrostbyte.jello.gui;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
-import com.mojang.blaze3d.platform.InputConstants;
+import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRouter;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -13,13 +12,13 @@ import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The client's first-run mode selection screen.
+ * Main-menu mode selector, matching Sigma's original SwitchScreen flow.
  *
- * <p>This is a modern Screen implementation of the old Sigma SwitchScreen flow: the user selects a mode
- * first, then returns to the screen that was open before. It reuses the original Sigma background, logo,
- * mode buttons and social icons, while using the current 26.2 rendering path.</p>
+ * <p>It is not a ClickGUI and does not change presentation from inside gameplay. A successful selection
+ * is persisted and immediately opens the selected main menu. When opened by a main menu, Escape returns
+ * to that menu; on first run a choice is required.</p>
  */
-public final class ModeSelectScreen extends Screen implements SigmaClickGui {
+public final class ModeSelectScreen extends Screen {
 
     private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/sigma/back.png");
     private static final Identifier LOGO = Identifier.withDefaultNamespace("textures/gui/sigma/logo.png");
@@ -42,16 +41,16 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
     private static final int BORDER = 0xFF3A3A3A;
 
     private final @Nullable Screen returnScreen;
-    private final boolean returnAfterSelect;
+    private final boolean selectionRequired;
 
     public ModeSelectScreen(final @Nullable Screen returnScreen) {
         this(returnScreen, false);
     }
 
-    public ModeSelectScreen(final @Nullable Screen returnScreen, final boolean returnAfterSelect) {
+    public ModeSelectScreen(final @Nullable Screen returnScreen, final boolean selectionRequired) {
         super(Component.literal("Select Client Mode"));
         this.returnScreen = returnScreen;
-        this.returnAfterSelect = returnAfterSelect;
+        this.selectionRequired = selectionRequired;
     }
 
     @Override
@@ -89,7 +88,7 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
         this.drawModeCard(graphics, JELLO_IMAGE, ClientMode.JELLO, x + smallWidth + gap, y + bigHeight + gap,
                 smallWidth, smallHeight, SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
 
-        this.drawSocialButtons(graphics, mouseX, mouseY);
+        this.drawSocialButtons(graphics);
     }
 
     private void drawModeCard(final GuiGraphicsExtractor graphics, final Identifier texture, final ClientMode mode,
@@ -98,13 +97,13 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
                               final int mouseX, final int mouseY) {
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0.0F, 0.0F, width, height, textureWidth, textureHeight, textureWidth, textureHeight);
         boolean hovered = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
-        boolean selected = Client.getInstance().getClientModeManager().get() == mode;
+        boolean selected = !this.selectionRequired && Client.getInstance().getClientModeManager().get() == mode;
         if (hovered || selected) {
             graphics.outline(x, y, width, height, hovered ? HOVER_BORDER : BORDER);
         }
     }
 
-    private void drawSocialButtons(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
+    private void drawSocialButtons(final GuiGraphicsExtractor graphics) {
         int totalWidth = 174;
         int x = (this.width - totalWidth) / 2;
         int y = this.height - 44;
@@ -135,7 +134,6 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
 
         int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
         int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
-        int logoX = (this.width - logoWidth) / 2;
         int logoY = 24;
         int cardsTop = logoY + logoHeight + 28;
         int cardsTotalHeight = bigHeight + gap + smallHeight;
@@ -143,11 +141,11 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
         int x = (this.width - bigWidth) / 2;
 
         ClientMode selected = null;
-        if (this.inside(mouseX, mouseY, x, y, bigWidth, bigHeight)) {
+        if (inside(mouseX, mouseY, x, y, bigWidth, bigHeight)) {
             selected = ClientMode.NO_ADDONS;
-        } else if (this.inside(mouseX, mouseY, x, y + bigHeight + gap, smallWidth, smallHeight)) {
+        } else if (inside(mouseX, mouseY, x, y + bigHeight + gap, smallWidth, smallHeight)) {
             selected = ClientMode.CLASSIC;
-        } else if (this.inside(mouseX, mouseY, x + smallWidth + gap, y + bigHeight + gap, smallWidth, smallHeight)) {
+        } else if (inside(mouseX, mouseY, x + smallWidth + gap, y + bigHeight + gap, smallWidth, smallHeight)) {
             selected = ClientMode.JELLO;
         }
 
@@ -157,22 +155,20 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
 
         Client.getInstance().getClientModeManager().set(selected);
         Client.getInstance().saveConfig();
-        if (this.returnAfterSelect && this.returnScreen != null) {
-            this.minecraft.gui.setScreen(this.returnScreen);
-        } else {
-            this.minecraft.gui.setScreen(Client.getInstance().getPresentationManager().createClickGui(Client.getInstance().getModuleManager()));
-        }
+        MainMenuRouter.openSelected();
         return true;
     }
 
-    private boolean inside(final int x, final int y, final int left, final int top, final int width, final int height) {
+    private static boolean inside(final int x, final int y, final int left, final int top, final int width, final int height) {
         return x >= left && x < left + width && y >= top && y < top + height;
     }
 
     @Override
     public boolean keyPressed(final KeyEvent event) {
-        if (InputConstants.getKey(event).equals(ClickGuiHandler.OPEN_KEY)) {
-            this.onClose();
+        if (event.isEscape()) {
+            if (!this.selectionRequired) {
+                this.onClose();
+            }
             return true;
         }
         return super.keyPressed(event);
@@ -180,10 +176,13 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
 
     @Override
     public void onClose() {
+        if (this.selectionRequired) {
+            return;
+        }
         if (this.returnScreen != null) {
             this.minecraft.gui.setScreen(this.returnScreen);
         } else {
-            ClickGuiHandler.close();
+            MainMenuRouter.openSelected();
         }
     }
 }
