@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.account.SigmaAccountScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
@@ -50,7 +51,6 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
 
         ClassicLayout layout = this.layout();
 
-        // Resources.big is a 2x (600x195) source that Classic drew as 300x97.
         int markWidth = LegacyUiScale.size(300);
         int markHeight = LegacyUiScale.size(97);
         int markX = (this.width - markWidth) / 2;
@@ -73,8 +73,6 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
                 ? SmoothInterpolator.interpolate(progress, 0.68, 2.32, 0.06, 0.48)
                 : SmoothInterpolator.interpolate(progress, 0.81, 0.38, 0.32, -1.53);
 
-            // BoxedButton drew the original square PNG at x+20,y with a 100x100 display size.
-            // Keep its quirky historical positioning instead of centring/redesigning the asset.
             int iconX = box.x + LegacyUiScale.px(20);
             int iconY = box.y;
             int iconSize = LegacyUiScale.size(100);
@@ -101,10 +99,8 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
     private ClassicLayout layout() {
         int width = LegacyUiScale.size(114);
         int height = LegacyUiScale.size(140);
-        int firstStride = LegacyUiScale.size(116); // old 122 + (-6)
-        int secondStride = LegacyUiScale.size(128); // old 122 + 6
-
-        // Exact old ClassicMainScreenGroup formulas, translated from framebuffer pixels at the edge.
+        int firstStride = LegacyUiScale.size(116);
+        int secondStride = LegacyUiScale.size(128);
         int firstStartX = this.width / 2 - LegacyUiScale.px(244);
         int secondStartX = this.width / 2 - LegacyUiScale.px(204);
         int firstRowY = this.height / 2 - LegacyUiScale.px(80);
@@ -132,9 +128,7 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
                 case 1 -> this.openMultiplayer();
                 case 2 -> this.openOptions();
                 case 3 -> this.openLanguage();
-                // Preserve the original Accounts slot. Sigma-Modern does not yet have the historical
-                // account manager, so leave its action dormant instead of silently assigning another screen.
-                case 4 -> { }
+                case 4 -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.CLASSIC));
                 case 5 -> this.openModeSelect();
                 case 6 -> this.quitGame();
                 default -> throw new IllegalStateException("Unexpected Classic menu action " + i);

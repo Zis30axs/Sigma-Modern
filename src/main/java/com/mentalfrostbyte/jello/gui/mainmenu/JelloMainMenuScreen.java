@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.account.SigmaAccountScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
@@ -54,8 +55,6 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
 
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
-        // The old menu was a three-layer scene. Keep the original PNG layers and only replace the old
-        // fixed-function renderer; do not substitute the SwitchScreen background here.
         drawFullScreen(graphics, BACKGROUND);
         drawFullScreen(graphics, MIDDLE);
         drawFullScreen(graphics, FOREGROUND);
@@ -85,7 +84,6 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
             int drawY = layout.y - (drawSize - layout.size) / 2
                 - Math.round((layout.size / 2.0F) * motion * 0.20F);
 
-            // Original MainMenuButton used Resources.shadowPNG with an 85px expansion around the icon.
             if (progress > 0.001F) {
                 int shadowPad = LegacyUiScale.size(85);
                 int shadowAlpha = Math.round(255.0F * Math.min(1.0F, progress * 0.70F));
@@ -99,8 +97,6 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
             graphics.blit(RenderPipelines.GUI_TEXTURED, ICONS[i], drawX, drawY, 0.0F, 0.0F,
                 drawSize, drawSize, drawSize, drawSize, LIGHT);
 
-            // In the original menu the name fades in below the image during hover rather than living in
-            // a permanent card. Keep that behaviour; the exact old Jello font can be ported separately.
             if (progress > 0.001F) {
                 String label = ACTIONS[i];
                 int labelX = x + (layout.size - this.font.width(label)) / 2;
@@ -112,7 +108,6 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
             }
         }
 
-        // Historical top-bar positions after JelloMainMenu#updatePanelDimensions.
         this.drawTopAction(graphics, "Exit", 30, mouseX, mouseY, this.exitHover, 0.40F);
         this.drawTopAction(graphics, "Changelog", 90, mouseX, mouseY, this.changelogHover, 0.70F);
         this.drawTopAction(graphics, "Switch", 220, mouseX, mouseY, this.switchHover, 0.70F);
@@ -190,9 +185,7 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
                 case 1 -> this.openMultiplayer();
                 case 2 -> this.openRealms();
                 case 3 -> this.openOptions();
-                // Alt Manager is intentionally present in its original fifth slot. Its account-management
-                // screen has not been ported to Sigma-Modern yet, so do not silently repurpose it as Language.
-                case 4 -> { }
+                case 4 -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.JELLO));
                 default -> throw new IllegalStateException("Unexpected Jello menu action " + i);
             }
             return true;
