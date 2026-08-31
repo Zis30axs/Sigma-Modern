@@ -58,6 +58,19 @@ jobs:
       - name: Apply source-native Sigma migration
         run: python3 .github/scripts/apply_sigma_loading_hot_switch.py
 
+      - name: Normalize generated loading source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/main/java/net/minecraft/client/gui/screens/LoadingOverlay.java')
+          source = path.read_text(encoding='utf-8')
+          if source.startswith('\\\n'):
+              source = source[2:]
+          path.write_text(source, encoding='utf-8')
+          PY
+
       - name: Check patch formatting
         run: git diff --check
 
