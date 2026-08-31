@@ -24,7 +24,6 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
     private static final Identifier MIDDLE = legacy("jello/background/middle.png");
     private static final Identifier FOREGROUND = legacy("jello/background/foreground.png");
     private static final Identifier LOGO = legacy("jello/logo_large.png");
-    private static final Identifier LOGO_2X = legacy("jello/logo_large@2x.png");
     private static final Identifier SHADOW = legacy("jello/shadow.png");
 
     private static final Identifier[] ICONS = {
@@ -63,8 +62,11 @@ public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
         int logoHeight = LegacyUiScale.size(178);
         int logoX = (this.width - logoWidth) / 2;
         int logoY = this.height / 2 - logoHeight;
-        Identifier logo = this.minecraft.getWindow().getGuiScale() > 1 ? LOGO_2X : LOGO;
-        graphics.blit(RenderPipelines.GUI_TEXTURED, logo, logoX, logoY, 0.0F, 0.0F,
+        // Minecraft 26.2 identifiers reject '@' in resource paths, so the historical
+        // logo_large@2x.png filename cannot be addressed directly. The base 336x178 artwork already
+        // maps 1:1 to framebuffer pixels at GUI scale 2 through LegacyUiScale, so it is the correct
+        // modern source for this logical-size render as well.
+        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
             logoWidth, logoHeight, logoWidth, logoHeight, LIGHT);
 
         MenuLayout layout = this.menuLayout();
