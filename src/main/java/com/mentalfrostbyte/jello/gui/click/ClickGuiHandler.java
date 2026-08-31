@@ -2,6 +2,7 @@ package com.mentalfrostbyte.jello.gui.click;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
+import com.mentalfrostbyte.jello.gui.SigmaClickGui;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -38,11 +39,11 @@ public final class ClickGuiHandler {
         }
 
         Minecraft mc = Minecraft.getInstance();
-        if (mc.gui.screen() instanceof ClickGuiScreen) {
+        if (mc.gui.screen() instanceof SigmaClickGui) {
             close();
         } else {
             previousScreen = mc.gui.screen();
-            mc.gui.setScreen(new ClickGuiScreen(Client.getInstance().getModuleManager()));
+            mc.gui.setScreen(Client.getInstance().getPresentationManager().createClickGui(Client.getInstance().getModuleManager()));
         }
 
         return true;

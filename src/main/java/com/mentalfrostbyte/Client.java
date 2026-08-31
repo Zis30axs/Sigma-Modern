@@ -3,6 +3,12 @@ package com.mentalfrostbyte;
 import com.google.gson.JsonObject;
 import com.mentalfrostbyte.jello.config.ModuleConfig;
 import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.gui.ClientMode;
+import com.mentalfrostbyte.jello.gui.ClientModeManager;
+import com.mentalfrostbyte.jello.gui.GuiInteractionSmoke;
+import com.mentalfrostbyte.jello.gui.GuiScreenInteractionSmoke;
+import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
+import com.mentalfrostbyte.jello.gui.PresentationManager;
 import com.mentalfrostbyte.jello.input.KeybindHandler;
 import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.util.game.MinecraftInstance;
@@ -39,6 +45,10 @@ public class Client implements MinecraftInstance {
 
     private final ModuleManager moduleManager = new ModuleManager();
 
+    private final ClientModeManager clientModeManager = new ClientModeManager();
+
+    private final PresentationManager presentationManager = new PresentationManager(this.clientModeManager);
+
     private JsonObject config = new JsonObject();
 
     private boolean started;
@@ -63,10 +73,64 @@ public class Client implements MinecraftInstance {
         this.started = true;
         logger.info("Starting {} {} for Minecraft {}", NAME, FULL_VERSION, mc.getLaunchedVersion());
         this.config = JsonFileUtil.read(this.getConfigFile());
+        this.clientModeManager.read(this.config);
+        if (!this.config.has("clientMode")) {
+            // This runs during Minecraft construction, before the first frame is rendered, so the mode
+            // selection replaces the main menu before it is ever shown to the user.
+            logger.info("Sigma debug: opening first-run mode select");
+            mc.gui.setScreen(new ModeSelectScreen(mc.gui.screen(), true));
+        }
         this.moduleManager.registerAll();
         ModuleConfig.read(this.config, this.moduleManager);
+        this.applyDebugClientModeIfRequested();
+        if (Boolean.getBoolean("sigma.debug.logMode")) {
+            logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
+        }
         EventBus.register(new KeybindHandler(this.moduleManager));
         logger.info("Started with {} modules.", this.moduleManager.all().size());
+        this.openDebugGuiIfRequested();
+    }
+
+    private void applyDebugClientModeIfRequested() {
+        String requested = System.getProperty("sigma.debug.setClientMode");
+        if (requested == null || requested.isBlank()) {
+            return;
+        }
+
+        for (ClientMode mode : ClientMode.values()) {
+            if (mode.name().equalsIgnoreCase(requested)) {
+                this.clientModeManager.set(mode);
+                this.saveConfig();
+                logger.info("Sigma debug: set clientMode={}", mode);
+                return;
+            }
+        }
+
+        logger.warn("Sigma debug: unknown clientMode '{}'", requested);
+    }
+
+    private void openDebugGuiIfRequested() {
+        String requested = System.getProperty("sigma.debug.openGui");
+        if (requested == null || requested.isBlank()) {
+            return;
+        }
+
+        for (ClientMode mode : ClientMode.values()) {
+            if (mode.name().equalsIgnoreCase(requested)) {
+                this.clientModeManager.set(mode);
+                mc.gui.setScreen(this.presentationManager.createClickGui(this.moduleManager));
+                logger.info("Sigma debug: opened {} GUI", mode);
+                if (Boolean.getBoolean("sigma.debug.smoke")) {
+                    GuiInteractionSmoke.run(this.moduleManager);
+                }
+                if (Boolean.getBoolean("sigma.debug.screenSmoke")) {
+                    GuiScreenInteractionSmoke.run(mc.gui.screen());
+                }
+                return;
+            }
+        }
+
+        logger.warn("Sigma debug: unknown GUI mode '{}'", requested);
     }
 
     /** Called once while the game is tearing down, before the window goes away. */
@@ -91,6 +155,7 @@ public class Client implements MinecraftInstance {
      */
     public void saveConfig() {
         ModuleConfig.write(this.config, this.moduleManager);
+        this.clientModeManager.write(this.config);
         try {
             JsonFileUtil.write(this.getConfigFile(), this.config);
         } catch (IOException failure) {
@@ -100,6 +165,14 @@ public class Client implements MinecraftInstance {
 
     public ModuleManager getModuleManager() {
         return this.moduleManager;
+    }
+
+    public ClientModeManager getClientModeManager() {
+        return this.clientModeManager;
+    }
+
+    public PresentationManager getPresentationManager() {
+        return this.presentationManager;
     }
 
     public JsonObject getConfig() {

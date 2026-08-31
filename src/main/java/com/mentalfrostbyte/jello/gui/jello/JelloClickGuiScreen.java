@@ -1,9 +1,10 @@
-package com.mentalfrostbyte.jello.gui.click;
+package com.mentalfrostbyte.jello.gui.jello;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
 import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
+import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
 
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
@@ -26,36 +27,36 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A deliberately small ClickGUI vertical slice.
+ * Jello functional ClickGUI skeleton.
  *
- * <p>It is a plain {@link Screen} that reads the existing {@link ModuleManager} and the modules'
- * {@link SettingHolder} views. There is no second module registry here: categories, modules, settings and
- * keybinds are all the real objects the client already uses.</p>
+ * <p>This is intentionally not the final Jello visual identity yet. It is a working Screen that reads the
+ * existing {@link ModuleManager} and the modules' {@link SettingHolder} views, supports the full current
+ * Setting surface and keybind capture, and can be iterated on for the real Jello presentation later.</p>
  *
- * <p>The layout is three panels - categories, modules, settings - so it is easy to grow into a full
- * client GUI later without changing the data flow.</p>
+ * <p>The layout is currently a simple three-panel skeleton - categories, modules, settings - and will be
+ * replaced/refined by the real Jello visual pass in a later phase.</p>
  */
-public class ClickGuiScreen extends Screen implements SigmaClickGui {
+public class JelloClickGuiScreen extends Screen implements SigmaClickGui {
 
-    private static final int PANEL_BG = 0xC0101010;
-    private static final int PANEL_BORDER = 0xFF3A3A3A;
-    private static final int HEADER_BG = 0xD0202020;
-    private static final int SELECTED_BG = 0xFF2D4A6E;
+    private static final int PANEL_BG = 0xC0081420;
+    private static final int PANEL_BORDER = 0xFF2A6E8A;
+    private static final int HEADER_BG = 0xD00E2A3A;
+    private static final int SELECTED_BG = 0xFF1E5F7A;
     private static final int HOVER_BG = 0x30FFFFFF;
-    private static final int TEXT = 0xFFE0E0E0;
-    private static final int TEXT_DIM = 0xFF9A9A9A;
-    private static final int TEXT_ENABLED = 0xFF6EE76E;
+    private static final int TEXT = 0xFFE0F0FF;
+    private static final int TEXT_DIM = 0xFF8FB5C9;
+    private static final int TEXT_ENABLED = 0xFF66D9FF;
     private static final int TEXT_DISABLED = 0xFFD0D0D0;
 
-    private static final int ROW_HEIGHT = 18;
-    private static final int PANEL_TOP = 26;
-    private static final int PANEL_BOTTOM_MARGIN = 6;
+    private static final int ROW_HEIGHT = 24;
+    private static final int PANEL_TOP = 36;
+    private static final int PANEL_BOTTOM_MARGIN = 8;
     private static final int CATEGORY_X = 8;
-    private static final int CATEGORY_WIDTH = 110;
-    private static final int MODULE_X = 126;
-    private static final int MODULE_WIDTH = 140;
-    private static final int SETTINGS_X = 274;
-    private static final int SETTINGS_WIDTH = 230;
+    private static final int CATEGORY_WIDTH = 130;
+    private static final int MODULE_X = 146;
+    private static final int MODULE_WIDTH = 170;
+    private static final int SETTINGS_X = 324;
+    private static final int SETTINGS_WIDTH = 260;
 
     private final ModuleManager modules;
 
@@ -68,8 +69,8 @@ public class ClickGuiScreen extends Screen implements SigmaClickGui {
     private int moduleScroll;
     private int settingScroll;
 
-    public ClickGuiScreen(final ModuleManager modules) {
-        super(Component.literal("Sigma ClickGUI"));
+    public JelloClickGuiScreen(final ModuleManager modules) {
+        super(Component.literal("Jello ClickGUI"));
         this.modules = modules;
     }
 
@@ -102,12 +103,14 @@ public class ClickGuiScreen extends Screen implements SigmaClickGui {
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
         graphics.fill(0, 0, this.width, this.height, 0x90000000);
+        graphics.fill(0, 0, this.width, 26, 0xFF0E2A3A);
+        graphics.text(this.font, "JELLO", 8, 8, TEXT_ENABLED);
+        String modeText = "Mode: " + Client.getInstance().getClientModeManager().get().name();
+        graphics.text(this.font, modeText, this.width - this.font.width(modeText) - 8, 8, TEXT_ENABLED);
+        graphics.text(this.font, "RShift: close | Left click: toggle/select | Right click keybind: cycle mode", 8, 30, TEXT_DIM);
         this.drawCategoryPanel(graphics, mouseX, mouseY);
         this.drawModulePanel(graphics, mouseX, mouseY);
         this.drawSettingsPanel(graphics, mouseX, mouseY);
-        graphics.text(this.font, "RShift: close | Left click: toggle/select | Right click keybind: cycle mode", 8, 8, TEXT_DIM);
-        String modeText = "Mode: " + Client.getInstance().getClientModeManager().get().name();
-        graphics.text(this.font, modeText, this.width - this.font.width(modeText) - 8, 8, TEXT_ENABLED);
     }
 
     @Override
@@ -263,11 +266,12 @@ public class ClickGuiScreen extends Screen implements SigmaClickGui {
             boolean hovered = mouseX >= x + 1 && mouseX < x + w - 1 && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
             if (selected) {
                 graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, SELECTED_BG);
+                graphics.fill(x + 1, rowY, x + 3, rowY + ROW_HEIGHT - 1, TEXT_ENABLED);
             } else if (hovered) {
                 graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, HOVER_BG);
             }
 
-            graphics.text(this.font, category.getDisplayName(), x + 4, rowY + 5, selected ? TEXT : TEXT_DIM);
+            graphics.text(this.font, category.getDisplayName(), x + 8, rowY + 6, selected ? TEXT : TEXT_DIM);
         }
     }
 
@@ -301,8 +305,12 @@ public class ClickGuiScreen extends Screen implements SigmaClickGui {
                 graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, HOVER_BG);
             }
 
+            if (module.isEnabled()) {
+                graphics.fill(x + 1, rowY, x + 3, rowY + ROW_HEIGHT - 1, TEXT_ENABLED);
+            }
+
             int nameColor = module.isEnabled() ? TEXT_ENABLED : TEXT_DISABLED;
-            graphics.text(this.font, module.getName(), x + 4, rowY + 5, nameColor);
+            graphics.text(this.font, module.getName(), x + 8, rowY + 6, nameColor);
             if (module.isEnabled()) {
                 graphics.text(this.font, "ON", x + w - this.font.width("ON") - 4, rowY + 5, TEXT_ENABLED);
             }
