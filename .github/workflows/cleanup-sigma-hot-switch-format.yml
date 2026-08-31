@@ -1,0 +1,120 @@
+name: Cleanup Sigma Hot Switch Format
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-sigma-hot-switch-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Normalize migrated method indentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          targets = {
+              'src/main/java/net/minecraft/client/Minecraft.java': [
+                  'private static UserApiService createUserApiService(',
+                  'private static CompletableFuture<UserProperties> fetchUserProperties(',
+                  'public boolean isOfflineDeveloperMode() {',
+                  'public boolean isSigmaOfflineUser() {',
+                  'public User getUser() {',
+                  'public CompletableFuture<Boolean> sigmaSwitchUser(',
+                  'private boolean sigmaCanSwitchUser() {',
+              ],
+              'src/main/java/com/mentalfrostbyte/jello/account/SigmaAccountManager.java': [
+                  'public synchronized String selectedId() {',
+                  'public LaunchIdentity resolveForUse(',
+                  'private Optional<LaunchIdentity> resolveSelectedForLaunch() {',
+                  'private LaunchIdentity resolveIdentity(',
+                  'private AccountEntry find(',
+              ],
+              'src/main/java/com/mentalfrostbyte/jello/gui/account/SigmaAccountScreen.java': [
+                  'private void useSelected() {',
+                  'private void useLauncherAccount() {',
+              ],
+          }
+
+          def indent_method(lines, signature):
+              matches = [i for i, line in enumerate(lines) if line.startswith(signature)]
+              if len(matches) != 1:
+                  raise SystemExit(f'{signature}: expected one unindented method, got {len(matches)}')
+              method_start = matches[0]
+              start = method_start
+              # Include an immediately preceding Javadoc block when the migration dedented it too.
+              cursor = method_start - 1
+              while cursor >= 0 and lines[cursor].strip() == '':
+                  cursor -= 1
+              if cursor >= 0 and lines[cursor].startswith('*/'):
+                  while cursor >= 0 and not lines[cursor].startswith('/**'):
+                      cursor -= 1
+                  if cursor >= 0:
+                      start = cursor
+
+              depth = 0
+              saw_open = False
+              end = None
+              for i in range(method_start, len(lines)):
+                  line = lines[i]
+                  depth += line.count('{')
+                  if line.count('{'):
+                      saw_open = True
+                  depth -= line.count('}')
+                  if saw_open and depth == 0:
+                      end = i
+                      break
+              if end is None:
+                  raise SystemExit(f'{signature}: could not locate method end')
+              for i in range(start, end + 1):
+                  if lines[i].strip():
+                      lines[i] = '    ' + lines[i]
+
+          for file_name, signatures in targets.items():
+              path = Path(file_name)
+              lines = path.read_text(encoding='utf-8').splitlines()
+              for signature in signatures:
+                  indent_method(lines, signature)
+              path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
+      - name: Check formatting
+        run: git diff --check
+
+      - name: Build client
+        run: mvn -B -DskipTests package dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/dependency
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/cleanup-sigma-hot-switch-format.yml
+          git add \
+            src/main/java/net/minecraft/client/Minecraft.java \
+            src/main/java/com/mentalfrostbyte/jello/account/SigmaAccountManager.java \
+            src/main/java/com/mentalfrostbyte/jello/gui/account/SigmaAccountScreen.java
+          git diff --cached --check
+          git commit -m "Format Sigma hot-switch integration"
+          git push origin HEAD:main
