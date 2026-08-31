@@ -1,8 +1,10 @@
 package com.mentalfrostbyte.jello.gui;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
-import com.mojang.blaze3d.platform.InputConstants;
+import com.mentalfrostbyte.jello.gui.base.animations.Animation;
+import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRouter;
+import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
+import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -12,14 +14,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import org.jspecify.annotations.Nullable;
 
-/**
- * The client's first-run mode selection screen.
- *
- * <p>This is a modern Screen implementation of the old Sigma SwitchScreen flow: the user selects a mode
- * first, then returns to the screen that was open before. It reuses the original Sigma background, logo,
- * mode buttons and social icons, while using the current 26.2 rendering path.</p>
- */
-public final class ModeSelectScreen extends Screen implements SigmaClickGui {
+/** Main-menu mode selector, preserving Sigma's original SwitchScreen flow. */
+public final class ModeSelectScreen extends Screen {
 
     private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/sigma/back.png");
     private static final Identifier LOGO = Identifier.withDefaultNamespace("textures/gui/sigma/logo.png");
@@ -38,20 +34,23 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
     private static final int LOGO_WIDTH = 455;
     private static final int LOGO_HEIGHT = 78;
 
-    private static final int HOVER_BORDER = 0xFF66D9FF;
-    private static final int BORDER = 0xFF3A3A3A;
+    private static final int LIGHT = ClientColors.LIGHT_GREYISH_BLUE.getColor();
+    private static final int DEEP_TEAL = ClientColors.DEEP_TEAL.getColor();
 
     private final @Nullable Screen returnScreen;
-    private final boolean returnAfterSelect;
+    private final boolean selectionRequired;
+    private final Animation noAddonsHover = new Animation(150, 190, Animation.Direction.BACKWARDS);
+    private final Animation classicHover = new Animation(150, 190, Animation.Direction.BACKWARDS);
+    private final Animation jelloHover = new Animation(150, 190, Animation.Direction.BACKWARDS);
 
     public ModeSelectScreen(final @Nullable Screen returnScreen) {
         this(returnScreen, false);
     }
 
-    public ModeSelectScreen(final @Nullable Screen returnScreen, final boolean returnAfterSelect) {
+    public ModeSelectScreen(final @Nullable Screen returnScreen, final boolean selectionRequired) {
         super(Component.literal("Select Client Mode"));
         this.returnScreen = returnScreen;
-        this.returnAfterSelect = returnAfterSelect;
+        this.selectionRequired = selectionRequired;
     }
 
     @Override
@@ -62,49 +61,76 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
         graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, 0, 0, 0.0F, 0.0F, this.width, this.height, 1280, 720, 1280, 720);
-        graphics.fill(0, 0, this.width, this.height, 0x66000000);
+        graphics.fill(0, 0, this.width, this.height, withAlpha(DEEP_TEAL, 77));
 
         int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
         int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
         int logoX = (this.width - logoWidth) / 2;
         int logoY = 24;
-        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F, logoWidth, logoHeight, 910, 156, 910, 156);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
+            logoWidth, logoHeight, 910, 156, 910, 156, LIGHT);
 
+        ModeLayout layout = this.layout(logoY, logoHeight);
+        this.drawModeCard(graphics, NO_ADDONS_IMAGE, ClientMode.NO_ADDONS, this.noAddonsHover,
+            layout.x, layout.y, layout.bigWidth, layout.bigHeight, NO_ADDONS_WIDTH, NO_ADDONS_HEIGHT, mouseX, mouseY);
+        this.drawModeCard(graphics, CLASSIC_IMAGE, ClientMode.CLASSIC, this.classicHover,
+            layout.x, layout.y + layout.bigHeight + layout.gap, layout.smallWidth, layout.smallHeight,
+            SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
+        this.drawModeCard(graphics, JELLO_IMAGE, ClientMode.JELLO, this.jelloHover,
+            layout.x + layout.smallWidth + layout.gap, layout.y + layout.bigHeight + layout.gap,
+            layout.smallWidth, layout.smallHeight, SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
+
+        this.drawSocialButtons(graphics);
+    }
+
+    private void drawModeCard(
+        final GuiGraphicsExtractor graphics,
+        final Identifier texture,
+        final ClientMode mode,
+        final Animation animation,
+        final int x,
+        final int y,
+        final int width,
+        final int height,
+        final int textureWidth,
+        final int textureHeight,
+        final int mouseX,
+        final int mouseY
+    ) {
+        boolean hovered = inside(mouseX, mouseY, x, y, width, height);
+        animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
+        float progress = animation.calcPercent();
+        float motion = animation.getDirection() == Animation.Direction.FORWARDS
+            ? SmoothInterpolator.interpolate(progress, 0.07, 0.73, 0.63, 1.01)
+            : SmoothInterpolator.interpolate(progress, 0.71, 0.18, 0.95, 0.57);
+        int lift = Math.round(motion * 3.0F);
+        int drawY = y - lift;
+
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, drawY, 0.0F, 0.0F,
+            width, height, textureWidth, textureHeight, textureWidth, textureHeight, LIGHT);
+
+        if (hovered) {
+            graphics.fill(x, drawY, x + width, drawY + height, withAlpha(DEEP_TEAL, 96));
+        } else if (!this.selectionRequired && Client.getInstance().getClientModeManager().get() == mode) {
+            graphics.fill(x, drawY, x + width, drawY + height, withAlpha(LIGHT, 18));
+        }
+    }
+
+    private ModeLayout layout(final int logoY, final int logoHeight) {
         float scale = Math.min(1.0F, (this.width - 24) / (float) NO_ADDONS_WIDTH);
         int bigWidth = (int) (NO_ADDONS_WIDTH * scale);
         int bigHeight = (int) (NO_ADDONS_HEIGHT * scale);
         int smallWidth = (int) (SMALL_WIDTH * scale);
         int smallHeight = (int) (SMALL_HEIGHT * scale);
         int gap = Math.max(4, (int) (GAP * scale));
-
         int cardsTop = logoY + logoHeight + 28;
         int cardsTotalHeight = bigHeight + gap + smallHeight;
         int y = cardsTop + Math.max(0, (this.height - cardsTop - cardsTotalHeight - 40) / 2);
         int x = (this.width - bigWidth) / 2;
-
-        this.drawModeCard(graphics, NO_ADDONS_IMAGE, ClientMode.NO_ADDONS, x, y, bigWidth, bigHeight,
-                NO_ADDONS_WIDTH, NO_ADDONS_HEIGHT, mouseX, mouseY);
-        this.drawModeCard(graphics, CLASSIC_IMAGE, ClientMode.CLASSIC, x, y + bigHeight + gap, smallWidth, smallHeight,
-                SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
-        this.drawModeCard(graphics, JELLO_IMAGE, ClientMode.JELLO, x + smallWidth + gap, y + bigHeight + gap,
-                smallWidth, smallHeight, SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
-
-        this.drawSocialButtons(graphics, mouseX, mouseY);
+        return new ModeLayout(x, y, bigWidth, bigHeight, smallWidth, smallHeight, gap);
     }
 
-    private void drawModeCard(final GuiGraphicsExtractor graphics, final Identifier texture, final ClientMode mode,
-                              final int x, final int y, final int width, final int height,
-                              final int textureWidth, final int textureHeight,
-                              final int mouseX, final int mouseY) {
-        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0.0F, 0.0F, width, height, textureWidth, textureHeight, textureWidth, textureHeight);
-        boolean hovered = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
-        boolean selected = Client.getInstance().getClientModeManager().get() == mode;
-        if (hovered || selected) {
-            graphics.outline(x, y, width, height, hovered ? HOVER_BORDER : BORDER);
-        }
-    }
-
-    private void drawSocialButtons(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
+    private void drawSocialButtons(final GuiGraphicsExtractor graphics) {
         int totalWidth = 174;
         int x = (this.width - totalWidth) / 2;
         int y = this.height - 44;
@@ -112,9 +138,9 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
             return;
         }
 
-        graphics.blit(RenderPipelines.GUI_TEXTURED, YOUTUBE_IMAGE, x, y, 0.0F, 0.0F, 65, 34, 65, 34, 65, 34);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, REDDIT_IMAGE, x + 85, y, 0.0F, 0.0F, 36, 34, 36, 34, 36, 34);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, GUILDED_IMAGE, x + 142, y, 0.0F, 0.0F, 32, 34, 32, 34, 32, 34);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, YOUTUBE_IMAGE, x, y, 0.0F, 0.0F, 65, 34, 65, 34, 65, 34, LIGHT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, REDDIT_IMAGE, x + 85, y, 0.0F, 0.0F, 36, 34, 36, 34, 36, 34, LIGHT);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, GUILDED_IMAGE, x + 142, y, 0.0F, 0.0F, 32, 34, 32, 34, 32, 34, LIGHT);
     }
 
     @Override
@@ -123,31 +149,19 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
             return super.mouseClicked(event, doubleClick);
         }
 
+        int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
+        int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
+        ModeLayout layout = this.layout(24, logoHeight);
         int mouseX = (int) event.x();
         int mouseY = (int) event.y();
 
-        float scale = Math.min(1.0F, (this.width - 24) / (float) NO_ADDONS_WIDTH);
-        int bigWidth = (int) (NO_ADDONS_WIDTH * scale);
-        int bigHeight = (int) (NO_ADDONS_HEIGHT * scale);
-        int smallWidth = (int) (SMALL_WIDTH * scale);
-        int smallHeight = (int) (SMALL_HEIGHT * scale);
-        int gap = Math.max(4, (int) (GAP * scale));
-
-        int logoWidth = Math.min(LOGO_WIDTH, this.width - 40);
-        int logoHeight = logoWidth * LOGO_HEIGHT / LOGO_WIDTH;
-        int logoX = (this.width - logoWidth) / 2;
-        int logoY = 24;
-        int cardsTop = logoY + logoHeight + 28;
-        int cardsTotalHeight = bigHeight + gap + smallHeight;
-        int y = cardsTop + Math.max(0, (this.height - cardsTop - cardsTotalHeight - 40) / 2);
-        int x = (this.width - bigWidth) / 2;
-
         ClientMode selected = null;
-        if (this.inside(mouseX, mouseY, x, y, bigWidth, bigHeight)) {
+        if (inside(mouseX, mouseY, layout.x, layout.y, layout.bigWidth, layout.bigHeight)) {
             selected = ClientMode.NO_ADDONS;
-        } else if (this.inside(mouseX, mouseY, x, y + bigHeight + gap, smallWidth, smallHeight)) {
+        } else if (inside(mouseX, mouseY, layout.x, layout.y + layout.bigHeight + layout.gap, layout.smallWidth, layout.smallHeight)) {
             selected = ClientMode.CLASSIC;
-        } else if (this.inside(mouseX, mouseY, x + smallWidth + gap, y + bigHeight + gap, smallWidth, smallHeight)) {
+        } else if (inside(mouseX, mouseY, layout.x + layout.smallWidth + layout.gap,
+            layout.y + layout.bigHeight + layout.gap, layout.smallWidth, layout.smallHeight)) {
             selected = ClientMode.JELLO;
         }
 
@@ -157,22 +171,24 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
 
         Client.getInstance().getClientModeManager().set(selected);
         Client.getInstance().saveConfig();
-        if (this.returnAfterSelect && this.returnScreen != null) {
-            this.minecraft.gui.setScreen(this.returnScreen);
-        } else {
-            this.minecraft.gui.setScreen(Client.getInstance().getPresentationManager().createClickGui(Client.getInstance().getModuleManager()));
-        }
+        MainMenuRouter.openSelected();
         return true;
     }
 
-    private boolean inside(final int x, final int y, final int left, final int top, final int width, final int height) {
+    private static boolean inside(final int x, final int y, final int left, final int top, final int width, final int height) {
         return x >= left && x < left + width && y >= top && y < top + height;
+    }
+
+    private static int withAlpha(final int color, final int alpha) {
+        return Math.max(0, Math.min(255, alpha)) << 24 | color & 0x00FFFFFF;
     }
 
     @Override
     public boolean keyPressed(final KeyEvent event) {
-        if (InputConstants.getKey(event).equals(ClickGuiHandler.OPEN_KEY)) {
-            this.onClose();
+        if (event.isEscape()) {
+            if (!this.selectionRequired) {
+                this.onClose();
+            }
             return true;
         }
         return super.keyPressed(event);
@@ -180,10 +196,16 @@ public final class ModeSelectScreen extends Screen implements SigmaClickGui {
 
     @Override
     public void onClose() {
+        if (this.selectionRequired) {
+            return;
+        }
         if (this.returnScreen != null) {
             this.minecraft.gui.setScreen(this.returnScreen);
         } else {
-            ClickGuiHandler.close();
+            MainMenuRouter.openSelected();
         }
+    }
+
+    private record ModeLayout(int x, int y, int bigWidth, int bigHeight, int smallWidth, int smallHeight, int gap) {
     }
 }
