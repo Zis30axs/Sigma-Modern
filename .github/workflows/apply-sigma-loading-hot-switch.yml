@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/apply-sigma-loading-hot-switch.yml .github/scripts/apply_sigma_loading_hot_switch.py
+          git rm -f .github/workflows/apply-sigma-loading-hot-switch.yml .github/scripts/apply_sigma_loading_hot_switch.py
           git add \
             src/main/java/net/minecraft/client/gui/screens/LoadingOverlay.java \
             src/main/java/net/minecraft/client/Minecraft.java \
