@@ -40,6 +40,7 @@ import com.mojang.datafixers.DataFixer;
 import com.mojang.jtracy.DiscontinuousFrame;
 import com.mojang.jtracy.TracyClient;
 import com.mojang.logging.LogUtils;
+import com.mojang.realmsclient.RealmsAvailability;
 import com.mojang.realmsclient.RealmsMainScreen;
 import com.mojang.realmsclient.client.RealmsClient;
 import com.mojang.realmsclient.gui.RealmsDataFetcher;
@@ -280,7 +281,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     public static final String UPDATE_DRIVERS_ADVICE = "Please make sure you have up-to-date drivers (see aka.ms/mcdriver for instructions).";
     private final long canary = Double.doubleToLongBits(Math.PI);
     private final Path resourcePackDirectory;
-    private final CompletableFuture<@Nullable ProfileResult> profileFuture;
+    private CompletableFuture<@Nullable ProfileResult> profileFuture;
     private final TextureManager textureManager;
     private final ShaderManager shaderManager;
     private final DataFixer fixerUpper;
@@ -295,7 +296,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     private final ItemModelResolver itemModelResolver;
     private final MapRenderer mapRenderer;
     public final ParticleEngine particleEngine;
-    private final User user;
+    private User user;
     public final Font font;
     public final Font fontFilterFishy;
     public final GameRenderer gameRenderer;
@@ -326,21 +327,22 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     public final FontManager fontManager;
     private final GpuWarnlistManager gpuWarnlistManager;
     private final PeriodicNotificationManager regionalCompliancies = new PeriodicNotificationManager(REGIONAL_COMPLIANCIES, Minecraft::countryEqualsISO3);
-    private final UserApiService userApiService;
-    private final CompletableFuture<UserProperties> userPropertiesFuture;
+    private UserApiService userApiService;
+    private CompletableFuture<UserProperties> userPropertiesFuture;
     private final SkinManager skinManager;
     private final AtlasManager atlasManager;
     private final ModelManager modelManager;
     private final MapTextureManager mapTextureManager;
     private final Tutorial tutorial;
-    private final PlayerSocialManager playerSocialManager;
-    private final RemoteFriendListUpdateHandler remoteFriendListUpdateHandler;
+    private PlayerSocialManager playerSocialManager;
+    private RemoteFriendListUpdateHandler remoteFriendListUpdateHandler;
     private final BlockEntityRenderDispatcher blockEntityRenderDispatcher;
-    private final ClientTelemetryManager telemetryManager;
-    private final ProfileKeyPairManager profileKeyPairManager;
-    private final RealmsDataFetcher realmsDataFetcher;
+    private ClientTelemetryManager telemetryManager;
+    private ProfileKeyPairManager profileKeyPairManager;
+    private RealmsDataFetcher realmsDataFetcher;
     private final QuickPlayLog quickPlayLog;
     private final Services services;
+    private boolean sigmaOfflineUser;
     private final PlayerSkinRenderCache playerSkinRenderCache;
     private final TimerQuery timerQuery;
     public @Nullable MultiPlayerGameMode gameMode;
@@ -415,18 +417,13 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             : new YggdrasilAuthenticationService(this.proxy);
         this.services = Services.create(authenticationService, this.gameDirectory);
         this.user = gameConfig.user.user;
-        this.profileFuture = this.offlineDeveloperMode
+        this.sigmaOfflineUser = !this.offlineDeveloperMode && "0".equals(this.user.getAccessToken());
+        boolean offlineUserServices = this.offlineDeveloperMode || this.sigmaOfflineUser;
+        this.profileFuture = offlineUserServices
             ? CompletableFuture.completedFuture(null)
             : CompletableFuture.supplyAsync(() -> this.services.sessionService().fetchProfile(this.user.getProfileId(), true), Util.nonCriticalIoPool());
-        this.userApiService = createUserApiService(authenticationService, gameConfig);
-        this.userPropertiesFuture = CompletableFuture.supplyAsync(() -> {
-            try {
-                return this.userApiService.fetchProperties();
-            } catch (AuthenticationException e) {
-                LOGGER.error("Failed to fetch user properties", e);
-                return UserApiService.OFFLINE_PROPERTIES;
-            }
-        }, Util.nonCriticalIoPool());
+        this.userApiService = createUserApiService(authenticationService, this.user, offlineUserServices);
+        this.userPropertiesFuture = fetchUserProperties(this.userApiService, offlineUserServices);
         LOGGER.info("Setting user: {}", this.user.getName());
         LOGGER.debug("(Session ID is {})", this.user.getSessionId());
         this.demo = gameConfig.game.demo;
@@ -637,7 +634,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         this.itemModelResolver = new ItemModelResolver(this.modelManager);
         this.mapTextureManager = new MapTextureManager(this.textureManager);
         this.mapRenderer = new MapRenderer(this.atlasManager, this.mapTextureManager);
-        FriendsService friendsService = authenticationService.createFriendsService(this.user.getAccessToken());
+        YggdrasilAuthenticationService friendsAuthService = offlineUserServices
+            ? YggdrasilAuthenticationService.createOffline(this.proxy)
+            : authenticationService;
+        FriendsService friendsService = friendsAuthService.createFriendsService(this.user.getAccessToken());
         this.remoteFriendListUpdateHandler = new RemoteFriendListUpdateHandler(friendsService, this);
         this.playerSocialManager = new PlayerSocialManager(this, this.userApiService, friendsService, this.remoteFriendListUpdateHandler);
         if (this.playerSocialManager.isFriendListEnabled()) {
@@ -734,7 +734,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         this.resizeGui();
         this.loadCriticalShaders();
         this.telemetryManager = new ClientTelemetryManager(this, this.userApiService, this.user);
-        this.profileKeyPairManager = this.offlineDeveloperMode
+        this.profileKeyPairManager = offlineUserServices
             ? ProfileKeyPairManager.EMPTY_KEY_MANAGER
             : ProfileKeyPairManager.create(this.userApiService, this.user, gameDirPath);
         this.narrator = new GameNarrator(this);
@@ -888,13 +888,36 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         return builder.toString();
     }
 
-    private static UserApiService createUserApiService(final YggdrasilAuthenticationService authService, final GameConfig config) {
-        return config.game.offlineDeveloperMode ? UserApiService.OFFLINE : authService.createUserApiService(config.user.user.getAccessToken());
-    }
+private static UserApiService createUserApiService(
+    final YggdrasilAuthenticationService authService,
+    final User user,
+    final boolean offline
+) {
+    return offline ? UserApiService.OFFLINE : authService.createUserApiService(user.getAccessToken());
+}
 
-    public boolean isOfflineDeveloperMode() {
-        return this.offlineDeveloperMode;
+private static CompletableFuture<UserProperties> fetchUserProperties(final UserApiService service, final boolean offline) {
+    if (offline) {
+        return CompletableFuture.completedFuture(UserApiService.OFFLINE_PROPERTIES);
     }
+    return CompletableFuture.supplyAsync(() -> {
+        try {
+            return service.fetchProperties();
+        } catch (AuthenticationException failure) {
+            LOGGER.warn("Failed to fetch user properties", failure);
+            return UserApiService.OFFLINE_PROPERTIES;
+        }
+    }, Util.nonCriticalIoPool());
+}
+
+public boolean isOfflineDeveloperMode() {
+    return this.offlineDeveloperMode;
+}
+
+/** Sigma offline accounts use local identity semantics even when the normal client is online-capable. */
+public boolean isSigmaOfflineUser() {
+    return this.sigmaOfflineUser;
+}
 
     public static ModCheck checkModStatus() {
         return ModCheck.identify("vanilla", ClientBrandRetriever::getClientModName, "Client", Minecraft.class);
@@ -2763,9 +2786,88 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         return profileId.equals(this.getUser().getProfileId());
     }
 
-    public User getUser() {
-        return this.user;
+public User getUser() {
+    return this.user;
+}
+
+/**
+ * Switch the active identity without restarting. This is deliberately title-screen-only: changing the user while
+ * a world, connection or integrated server is alive would mix two identities inside one network session.
+ */
+public CompletableFuture<Boolean> sigmaSwitchUser(final User newUser, final boolean offlineAccount) {
+    if (!this.sigmaCanSwitchUser()) {
+        return CompletableFuture.completedFuture(false);
     }
+
+    CompletableFuture<Boolean> result = new CompletableFuture<>();
+    Util.nonCriticalIoPool().execute(() -> {
+        try {
+            boolean offlineServices = this.offlineDeveloperMode || offlineAccount;
+            YggdrasilAuthenticationService authService = offlineServices
+                ? YggdrasilAuthenticationService.createOffline(this.proxy)
+                : new YggdrasilAuthenticationService(this.proxy);
+            UserApiService userApi = createUserApiService(authService, newUser, offlineServices);
+            UserProperties properties = offlineServices ? UserApiService.OFFLINE_PROPERTIES : fetchUserProperties(userApi, false).join();
+            FriendsService friendsService = authService.createFriendsService(newUser.getAccessToken());
+            ProfileResult profile = offlineServices ? null : this.services.sessionService().fetchProfile(newUser.getProfileId(), true);
+
+            this.execute(() -> {
+                try {
+                    if (!this.sigmaCanSwitchUser()) {
+                        result.complete(false);
+                        return;
+                    }
+
+                    if (this.remoteFriendListUpdateHandler != null) {
+                        this.remoteFriendListUpdateHandler.close();
+                    }
+                    if (this.telemetryManager != null) {
+                        this.telemetryManager.close();
+                    }
+
+                    this.user = newUser;
+                    this.sigmaOfflineUser = offlineAccount;
+                    this.profileFuture = CompletableFuture.completedFuture(profile);
+                    this.userApiService = userApi;
+                    this.userPropertiesFuture = CompletableFuture.completedFuture(properties);
+                    this.remoteFriendListUpdateHandler = new RemoteFriendListUpdateHandler(friendsService, this);
+                    this.playerSocialManager = new PlayerSocialManager(
+                        this, this.userApiService, friendsService, this.remoteFriendListUpdateHandler
+                    );
+                    if (this.playerSocialManager.isFriendListEnabled()) {
+                        this.remoteFriendListUpdateHandler.start();
+                    }
+
+                    this.telemetryManager = new ClientTelemetryManager(this, this.userApiService, this.user);
+                    this.profileKeyPairManager = offlineServices
+                        ? ProfileKeyPairManager.EMPTY_KEY_MANAGER
+                        : ProfileKeyPairManager.create(this.userApiService, this.user, this.gameDirectory.toPath());
+                    this.reportingContext = ReportingContext.create(ReportEnvironment.local(), this.userApiService);
+
+                    RealmsAvailability.reset();
+                    this.realmsDataFetcher = new RealmsDataFetcher(RealmsClient.getOrCreate(this));
+                    this.updateTitle();
+                    LOGGER.info("Sigma hot-switched user to {} ({})", this.user.getName(), this.user.getProfileId());
+                    result.complete(true);
+                } catch (Throwable failure) {
+                    result.completeExceptionally(failure);
+                }
+            });
+        } catch (Throwable failure) {
+            result.completeExceptionally(failure);
+        }
+    });
+    return result;
+}
+
+private boolean sigmaCanSwitchUser() {
+    return this.level == null
+        && this.player == null
+        && this.gameMode == null
+        && this.pendingConnection == null
+        && this.singleplayerServer == null
+        && this.getConnection() == null;
+}
 
     public @Nullable ProfileResult getProfileResult() {
         return this.profileFuture.join();

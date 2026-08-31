@@ -171,11 +171,12 @@ public class DownloadedPackSource implements AutoCloseable {
 
             private Map<String, String> createDownloadHeaders() {
                 WorldVersion version = SharedConstants.getCurrentVersion();
+                User currentUser = DownloadedPackSource.this.minecraft.getUser();
                 return Map.of(
                     "X-Minecraft-Username",
-                    user.getName(),
+                    currentUser.getName(),
                     "X-Minecraft-UUID",
-                    UndashedUuid.toString(user.getProfileId()),
+                    UndashedUuid.toString(currentUser.getProfileId()),
                     "X-Minecraft-Version",
                     version.name(),
                     "X-Minecraft-Version-ID",
