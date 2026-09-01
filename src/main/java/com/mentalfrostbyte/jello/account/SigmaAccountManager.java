@@ -33,9 +33,9 @@ import org.slf4j.LoggerFactory;
  * local file. This port keeps the old account-list workflow but uses refreshable Microsoft OAuth state
  * through MinecraftAuth and never persists Microsoft account passwords.</p>
  *
- * <p>A selected account is applied on the next launch. Minecraft 26.2 constructs authentication,
- * skin, social, profile-key and Realms services from the launch-time user, so replacing only the
- * visible session at runtime would leave a partially switched identity.</p>
+ * <p>The selected identity is still persisted for the next launch, but the title-screen account manager can
+ * also apply it immediately. Unlike Sigma 5's mutable Session fields, the 26.2 port rebuilds the account-bound
+ * client services so the visible name, multiplayer authentication, social state and signing keys stay coherent.</p>
  */
 public final class SigmaAccountManager {
 
@@ -119,6 +119,27 @@ public final class SigmaAccountManager {
         return this.selectedId;
     }
 
+/** Resolve/refresh credentials for a hot switch without committing the selection until the client accepts it. */
+    public LaunchIdentity resolveForUse(final String id) throws Exception {
+        AccountEntry account;
+        synchronized (this) {
+            account = this.find(id);
+        }
+        if (account == null) {
+            throw new IllegalArgumentException("Unknown Sigma account: " + id);
+        }
+
+        LaunchIdentity identity = this.resolveIdentity(account);
+        synchronized (this) {
+            if (!this.accounts.contains(account)) {
+                throw new IllegalStateException("Account was removed while credentials were refreshing");
+            }
+            // Persist refreshed OAuth state even before switching, but leave selectedId untouched on failure.
+            this.save();
+        }
+        return identity;
+    }
+
     public AccountEntry loginMicrosoft(final Consumer<MsaDeviceCode> deviceCodeConsumer) throws Exception {
         JavaAuthManager authManager = JavaAuthManager.create(MinecraftAuth.createHttpClient(USER_AGENT))
             .login(DeviceCodeMsaAuthService::new, deviceCodeConsumer);
@@ -200,33 +221,22 @@ public final class SigmaAccountManager {
         return manager.resolveSelectedForLaunch();
     }
 
-    private synchronized Optional<LaunchIdentity> resolveSelectedForLaunch() {
-        AccountEntry account = this.find(this.selectedId);
+    private Optional<LaunchIdentity> resolveSelectedForLaunch() {
+        AccountEntry account;
+        synchronized (this) {
+            account = this.find(this.selectedId);
+        }
         if (account == null) {
             return Optional.empty();
         }
 
         try {
-            LaunchIdentity identity;
-            if (account.type == AccountType.OFFLINE) {
-                identity = new LaunchIdentity(account.name, account.profileId, "0");
-            } else {
-                if (account.authState == null) {
-                    throw new IllegalStateException("Microsoft account has no OAuth state");
-                }
-
-                JavaAuthManager authManager = JavaAuthManager.fromJson(
-                    MinecraftAuth.createHttpClient(USER_AGENT), account.authState
-                );
-                MinecraftToken token = authManager.getMinecraftToken().getUpToDate();
-                MinecraftProfile profile = authManager.getMinecraftProfile().getUpToDate();
-                account.updateMicrosoft(profile, JavaAuthManager.toJson(authManager));
-                identity = new LaunchIdentity(profile.getName(), profile.getId(), token.getToken());
+            LaunchIdentity identity = this.resolveIdentity(account);
+            synchronized (this) {
+                account.lastUsed = System.currentTimeMillis();
+                account.useCount++;
+                this.save();
             }
-
-            account.lastUsed = System.currentTimeMillis();
-            account.useCount++;
-            this.save();
             return Optional.of(identity);
         } catch (Exception failure) {
             LOGGER.error("Could not refresh selected Sigma account '{}'; falling back to launcher identity", account.name, failure);
@@ -234,17 +244,36 @@ public final class SigmaAccountManager {
         }
     }
 
+    private LaunchIdentity resolveIdentity(final AccountEntry account) throws Exception {
+        if (account.type == AccountType.OFFLINE) {
+            return new LaunchIdentity(account.name, account.profileId, "0");
+        }
+        if (account.authState == null) {
+            throw new IllegalStateException("Microsoft account has no OAuth state");
+        }
+
+        JavaAuthManager authManager = JavaAuthManager.fromJson(
+            MinecraftAuth.createHttpClient(USER_AGENT), account.authState
+        );
+        MinecraftToken token = authManager.getMinecraftToken().getUpToDate();
+        MinecraftProfile profile = authManager.getMinecraftProfile().getUpToDate();
+        synchronized (this) {
+            account.updateMicrosoft(profile, JavaAuthManager.toJson(authManager));
+        }
+        return new LaunchIdentity(profile.getName(), profile.getId(), token.getToken());
+    }
+
     private AccountEntry find(final String id) {
-        if (id == null) {
+            if (id == null) {
+                return null;
+            }
+            for (AccountEntry account : this.accounts) {
+                if (account.id.equals(id)) {
+                    return account;
+                }
+            }
             return null;
         }
-        for (AccountEntry account : this.accounts) {
-            if (account.id.equals(id)) {
-                return account;
-            }
-        }
-        return null;
-    }
 
     private void restrictFilePermissions() {
         try {

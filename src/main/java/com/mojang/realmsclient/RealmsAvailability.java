@@ -23,6 +23,11 @@ public class RealmsAvailability {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static @Nullable CompletableFuture<RealmsAvailability.Result> future;
 
+    /** Drop cached availability whenever Sigma changes the active identity. */
+    public static synchronized void reset() {
+        future = null;
+    }
+
     public static CompletableFuture<RealmsAvailability.Result> get() {
         if (future == null || shouldRefresh(future)) {
             future = check();
@@ -37,7 +42,7 @@ public class RealmsAvailability {
     }
 
     private static CompletableFuture<RealmsAvailability.Result> check() {
-        if (Minecraft.getInstance().isOfflineDeveloperMode()) {
+        if (Minecraft.getInstance().isOfflineDeveloperMode() || Minecraft.getInstance().isSigmaOfflineUser()) {
             return CompletableFuture.completedFuture(new RealmsAvailability.Result(RealmsAvailability.Type.AUTHENTICATION_ERROR));
         } else {
             return SharedConstants.DEBUG_BYPASS_REALMS_VERSION_CHECK

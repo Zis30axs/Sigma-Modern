@@ -6,6 +6,8 @@ import com.mentalfrostbyte.jello.account.SigmaAccountManager.AccountEntry;
 import com.mentalfrostbyte.jello.account.SigmaAccountManager.AccountType;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import net.minecraft.client.User;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -58,6 +60,7 @@ public final class SigmaAccountScreen extends Screen {
     private volatile String status = "Select an account, or add one.";
     private volatile String deviceCode = "";
     private volatile boolean loginInProgress;
+    private volatile boolean switchInProgress;
 
     public SigmaAccountScreen(final Screen parent, final Style style) {
         super(Component.literal(style == Style.JELLO ? "Alt Manager" : "Account Manager"));
@@ -99,7 +102,7 @@ public final class SigmaAccountScreen extends Screen {
         );
 
         this.useButton = this.addRenderableWidget(
-            Button.builder(Component.literal("Use Next Launch"), button -> this.useSelected())
+            Button.builder(Component.literal("Use Now"), button -> this.useSelected())
                 .bounds(detailX, layout.top + 144, detailWidth, 20)
                 .build()
         );
@@ -204,7 +207,7 @@ public final class SigmaAccountScreen extends Screen {
     }
 
     private void beginMicrosoftLogin() {
-        if (this.loginInProgress) {
+        if (this.loginInProgress || this.switchInProgress) {
             return;
         }
 
@@ -225,7 +228,7 @@ public final class SigmaAccountScreen extends Screen {
                 });
                 this.minecraft.execute(() -> {
                     this.selectedRowId = account.getId();
-                    this.status = "Added Microsoft account " + account.getName() + ". Select Use Next Launch to activate it.";
+                    this.status = "Added Microsoft account " + account.getName() + ". Select Use Now to activate it.";
                     this.deviceCode = "";
                     this.loginInProgress = false;
                     this.updateControls();
@@ -246,6 +249,9 @@ public final class SigmaAccountScreen extends Screen {
     }
 
     private void addOffline() {
+        if (this.switchInProgress) {
+            return;
+        }
         try {
             AccountEntry account = this.accounts.addOffline(this.offlineNameBox.getValue());
             this.selectedRowId = account.getId();
@@ -264,20 +270,62 @@ public final class SigmaAccountScreen extends Screen {
             this.status = "Select an account first.";
             return;
         }
-
-        if (this.accounts.selectForNextLaunch(account.getId())) {
-            this.status = account.getName() + " will be used after restarting the client.";
-            this.updateControls();
+        if (this.switchInProgress) {
+            return;
         }
+        if (this.minecraft.level != null || this.minecraft.player != null || this.minecraft.getConnection() != null) {
+            this.status = "Hot switching is only available from the title screen.";
+            return;
+        }
+
+        this.switchInProgress = true;
+        this.status = "Logging in...";
+        this.updateControls();
+        Thread thread = new Thread(() -> {
+            try {
+                SigmaAccountManager.LaunchIdentity identity = this.accounts.resolveForUse(account.getId());
+                User user = new User(identity.name(), identity.profileId(), identity.accessToken(), Optional.empty(), Optional.empty());
+                this.minecraft.sigmaSwitchUser(user, account.getType() == AccountType.OFFLINE).whenComplete((switched, failure) ->
+                    this.minecraft.execute(() -> {
+                        this.switchInProgress = false;
+                        if (failure != null) {
+                            Client.logger.error("Sigma hot account switch failed", failure);
+                            this.status = "Login failed: " + concise(failure);
+                        } else if (!switched) {
+                            this.status = "Return to the title screen before switching accounts.";
+                        } else {
+                            this.accounts.selectForNextLaunch(account.getId());
+                            this.status = "Logged in. (" + identity.name() + ")";
+                        }
+                        this.updateControls();
+                    })
+                );
+            } catch (Throwable failure) {
+                Client.logger.error("Sigma account refresh failed", failure);
+                this.minecraft.execute(() -> {
+                    this.switchInProgress = false;
+                    this.status = "Login failed: " + concise(failure);
+                    this.updateControls();
+                });
+            }
+        }, "Sigma-Account-Switch");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void useLauncherAccount() {
-        this.accounts.useLauncherIdentity();
-        this.status = "Launcher identity will be used on the next launch.";
-        this.updateControls();
-    }
+            if (this.switchInProgress) {
+                return;
+            }
+            this.accounts.useLauncherIdentity();
+            this.status = "Launcher identity will be used on the next launch.";
+            this.updateControls();
+        }
 
     private void deleteSelected() {
+        if (this.switchInProgress) {
+            return;
+        }
         AccountEntry account = this.selectedRow();
         if (account == null) {
             return;
@@ -294,13 +342,13 @@ public final class SigmaAccountScreen extends Screen {
 
     private void updateControls() {
         if (this.useButton != null) {
-            this.useButton.active = this.selectedRow() != null;
+            this.useButton.active = !this.switchInProgress && this.selectedRow() != null;
         }
         if (this.deleteButton != null) {
-            this.deleteButton.active = this.selectedRow() != null;
+            this.deleteButton.active = !this.switchInProgress && this.selectedRow() != null;
         }
         if (this.microsoftButton != null) {
-            this.microsoftButton.active = !this.loginInProgress;
+            this.microsoftButton.active = !this.loginInProgress && !this.switchInProgress;
         }
     }
 
@@ -336,9 +384,10 @@ public final class SigmaAccountScreen extends Screen {
             String type = account.getType() == AccountType.MICROSOFT ? "Microsoft" : "Offline";
             graphics.text(this.font, account.getName(), layout.listX + 14, y + 7, textColor, false);
             graphics.text(this.font, type, layout.listX + 14, y + 19, TEXT_DIM, false);
-            if (account.getId().equals(nextId)) {
-                String next = "NEXT";
-                graphics.text(this.font, next, layout.listX + layout.listWidth - this.font.width(next) - 14, y + 7, TEXT_GOOD, false);
+            boolean active = account.getProfileId().equals(this.minecraft.getUser().getProfileId());
+            String marker = active ? "ACTIVE" : account.getId().equals(nextId) ? "NEXT" : null;
+            if (marker != null) {
+                graphics.text(this.font, marker, layout.listX + layout.listWidth - this.font.width(marker) - 14, y + 7, TEXT_GOOD, false);
             }
         }
 

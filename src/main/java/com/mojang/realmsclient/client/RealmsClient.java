@@ -123,20 +123,22 @@ public class RealmsClient {
         String username = minecraft.getUser().getName();
         String sessionId = minecraft.getUser().getSessionId();
         RealmsClient realmsClient = realmsClientInstance;
-        if (realmsClient != null) {
+        if (realmsClient != null && realmsClient.matches(sessionId, username)) {
             return realmsClient;
         }
 
         synchronized (RealmsClient.class) {
             RealmsClient rc = realmsClientInstance;
-            if (rc != null) {
-                return rc;
+            if (rc == null || !rc.matches(sessionId, username)) {
+                rc = new RealmsClient(sessionId, username, minecraft);
+                realmsClientInstance = rc;
             }
-
-            rc = new RealmsClient(sessionId, username, minecraft);
-            realmsClientInstance = rc;
             return rc;
         }
+    }
+
+    private boolean matches(final String sessionId, final String username) {
+        return this.sessionId.equals(sessionId) && this.username.equals(username);
     }
 
     private RealmsClient(final String sessionId, final String username, final Minecraft minecraft) {
@@ -152,7 +154,7 @@ public class RealmsClient {
     }
 
     private Set<String> fetchFeatureFlags() {
-        if (Minecraft.getInstance().isOfflineDeveloperMode()) {
+        if (Minecraft.getInstance().isOfflineDeveloperMode() || Minecraft.getInstance().isSigmaOfflineUser()) {
             return Set.of();
         }
 
