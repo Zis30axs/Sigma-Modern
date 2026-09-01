@@ -30,6 +30,21 @@ import net.minecraft.client.gui.screens.options.HasGamemasterPermissionReaction;
 import net.minecraft.client.multiplayer.ClientLevel;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viaversion.api.connection.UserConnection;
+import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
+import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.protocols.v1_20_3to1_20_5.packet.ServerboundPackets1_20_5;
+import com.viaversion.viaversion.protocols.v1_21to1_21_2.Protocol1_21To1_21_2;
+import com.viaversion.viaversion.protocols.v1_21to1_21_2.storage.ClientVehicleStorage;
+import com.viaversion.viaversion.protocols.v1_21to1_21_2.storage.ProtocolStorables1_21_2;
+import com.viaversion.viaversion.protocols.v1_21_4to1_21_5.packet.ServerboundPackets1_21_5;
+import com.viaversion.viaversion.protocols.v1_21_5to1_21_6.Protocol1_21_5To1_21_6;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
+import net.raphimc.vialegacy.protocol.release.r1_5_2tor1_6_1.Protocolr1_5_2Tor1_6_1;
+import net.raphimc.vialegacy.protocol.release.r1_5_2tor1_6_1.packet.ServerboundPackets1_5_2;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.chat.ChatAbilities;
 import net.minecraft.client.resources.sounds.AmbientSoundHandler;
@@ -157,6 +172,10 @@ public class LocalPlayer extends AbstractClientPlayer
     private boolean flashOnSetHealth;
     public ClientInput input = new ClientInput();
     private Input lastSentInput;
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$lastSneaking
+    // (@Unique). <= 1.21 has no player-input packet, so the sneak state has to be diffed by hand and
+    // reported with the legacy player-command packet.
+    private boolean vfpLastSneaking;
     protected final Minecraft minecraft;
     protected int sprintTriggerTime;
     private static final int EXPERIENCE_DISPLAY_UNREADY_TO_SET = Integer.MIN_VALUE;
@@ -197,6 +216,9 @@ public class LocalPlayer extends AbstractClientPlayer
         this.recipeBook = recipeBook;
         this.lastSentInput = lastSentInput;
         this.wasSprinting = wasSprinting;
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#initLastSneaking
+        // (@Inject <init> RETURN)
+        this.vfpLastSneaking = lastSentInput.shift();
         this.ambientSoundHandlers.add(new UnderwaterAmbientSoundHandler(this, minecraft.getSoundManager()));
         this.ambientSoundHandlers.add(new BubbleColumnAmbientSoundHandler(this));
         this.ambientSoundHandlers.add(new BiomeAmbientSoundsHandler(this, minecraft.getSoundManager()));
@@ -228,6 +250,14 @@ public class LocalPlayer extends AbstractClientPlayer
                 .play(new RidingEntitySoundInstance(this, nautilus, true, SoundEvents.NAUTILUS_RIDING, nautilus.getSoundSource(), 0.0F, 1.0F, 5.0F));
         }
 
+        // MODIFIED for porting: was VFP vehicle MixinLocalPlayer#setRotationsWhenInBoat
+        // (@Inject startRiding RETURN). <= 1.18 snapped the player's yaw to the boat on mount.
+        if (entity instanceof Boat && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18)) {
+            this.yRotO = entity.getYRot();
+            this.setYRot(entity.getYRot());
+            this.setYHeadRot(entity.getYRot());
+        }
+
         return true;
     }
 
@@ -257,17 +287,42 @@ public class LocalPlayer extends AbstractClientPlayer
 
             this.dropSpamThrottler.tick();
             super.tick();
+            // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#sendSneakingPacket
+            // (@Inject after the super.tick() call). 1.21.2..1.21.5 report sneaking here.
+            if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_21_2, ProtocolVersion.v1_21_5)) {
+                this.vfpSendSneakingPacket();
+            }
+
             if (!this.lastSentInput.equals(this.input.keyPresses)) {
-                this.connection.send(new ServerboundPlayerInputPacket(this.input.keyPresses));
+                // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#skipVVProtocol
+                // (@Redirect on the first ClientPacketListener#send in tick). <= 1.21.5 builds the input
+                // packet at the 1.21.5 level directly so the 1.21.5->1.21.6 protocol does not rewrite it
+                // again, which also lets mods send raw input packets that VV then remaps.
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                    this.vfpSendInputPacket(this.input.keyPresses);
+                } else {
+                    this.connection.send(new ServerboundPlayerInputPacket(this.input.keyPresses));
+                }
+
                 this.lastSentInput = this.input.keyPresses;
             }
 
             if (this.isPassenger()) {
-                this.connection.send(new ServerboundMovePlayerPacket.Rot(this.getYRot(), this.getXRot(), this.onGround(), this.horizontalCollision));
+                // MODIFIED for porting: was VFP vehicle MixinLocalPlayer#modifyPositionPacket
+                // (@Redirect on the first ClientPacketListener#send after the isPassenger branch in tick).
+                // <= 1.5.2 reported the ridden position with the sentinel y/stance of -999 and the current
+                // motion in the x/z slots, and the 1.21->1.21.2 protocol's vehicle input has to be re-sent
+                // by hand because the packet order changes.
+                this.vfpSendRidingPositionPacket();
                 Entity vehicle = this.getRootVehicle();
                 if (vehicle != this && vehicle.isLocalInstanceAuthoritative()) {
                     this.connection.send(ServerboundMoveVehiclePacket.fromEntity(vehicle));
-                    this.sendIsSprintingIfNeeded();
+                    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#removeSprintingPacket
+                    // (@WrapWithCondition on sendIsSprintingIfNeeded in tick). < 1.19.3 only ever reported
+                    // sprinting from sendPosition, never from the vehicle branch of tick.
+                    if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_19_3)) {
+                        this.sendIsSprintingIfNeeded();
+                    }
                 }
             } else {
                 this.sendPosition();
@@ -294,6 +349,13 @@ public class LocalPlayer extends AbstractClientPlayer
 
     private void sendPosition() {
         this.sendIsSprintingIfNeeded();
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#sendSneakingAfterSprinting
+        // (@Inject after sendIsSprintingIfNeeded in sendPosition). <= 1.21 expects the sneak command right
+        // after the sprint command, in that order.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            this.vfpSendSneakingPacket();
+        }
+
         if (this.isControlledCamera()) {
             // Sigma hook: what the client is about to tell the server about where it is and where it is
             // looking. Every field is writable, and the values a listener leaves behind are both what
@@ -318,7 +380,14 @@ public class LocalPlayer extends AbstractClientPlayer
             double deltaYRot = yRot - this.yRotLast;
             double deltaXRot = xRot - this.xRotLast;
             this.positionReminder++;
-            boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || this.positionReminder >= 20;
+            // MODIFIED for porting: was VFP movement/packet MixinLocalPlayer#moveLastPosPacketIncrement
+            // (@ModifyExpressionValue on the third positionReminder field access in sendPosition).
+            // <= 1.8 evaluated the forced-update check before incrementing the reminder, so the
+            // increment above is reverted for this read alone - the counter itself keeps counting.
+            int positionReminderForCheck = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)
+                ? this.positionReminder - 1
+                : this.positionReminder;
+            boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || positionReminderForCheck >= 20;
             boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0;
             if (move && rot) {
                 this.connection
@@ -327,7 +396,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 this.connection.send(new ServerboundMovePlayerPacket.Pos(x, y, z, onGround, this.horizontalCollision));
             } else if (rot) {
                 this.connection.send(new ServerboundMovePlayerPacket.Rot(yRot, xRot, onGround, this.horizontalCollision));
-            } else if (this.lastOnGround != onGround || this.lastHorizontalCollision != this.horizontalCollision) {
+            } else if (this.vfpLastOnGroundForIdleCheck(onGround) != onGround || this.lastHorizontalCollision != this.horizontalCollision) {
                 this.connection.send(new ServerboundMovePlayerPacket.StatusOnly(onGround, this.horizontalCollision));
             }
 
@@ -352,6 +421,21 @@ public class LocalPlayer extends AbstractClientPlayer
             motion.setState(EventState.POST);
             EventBus.call(motion);
         }
+    }
+
+    // MODIFIED for porting: was VFP movement/packet MixinLocalPlayer#sendIdlePacket
+    // (@Redirect on the lastOnGround GETFIELD in sendPosition). r1_4_2..1.8 and everything up to
+    // r1_2_4tor1_2_5 sent the idle movement packet every tick instead of only when the on-ground or
+    // horizontal-collision state changed. Upstream substitutes the negation of the value the packet
+    // is about to carry for the field read, which makes the comparison unconditionally true.
+    private boolean vfpLastOnGroundForIdleCheck(final boolean onGround) {
+        final ProtocolVersion target = ProtocolTranslator.getTargetVersion();
+        if (target.betweenInclusive(LegacyProtocolVersion.r1_4_2, ProtocolVersion.v1_8)
+            || target.olderThanOrEqualTo(LegacyProtocolVersion.r1_2_4tor1_2_5)) {
+            return !onGround;
+        }
+
+        return this.lastOnGround;
     }
 
     private void sendIsSprintingIfNeeded() {
@@ -745,7 +829,12 @@ public class LocalPlayer extends AbstractClientPlayer
     @Override
     public void applyInput() {
         if (this.isControlledCamera()) {
-            Vec2 modifiedInput = this.modifyInput(this.input.getMoveVector());
+            // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
+            // (@Redirect on modifyInput in applyInput). <= 1.21.4 applied the movement speed factors in
+            // aiStep instead of here, see the aiStep hook of the same name.
+            Vec2 modifiedInput = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)
+                ? this.input.getMoveVector()
+                : this.modifyInput(this.input.getMoveVector());
             this.xxa = modifiedInput.x;
             this.zza = modifiedInput.y;
             this.jumping = this.input.keyPresses.jump();
@@ -763,7 +852,9 @@ public class LocalPlayer extends AbstractClientPlayer
             return input;
         }
 
-        Vec2 newInput = input.scale(0.98F);
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
+        // (@Redirect on the first Vec2#scale in modifyInput). <= 1.21.4 had no 0.98 input scale.
+        Vec2 newInput = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? input : input.scale(0.98F);
         if (this.isUsingItem() && !this.isPassenger()) {
             newInput = newInput.scale(this.itemUseSpeedMultiplier());
         }
@@ -773,7 +864,10 @@ public class LocalPlayer extends AbstractClientPlayer
             newInput = newInput.scale(sneakingMovementFactor);
         }
 
-        return modifyInputSpeedForSquareMovement(newInput);
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
+        // (@Redirect on modifyInputSpeedForSquareMovement in modifyInput). <= 1.21.4 did not remap the
+        // input onto the unit square.
+        return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? newInput : modifyInputSpeedForSquareMovement(newInput);
     }
 
     private static Vec2 modifyInputSpeedForSquareMovement(final Vec2 input) {
@@ -821,6 +915,11 @@ public class LocalPlayer extends AbstractClientPlayer
     public void aiStep() {
         // Sigma hook: the physics step, before input becomes movement flags.
         EventBus.call(new EventLivingUpdate(EventState.PRE));
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#storeSprintingSneakingState
+        // (@Inject HEAD, shared with the canStartSprinting redirect below via @Share).
+        final boolean vfpSneakSprintState = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)
+            && !this.input.keyPresses.shift()
+            && !this.vfpIsWalking1_21_4();
         if (this.sprintTriggerTime > 0) {
             this.sprintTriggerTime--;
         }
@@ -834,13 +933,33 @@ public class LocalPlayer extends AbstractClientPlayer
         boolean wasShiftKeyDown = this.input.keyPresses.shift();
         boolean hasForwardImpulse = this.input.hasForwardImpulse();
         Abilities abilities = this.getAbilities();
+        // MODIFIED for porting: was VFP vehicle MixinLocalPlayer#removeVehicleRequirement
+        // (@Redirect on the first isPassenger call in aiStep). <= 1.20 let the player crouch while riding.
         this.crouching = !abilities.flying
             && !this.isSwimming()
-            && !this.isPassenger()
+            && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20) && this.isPassenger())
             && this.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING)
             && (this.isShiftKeyDown() || !this.isSleeping() && !this.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.STANDING));
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#removeSneakingConditions
+        // (@Inject before ClientInput#tick in aiStep). <= 1.13.2 allowed sneaking while flying, inside
+        // blocks and in vehicles.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            this.crouching = this.isShiftKeyDown() && !this.isSleeping();
+        }
+
         this.input.tick();
         this.minecraft.getTutorial().onInput(this.input);
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
+        // (@Inject after Tutorial#onInput in aiStep). <= 1.21.4 applied the movement speed factors to the
+        // input vector here rather than in applyInput; 1.21.4 additionally re-checks run sprinting.
+        if (ProtocolTranslator.getTargetVersion().equalTo(ProtocolVersion.v1_21_4) && this.shouldStopRunSprinting()) {
+            this.setSprinting(false);
+        }
+
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            this.input.moveVector = this.modifyInput(this.input.moveVector);
+        }
+
         boolean wasAutoJump = false;
         if (this.autoJumpTime > 0) {
             this.autoJumpTime--;
@@ -855,11 +974,33 @@ public class LocalPlayer extends AbstractClientPlayer
             this.moveTowardsClosestSpace(this.getX() + this.getBbWidth() * 0.35, this.getZ() + this.getBbWidth() * 0.35);
         }
 
-        if (wasShiftKeyDown || this.isSlowDueToUsingItem() && !this.isPassenger() || this.input.keyPresses.backward()) {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#dontResetDoubleTapTicks
+        // (@Redirect on Input#backward in aiStep). <= 1.21.4 did not clear the double-tap sprint window
+        // when walking backwards.
+        if (wasShiftKeyDown
+            || this.isSlowDueToUsingItem() && !this.isPassenger()
+            || ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_4) && this.input.keyPresses.backward()) {
             this.sprintTriggerTime = 0;
         }
 
-        if (this.canStartSprinting()) {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeCanStartSprintingConditions
+        // (@Redirect on canStartSprinting in aiStep). <= 1.21.4 started sprinting from its own condition
+        // block and then reported false, so the vanilla block only runs for newer targets.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            final boolean canStartSprinting = this.canStartSprinting();
+            final boolean sprintOnGround = this.isPassenger() ? this.getVehicle().onGround() : this.onGround();
+            if ((sprintOnGround || this.isUnderWater()) && vfpSneakSprintState && canStartSprinting) {
+                if (this.sprintTriggerTime <= 0 && !this.minecraft.options.keySprint.isDown()) {
+                    this.sprintTriggerTime = this.minecraft.options.sprintWindow().get();
+                } else {
+                    this.setSprinting(true);
+                }
+            }
+
+            if (this.vfpCanWaterSprint() && canStartSprinting && this.minecraft.options.keySprint.isDown()) {
+                this.setSprinting(true);
+            }
+        } else if (this.canStartSprinting()) {
             if (!hasForwardImpulse) {
                 if (this.sprintTriggerTime > 0) {
                     this.setSprinting(true);
@@ -878,7 +1019,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 if (this.shouldStopSwimSprinting()) {
                     this.setSprinting(false);
                 }
-            } else if (this.shouldStopRunSprinting()) {
+            } else if (this.vfpShouldStopRunSprintingAtAiStep()) {
                 this.setSprinting(false);
             }
         }
@@ -978,12 +1119,57 @@ public class LocalPlayer extends AbstractClientPlayer
     }
 
     private boolean shouldStopRunSprinting() {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeStopSprintingConditions
+        // (@Inject HEAD cancellable on shouldStopRunSprinting)
+        final ProtocolVersion vfpTarget = ProtocolTranslator.getTargetVersion();
+        if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            final boolean ridingCamel = this.getVehicle() != null && this.getVehicle().getType() == EntityTypes.CAMEL;
+            return this.isFallFlying()
+                || this.isMobilityRestricted()
+                || this.isMovingSlowly()
+                || this.isPassenger() && !ridingCamel
+                || this.isUsingItem() && !this.isPassenger() && !this.isUnderWater();
+        } else if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_21_7)) {
+            return this.isMobilityRestricted()
+                || this.isPassenger() && !this.vehicleCanSprint(this.getVehicle())
+                || !this.input.hasForwardImpulse()
+                || !this.vfpHasEnoughFoodToSprint1_19_1()
+                || this.horizontalCollision && !this.minorHorizontalCollision
+                || this.isInWater() && !this.isUnderWater();
+        }
+
         return !this.isSprintingPossible(this.getAbilities().flying)
             || !this.input.hasForwardImpulse()
             || this.horizontalCollision && !this.minorHorizontalCollision;
     }
 
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeStopSprintingConditions
+    // (@Redirect on shouldStopRunSprinting in aiStep). <= 1.21.4 evaluated a different condition at the
+    // aiStep call site than inside the method itself.
+    private boolean vfpShouldStopRunSprintingAtAiStep() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            return this.vfpShouldCancelSprinting()
+                || this.horizontalCollision && !this.minorHorizontalCollision
+                || !this.vfpCanWaterSprint();
+        }
+
+        return this.shouldStopRunSprinting();
+    }
+
     private boolean shouldStopSwimSprinting() {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeStopSwimSprintingConditions
+        // (@Inject HEAD cancellable)
+        final ProtocolVersion vfpTarget = ProtocolTranslator.getTargetVersion();
+        if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            return !this.onGround() && !this.input.keyPresses.shift() && this.vfpShouldCancelSprinting() || !this.isInWater();
+        } else if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_21_7)) {
+            return this.isMobilityRestricted()
+                || this.isPassenger() && !this.vehicleCanSprint(this.getVehicle())
+                || !this.isInWater()
+                || !this.input.hasForwardImpulse() && !this.onGround() && !this.input.keyPresses.shift()
+                || !this.vfpHasEnoughFoodToSprint1_19_1();
+        }
+
         return !this.isSprintingPossible(true) || !this.isInWater() || !this.input.hasForwardImpulse() && !this.onGround() && !this.input.keyPresses.shift();
     }
 
@@ -1196,18 +1382,136 @@ public class LocalPlayer extends AbstractClientPlayer
     }
 
     private boolean isSprintingPossible(final boolean allowedInShallowWater) {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#isSprintingPossible1_21_10
+        // (@Inject HEAD cancellable). <= 1.21.9 used the pre-1.19.1 food condition and only required the
+        // vehicle to be able to sprint while actually riding one.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)) {
+            return !this.isMobilityRestricted()
+                && this.vfpHasEnoughFoodToSprint1_19_1()
+                && (!this.isPassenger() || this.vehicleCanSprint(this.getVehicle()))
+                && (allowedInShallowWater || !this.isInShallowWater());
+        }
+
         return !this.isMobilityRestricted()
             && (this.isPassenger() ? this.vehicleCanSprint(this.getVehicle()) : this.hasEnoughFoodToDoExhaustiveManoeuvres())
             && (allowedInShallowWater || !this.isInShallowWater());
     }
 
     private boolean canStartSprinting() {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeCanStartSprintingConditions
+        // (@Inject HEAD cancellable on canStartSprinting)
+        final ProtocolVersion version = ProtocolTranslator.getTargetVersion();
+        if (version.olderThanOrEqualTo(ProtocolVersion.v1_21_7)) {
+            return !this.isSprinting()
+                && (version.olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? this.vfpIsWalking1_21_4() : this.input.hasForwardImpulse())
+                && this.vfpHasEnoughFoodToSprint1_19_1()
+                && !this.isUsingItem()
+                && !this.isMobilityRestricted()
+                && (!(version.newerThan(ProtocolVersion.v1_19_3) && this.isPassenger()) || this.vehicleCanSprint(this.getVehicle()))
+                && (!(version.newerThan(ProtocolVersion.v1_19_3) && this.isFallFlying()) || this.isUnderWater())
+                && (!(this.isMovingSlowly() && version.equalTo(ProtocolVersion.v1_21_4)) || this.isUnderWater() && version.equalTo(ProtocolVersion.v1_21_4))
+                && (!version.olderThanOrEqualTo(ProtocolVersion.v1_21_4) && (!this.isInWater() || this.isUnderWater()) || version.olderThanOrEqualTo(ProtocolVersion.v1_21_4));
+        }
+
         return !this.isSprinting()
             && this.input.hasForwardImpulse()
             && this.isSprintingPossible(this.getAbilities().flying)
             && !this.isSlowDueToUsingItem()
             && (!this.isFallFlying() || this.isUnderWater())
             && (!this.isMovingSlowly() || this.isUnderWater());
+    }
+
+    // MODIFIED for porting: was VFP vehicle MixinLocalPlayer#modifyPositionPacket (@Redirect body)
+    private void vfpSendRidingPositionPacket() {
+        if (ProtocolTranslator.getTargetVersion().newerThan(LegacyProtocolVersion.r1_5_2)) {
+            this.connection.send(new ServerboundMovePlayerPacket.Rot(this.getYRot(), this.getXRot(), this.onGround(), this.horizontalCollision));
+            return;
+        }
+
+        final UserConnection userConnection = ((IConnection)this.connection.getConnection()).viaFabricPlus$getUserConnection();
+        userConnection.getChannel().eventLoop().execute(() -> {
+            final PacketWrapper movePlayerPosRot = PacketWrapper.create(ServerboundPackets1_5_2.MOVE_PLAYER_POS_ROT, userConnection);
+            movePlayerPosRot.write(Types.DOUBLE, this.getDeltaMovement().x); // x
+            movePlayerPosRot.write(Types.DOUBLE, -999.0D); // y
+            movePlayerPosRot.write(Types.DOUBLE, -999.0D); // stance
+            movePlayerPosRot.write(Types.DOUBLE, this.getDeltaMovement().z); // z
+            movePlayerPosRot.write(Types.FLOAT, this.getYRot()); // yaw
+            movePlayerPosRot.write(Types.FLOAT, this.getXRot()); // pitch
+            movePlayerPosRot.write(Types.BOOLEAN, this.onGround()); // onGround
+            movePlayerPosRot.sendToServer(Protocolr1_5_2Tor1_6_1.class);
+
+            // Copied from the 1.21->1.21.2 protocol since it changes the packet order and the movement
+            // packet above is sent by hand.
+            final ClientVehicleStorage storage = userConnection.<ProtocolStorables1_21_2>storables(Protocol1_21To1_21_2.class).clientVehicleStorage();
+            if (storage != null) {
+                final PacketWrapper playerInput = PacketWrapper.create(ServerboundPackets1_20_5.PLAYER_INPUT, userConnection);
+                playerInput.write(Types.FLOAT, storage.sidewaysMovement());
+                playerInput.write(Types.FLOAT, storage.forwardMovement());
+                playerInput.write(Types.BYTE, storage.flags());
+                playerInput.sendToServer(Protocol1_21To1_21_2.class);
+            }
+        });
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$sendSneakingPacket
+    // (@Unique). Builds the legacy sneak player-command at the 1.21.5 level so ViaVersion maps it the rest
+    // of the way down, and only when the state actually changed.
+    private void vfpSendSneakingPacket() {
+        final boolean sneaking = this.isShiftKeyDown();
+        if (sneaking == this.vfpLastSneaking) {
+            return;
+        }
+
+        final PacketWrapper sneakingPacket = PacketWrapper.create(ServerboundPackets1_21_5.PLAYER_COMMAND, ProtocolTranslator.getPlayNetworkUserConnection());
+        sneakingPacket.write(Types.VAR_INT, this.getId());
+        sneakingPacket.write(Types.VAR_INT, sneaking ? 0 : 1);
+        sneakingPacket.write(Types.VAR_INT, 0); // No data
+        sneakingPacket.scheduleSendToServer(Protocol1_21_5To1_21_6.class);
+        this.vfpLastSneaking = sneaking;
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$sendInputPacket (@Unique)
+    private void vfpSendInputPacket(final Input playerInput) {
+        byte flags = 0;
+        flags = (byte)(flags | (playerInput.forward() ? 0x1 : 0));
+        flags = (byte)(flags | (playerInput.backward() ? 0x2 : 0));
+        flags = (byte)(flags | (playerInput.left() ? 0x4 : 0));
+        flags = (byte)(flags | (playerInput.right() ? 0x8 : 0));
+        flags = (byte)(flags | (playerInput.jump() ? 0x10 : 0));
+        flags = (byte)(flags | (playerInput.shift() ? 0x20 : 0));
+        flags = (byte)(flags | (playerInput.sprint() ? 0x40 : 0));
+
+        final PacketWrapper inputPacket = PacketWrapper.create(ServerboundPackets1_21_5.PLAYER_INPUT, ProtocolTranslator.getPlayNetworkUserConnection());
+        inputPacket.write(Types.BYTE, flags);
+        inputPacket.scheduleSendToServer(Protocol1_21_5To1_21_6.class);
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$shouldCancelSprinting (@Unique)
+    private boolean vfpShouldCancelSprinting() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_1)) {
+            return !(this.input.moveVector.y >= 0.8F) || !this.vfpHasEnoughFoodToSprint1_19_1(); // Disables sprint sneaking
+        }
+
+        return !this.input.hasForwardImpulse() || !this.vfpHasEnoughFoodToSprint1_19_1();
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$hasEnoughFoodToSprint1_19_1 (@Unique)
+    private boolean vfpHasEnoughFoodToSprint1_19_1() {
+        return ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_19_1) && this.isPassenger()
+            || this.hasEnoughFoodToDoExhaustiveManoeuvres();
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$isWalking1_21_4 (@Unique)
+    private boolean vfpIsWalking1_21_4() {
+        final boolean submergedInWater = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_14_1) && this.isUnderWater();
+        return submergedInWater ? this.input.hasForwardImpulse() : this.input.moveVector.y >= 0.8;
+    }
+
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#viaFabricPlus$canWaterSprint (@Unique)
+    private boolean vfpCanWaterSprint() {
+        return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+            || !this.isInWater()
+            || this.isUnderWater();
     }
 
     private boolean vehicleCanSprint(final Entity vehicle) {

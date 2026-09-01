@@ -1300,7 +1300,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                     if (passenger == this.minecraft.player) {
                         this.removedPlayerVehicleId = OptionalInt.empty();
                         if (!wasPlayerMounted) {
-                            if (vehicle instanceof AbstractBoat) {
+                            // MODIFIED for porting: was VFP packet_handling MixinClientPacketListener#dontChangeYawWhenMountingBoats
+                            // (@ModifyConstant on the AbstractBoat class constant). <= 1.18 did not snap the
+                            // player's yaw to the boat when the server seats them in it.
+                            if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_18) && vehicle instanceof AbstractBoat) {
                                 this.minecraft.player.yRotO = vehicle.getYRot();
                                 this.minecraft.player.setYRot(vehicle.getYRot());
                                 this.minecraft.player.setYHeadRot(vehicle.getYRot());

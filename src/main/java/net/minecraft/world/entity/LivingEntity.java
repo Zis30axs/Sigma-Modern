@@ -3221,6 +3221,14 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
 
         profiler.pop();
         profiler.push("travel");
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLivingEntity#moveMovementSpeedFactors
+        // (@Inject before the first isFallFlying call in aiStep). <= 1.21.4 applied the 0.98 input scale
+        // here, on the already-computed movement floats, instead of inside LocalPlayer#modifyInput.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            this.xxa *= 0.98F;
+            this.zza *= 0.98F;
+        }
+
         if (this.isFallFlying()) {
             this.updateFallFlying();
         }

@@ -76,8 +76,11 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.viaversion.viafabricplus.util.network.DataCustomPayload;
 import com.viaversion.viafabricplus.util.network.SyncTasks;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.FriendlyByteBuf;
 @OnlyIn(Dist.CLIENT)
 public abstract class ClientCommonPacketListenerImpl implements ClientCommonPacketListener {
@@ -120,7 +123,12 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
         LOGGER.error("Failed to handle packet {}, disconnecting", packet, cause);
         Optional<Path> report = this.storeDisconnectionReport(packet, cause);
         Optional<URI> bugReportLink = this.serverLinks.findKnownType(ServerLinks.KnownLinkType.BUG_REPORT).map(ServerLinks.Entry::link);
-        this.connection.disconnect(new DisconnectionDetails(Component.translatable("disconnect.packetError"), report, bugReportLink));
+        // MODIFIED for porting: was VFP packet_handling MixinClientCommonPacketListenerImpl#dontDisconnectOnPacketException
+        // (@WrapWithCondition on Connection.disconnect). Translated protocols regularly produce packets the
+        // modern listener cannot handle; only >1.20.3 targets are allowed to tear the connection down for it.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_3)) {
+            this.connection.disconnect(new DisconnectionDetails(Component.translatable("disconnect.packetError"), report, bugReportLink));
+        }
     }
 
     @Override
@@ -131,6 +139,11 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
     }
 
     private Optional<Path> storeDisconnectionReport(final @Nullable Packet packet, final Throwable cause) {
+        // MODIFIED for porting: was VFP packet_handling MixinClientCommonPacketListenerImpl#dontCreatePacketErrorCrashReports
+        // (@Inject HEAD cancellable)
+        if (DebugSettings.INSTANCE.dontCreatePacketErrorCrashReports.isEnabled()) {
+            return Optional.empty();
+        }
         CrashReport report = CrashReport.forThrowable(cause, "Packet handling error");
         PacketUtils.fillCrashReport(report, this, packet);
         Path debugDir = this.minecraft.gameDirectory.toPath().resolve("debug");
@@ -149,12 +162,32 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
 
     @Override
     public void handleKeepAlive(final ClientboundKeepAlivePacket packet) {
-        this.sendWhen(new ServerboundKeepAlivePacket(packet.getId()), () -> !RenderSystem.isFrozenAtPollEvents(), Duration.ofMinutes(1L));
+        // MODIFIED for porting: was VFP packet_handling MixinClientCommonPacketListenerImpl#forceSendKeepAlive
+        // (@Redirect on the sendWhen call). <= 1.19.3 servers time the connection out on the deferred
+        // response, so the keep-alive answer is written immediately instead of being queued behind a
+        // condition that only clears on the next client tick.
+        final Packet<? extends ServerboundPacketListener> keepAlive = new ServerboundKeepAlivePacket(packet.getId());
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3)) {
+            this.send(keepAlive);
+        } else {
+            this.sendWhen(keepAlive, () -> !RenderSystem.isFrozenAtPollEvents(), Duration.ofMinutes(1L));
+        }
     }
 
     @Override
     public void handlePing(final ClientboundPingPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // MODIFIED for porting: was VFP packet_handling MixinClientCommonPacketListenerImpl#addMissingConditions
+        // (@Inject after ensureRunningOnSameThread, cancellable). <= 1.16.4 has no ping packet: ViaVersion
+        // maps the removed container-acknowledgement (transaction) onto it and packs the window id into
+        // bits 16-23 of the ping id. 1.16 vanilla only answered an acknowledgement for window 0 or for the
+        // container that is currently open, so any other window id must not be answered here either.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            final short inventoryId = (short)(packet.getId() >> 16 & 0xFF);
+            if (inventoryId != 0 && inventoryId != this.minecraft.player.containerMenu.containerId) {
+                return;
+            }
+        }
         this.send(new ServerboundPongPacket(packet.getId()));
     }
 
@@ -181,6 +214,13 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
 
     @Override
     public void handleResourcePackPush(final ClientboundResourcePackPushPacket packet) {
+        // MODIFIED for porting: was VFP packet_handling MixinClientCommonPacketListenerImpl#validateUrlInNetworkThread
+        // (@Inject HEAD cancellable - deliberately before ensureRunningOnSameThread). <= 1.20.2 expects the
+        // INVALID_URL answer from the network thread, before the packet is handed to the main thread.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2) && parseResourcePackUrl(packet.url()) == null) {
+            this.connection.send(new ServerboundResourcePackPacket(packet.id(), ServerboundResourcePackPacket.Action.INVALID_URL));
+            return;
+        }
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         UUID packId = packet.id();
         URL url = parseResourcePackUrl(packet.url());

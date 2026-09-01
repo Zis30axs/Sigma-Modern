@@ -160,6 +160,8 @@ public abstract class Player extends Avatar implements ContainerUser {
     private int sleepCounter = 0;
     protected boolean wasUnderwater;
     private final Abilities abilities = new Abilities();
+    // MODIFIED for porting: was VFP sprinting_and_sneaking MixinPlayer#viaFabricPlus$isSprinting (@Unique)
+    private boolean vfpWasSprintingAtSetSpeed;
     public int experienceLevel = 0;
     public int totalExperience = 0;
     public float experienceProgress = 0.0F;
@@ -456,6 +458,10 @@ public abstract class Player extends Avatar implements ContainerUser {
         super.aiStep();
         this.updateSwingTime();
         this.yHeadRot = this.getYRot();
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinPlayer#storeSprintingState
+        // (@Inject before Player#setSpeed in aiStep). <= 1.19.3 read the sprinting state for the flying
+        // speed at this point of the tick, not at the moment getFlyingSpeed is asked.
+        this.vfpWasSprintingAtSetSpeed = this.isSprinting();
         this.setSpeed((float)this.getAttributeValue(Attributes.MOVEMENT_SPEED));
         if (this.getHealth() > 0.0F && !this.isSpectator()) {
             AABB pickupArea;
@@ -1983,10 +1989,15 @@ public abstract class Player extends Avatar implements ContainerUser {
 
     @Override
     protected float getFlyingSpeed() {
+        // MODIFIED for porting: was VFP sprinting_and_sneaking MixinPlayer#useLastSprintingState
+        // (@Redirect on isSprinting in getFlyingSpeed)
+        final boolean sprinting = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3)
+            ? this.vfpWasSprintingAtSetSpeed
+            : this.isSprinting();
         if (this.abilities.flying && !this.isPassenger()) {
-            return this.isSprinting() ? this.abilities.getFlyingSpeed() * 2.0F : this.abilities.getFlyingSpeed();
+            return sprinting ? this.abilities.getFlyingSpeed() * 2.0F : this.abilities.getFlyingSpeed();
         } else {
-            return this.isSprinting() ? 0.025999999F : 0.02F;
+            return sprinting ? 0.025999999F : 0.02F;
         }
     }
 
