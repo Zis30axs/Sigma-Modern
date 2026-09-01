@@ -57,9 +57,18 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
   settings.json/viaversion.yml/viabackwards.yml/vialegacy.yml/viabedrock.yml/viaaprilfools.yml
   协议栈完整加载并持久化设置。5+ 分钟稳定运行零错误。
   游戏已可正常使用——剩余工作为用户手动测试旧版服务器连接。
-## 移植完成确认
+## 移植完成确认（已撤回 / RETRACTED）
 
-ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。
+~~ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。~~
+
+**这个结论是错的，已撤回。** 2026-09-02 做了一次全量逐 hook 审计：上游 368 个 mixin / 726 个 hook，
+当时实际内联的只有约 152 个（20.9%）。参见 **[VFP_AUDIT.md](VFP_AUDIT.md)** —— 那份文件是唯一的账本，
+本文件以下内容仅作历史记录。
+
+审计还在“已标记完成”的代码里发现三处缺陷（config-state autoRead 在 netty 线程上是死代码、
+`alwaysSignCommands` 逻辑取反、`dontOpenConfirmationScreens` 门控错误），详见 VFP_AUDIT.md。
+
+下面这几条当时用来支撑“完整移植”的证据，都**不能**证明功能完整，只能证明能启动：
 - 编译通过（BUILD SUCCESS）
 - 运行时稳定（7+ 分钟零崩溃零错误）
 - ViaVersion 协议栈加载成功
