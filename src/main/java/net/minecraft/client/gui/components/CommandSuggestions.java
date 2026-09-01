@@ -1,5 +1,6 @@
 package net.minecraft.client.gui.components;
 
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -133,6 +134,22 @@ public class CommandSuggestions {
     }
 
     public boolean keyPressed(final KeyEvent event) {
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinCommandSuggestions#handle1_12_2KeyPressed
+        // (@Inject HEAD cancellable). <= 1.12.2 asked the server for completions on TAB and dismissed the
+        // popup on any other key.
+        if (this.vfpCancelTabComplete()) {
+            if (event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_TAB && this.suggestions == null) {
+                this.updateCommandInfo();
+            } else if (this.suggestions != null) {
+                if (this.suggestions.keyPressed(event)) {
+                    return true;
+                }
+
+                this.input.setSuggestion(null);
+                this.suggestions = null;
+            }
+        }
+
         boolean isVisible = this.suggestions != null;
         if (isVisible && this.suggestions.keyPressed(event)) {
             return true;
@@ -400,7 +417,18 @@ public class CommandSuggestions {
     }
 
     private @Nullable FormattedCharSequence formatChat(final String text, final int offset) {
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinCommandSuggestions#disableTextFieldColors
+        // (@Inject HEAD cancellable). <= 1.12.2 had no client-side command syntax highlighting.
+        if (this.vfpCancelTabComplete()) {
+            return FormattedCharSequence.forward(text, Style.EMPTY);
+        }
+
         return this.currentParse != null ? formatText(this.currentParse, text, offset) : null;
+    }
+
+    // MODIFIED for porting: was VFP legacy_tab_completion MixinCommandSuggestions#viaFabricPlus$cancelTabComplete (@Unique)
+    private boolean vfpCancelTabComplete() {
+        return DebugSettings.INSTANCE.legacyTabCompletions.isEnabled() && this.input.getValue().startsWith("/");
     }
 
     private static @Nullable String calculateSuggestionSuffix(final String contents, final String suggestion) {
@@ -446,6 +474,12 @@ public class CommandSuggestions {
     }
 
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinCommandSuggestions#clearMessages
+        // (@Inject HEAD). <= 1.12.2 showed no command usage hints.
+        if (this.vfpCancelTabComplete()) {
+            this.commandUsage.clear();
+        }
+
         if (!this.extractSuggestions(graphics, mouseX, mouseY)) {
             this.extractUsage(graphics);
         }

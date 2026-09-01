@@ -1,5 +1,7 @@
 package net.minecraft.client.gui.screens.inventory;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.client.GameNarrator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -78,7 +80,12 @@ public abstract class AbstractCommandBlockEditScreen extends Screen {
         );
         this.commandSuggestions = new CommandSuggestions(this.minecraft, this, this.commandEdit, this.font, true, true, 0, 7, false, Integer.MIN_VALUE);
         this.commandSuggestions.setAllowSuggestions(true);
-        this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP legacy_tab_completion
+        // MixinAbstractCommandBlockEditScreen#cancelAutoComplete (@Redirect method="*" on
+        // CommandSuggestions#updateCommandInfo). Command blocks only auto-complete from 1.13 on.
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_13)) {
+            this.commandSuggestions.updateCommandInfo();
+        }
         this.updatePreviousOutput(trackOutput);
     }
 
@@ -100,7 +107,12 @@ public abstract class AbstractCommandBlockEditScreen extends Screen {
         String oldText = this.commandEdit.getValue();
         this.init(width, height);
         this.commandEdit.setValue(oldText);
-        this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP legacy_tab_completion
+        // MixinAbstractCommandBlockEditScreen#cancelAutoComplete (@Redirect method="*" on
+        // CommandSuggestions#updateCommandInfo). Command blocks only auto-complete from 1.13 on.
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_13)) {
+            this.commandSuggestions.updateCommandInfo();
+        }
     }
 
     protected void updatePreviousOutput(final boolean isTracking) {
@@ -120,7 +132,12 @@ public abstract class AbstractCommandBlockEditScreen extends Screen {
     protected abstract void populateAndSendPacket();
 
     private void onEdited(final String value) {
-        this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP legacy_tab_completion
+        // MixinAbstractCommandBlockEditScreen#cancelAutoComplete (@Redirect method="*" on
+        // CommandSuggestions#updateCommandInfo). Command blocks only auto-complete from 1.13 on.
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_13)) {
+            this.commandSuggestions.updateCommandInfo();
+        }
     }
 
     @Override

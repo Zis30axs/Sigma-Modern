@@ -1,5 +1,6 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.ActiveTextCollector;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -64,7 +65,13 @@ public class ChatScreen extends Screen {
         };
         this.input.setMaxLength(256);
         this.input.setBordered(false);
-        this.input.setValue(this.initial);
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#moveSetTextDown
+        // (@WrapWithCondition on EditBox#setValue in init). With legacy tab completion the initial text is
+        // only applied at the end of init, after the suggestion widget exists.
+        if (!DebugSettings.INSTANCE.legacyTabCompletions.isEnabled()) {
+            this.input.setValue(this.initial);
+        }
+
         this.input.setResponder(this::onEdited);
         this.input.addFormatter(this::formatChat);
         this.input.setCanLoseFocus(false);
@@ -76,6 +83,12 @@ public class ChatScreen extends Screen {
         this.displayMode = chatAbilities.hasAnyRestrictions() ? ChatComponent.DisplayMode.FOREGROUND_RESTRICTED : ChatComponent.DisplayMode.FOREGROUND;
         this.commandSuggestions.setRestrictions(chatAbilities.canSendMessages(), chatAbilities.canSendCommands());
         this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#moveSetTextDown
+        // (@Inject init RETURN) - the other half of the hook above.
+        if (DebugSettings.INSTANCE.legacyTabCompletions.isEnabled()) {
+            this.input.setValue(this.initial);
+            this.commandSuggestions.updateCommandInfo();
+        }
     }
 
     @Override
@@ -112,9 +125,22 @@ public class ChatScreen extends Screen {
     }
 
     private void onEdited(final String value) {
-        this.commandSuggestions.setAllowSuggestions(true);
-        this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#fixCommandKey
+        // (@ModifyArg index 0 on setAllowSuggestions) and #disableAutoTabComplete (@WrapWithCondition on
+        // updateCommandInfo). <= 1.12.2 only completed on demand, and only for non-command input does the
+        // modern live update stay.
+        final boolean keepTabComplete = this.vfpKeepTabComplete();
+        this.commandSuggestions.setAllowSuggestions(keepTabComplete || !this.input.getValue().isEmpty());
+        if (keepTabComplete) {
+            this.commandSuggestions.updateCommandInfo();
+        }
+
         this.isDraft = false;
+    }
+
+    // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#viaFabricPlus$keepTabComplete (@Unique)
+    private boolean vfpKeepTabComplete() {
+        return !DebugSettings.INSTANCE.legacyTabCompletions.isEnabled() || !this.input.getValue().startsWith("/");
     }
 
     @Override
