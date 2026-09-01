@@ -65,7 +65,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class KeyboardHandler {
+public class KeyboardHandler implements com.viaversion.viafabricplus.injection.access.execute_inputs_sync.IMouseKeyboardHandlers {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final int DEBUG_CRASH_TIME = 10000;
     private final Minecraft minecraft;
@@ -638,13 +638,36 @@ public class KeyboardHandler {
         }
     }
 
+    // MODIFIED for porting: was VFP execute_inputs_sync MixinKeyboardHandler#viaFabricPlus$pendingScreenEvents
+    // (@Unique) plus the IMouseKeyboardHandlers implementation. For <= 1.12.2 targets, screen input
+    // events are queued instead of being posted to the client executor, so Minecraft#tick drains them
+    // at a fixed point of the tick and container interaction keeps its packet order.
+    private final java.util.Queue<Runnable> vfpPendingScreenEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    @Override
+    public java.util.Queue<Runnable> viaFabricPlus$getPendingScreenEvents() {
+        return this.vfpPendingScreenEvents;
+    }
+
+    // MODIFIED for porting: was VFP execute_inputs_sync MixinKeyboardHandler#storeEvent
+    // (@Redirect on Minecraft#execute in the setup callbacks)
+    private void vfpStoreScreenEvent(final Runnable runnable) {
+        if (this.minecraft.getConnection() != null
+            && this.minecraft.gui.screen() != null
+            && com.viaversion.viafabricplus.settings.impl.DebugSettings.INSTANCE.executeInputsSynchronously.isEnabled()) {
+            this.vfpPendingScreenEvents.offer(runnable);
+        } else {
+            this.minecraft.execute(runnable);
+        }
+    }
+
     public void setup(final Window window) {
         InputConstants.setupKeyboardCallbacks(window, (window1, keysym, scancode, action, mods) -> {
             KeyEvent event = new KeyEvent(keysym, scancode, mods);
-            this.minecraft.execute(() -> this.keyPress(window1, action, event));
+            this.vfpStoreScreenEvent(() -> this.keyPress(window1, action, event));
         }, (window1, codepoint) -> {
             CharacterEvent event = new CharacterEvent(codepoint);
-            this.minecraft.execute(() -> this.charTyped(window1, event));
+            this.vfpStoreScreenEvent(() -> this.charTyped(window1, event));
         }, (window1, preeditSize, preeditPtr, blockCount, blockSizesPtr, focusedBlock, caret) -> {
             PreeditEvent event = PreeditEvent.createFromCallback(preeditSize, preeditPtr, blockCount, blockSizesPtr, focusedBlock, caret);
             this.minecraft.execute(() -> this.preeditCallback(window1, event));

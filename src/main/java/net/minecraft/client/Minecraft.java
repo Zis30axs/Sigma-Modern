@@ -80,7 +80,9 @@ import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.Hud;
+import com.viaversion.viafabricplus.injection.access.execute_inputs_sync.IMouseKeyboardHandlers;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.client.gui.components.DebugScreenOverlay;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.debug.DebugScreenEntries;
@@ -1963,11 +1965,29 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             this.missTime = 10000;
         }
 
-        if (this.gui.overlay() == null && this.gui.screen() == null) {
-            profiler.popPush("Keybindings");
-            this.handleKeybinds();
-            if (this.missTime > 0) {
-                this.missTime--;
+        // MODIFIED for porting: was VFP execute_inputs_sync MixinMinecraft#processInputQueues
+        // (@Inject at the Gui#screen call of this condition, sliced between the missTime store and the
+        // level tick). Upstream injects before the screen() read, so the drain only happens while no
+        // overlay is showing - the nesting below preserves that.
+        if (this.gui.overlay() == null) {
+            if (DebugSettings.INSTANCE.executeInputsSynchronously.isEnabled()) {
+                java.util.Queue<Runnable> inputEvents = ((IMouseKeyboardHandlers)this.mouseHandler).viaFabricPlus$getPendingScreenEvents();
+                while (!inputEvents.isEmpty()) {
+                    inputEvents.poll().run();
+                }
+
+                inputEvents = ((IMouseKeyboardHandlers)this.keyboardHandler).viaFabricPlus$getPendingScreenEvents();
+                while (!inputEvents.isEmpty()) {
+                    inputEvents.poll().run();
+                }
+            }
+
+            if (this.gui.screen() == null) {
+                profiler.popPush("Keybindings");
+                this.handleKeybinds();
+                if (this.missTime > 0) {
+                    this.missTime--;
+                }
             }
         }
 

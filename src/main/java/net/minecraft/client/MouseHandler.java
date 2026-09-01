@@ -36,7 +36,7 @@ import org.lwjgl.glfw.GLFWDropCallback;
 import org.slf4j.Logger;
 
 @OnlyIn(Dist.CLIENT)
-public class MouseHandler {
+public class MouseHandler implements com.viaversion.viafabricplus.injection.access.execute_inputs_sync.IMouseKeyboardHandlers {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final long DOUBLE_CLICK_THRESHOLD_MS = 250L;
     private final Minecraft minecraft;
@@ -255,11 +255,34 @@ public class MouseHandler {
         }
     }
 
+    // MODIFIED for porting: was VFP execute_inputs_sync MixinMouseHandler#viaFabricPlus$pendingScreenEvents
+    // (@Unique) plus the IMouseKeyboardHandlers implementation. For <= 1.12.2 targets, screen input
+    // events are queued instead of being posted to the client executor, so Minecraft#tick drains them
+    // at a fixed point of the tick and container interaction keeps its packet order.
+    private final java.util.Queue<Runnable> vfpPendingScreenEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    @Override
+    public java.util.Queue<Runnable> viaFabricPlus$getPendingScreenEvents() {
+        return this.vfpPendingScreenEvents;
+    }
+
+    // MODIFIED for porting: was VFP execute_inputs_sync MixinMouseHandler#storeEvent
+    // (@Redirect on Minecraft#execute in the setup callbacks)
+    private void vfpStoreScreenEvent(final Runnable runnable) {
+        if (this.minecraft.getConnection() != null
+            && this.minecraft.gui.screen() != null
+            && com.viaversion.viafabricplus.settings.impl.DebugSettings.INSTANCE.executeInputsSynchronously.isEnabled()) {
+            this.vfpPendingScreenEvents.offer(runnable);
+        } else {
+            this.minecraft.execute(runnable);
+        }
+    }
+
     public void setup(final Window window) {
         InputConstants.setupMouseCallbacks(
-            window, (window1, xpos, ypos) -> this.minecraft.execute(() -> this.onMove(window1, xpos, ypos)), (window1, button, action, mods) -> {
+            window, (window1, xpos, ypos) -> this.vfpStoreScreenEvent(() -> this.onMove(window1, xpos, ypos)), (window1, button, action, mods) -> {
                 MouseButtonInfo buttonInfo = new MouseButtonInfo(button, mods);
-                this.minecraft.execute(() -> this.onButton(window1, buttonInfo, action));
+                this.vfpStoreScreenEvent(() -> this.onButton(window1, buttonInfo, action));
             }, (window1, xoffset, yoffset) -> this.minecraft.execute(() -> this.onScroll(window1, xoffset, yoffset)), (window1, count, namesPtr) -> {
                 List<Path> names = new ArrayList<>(count);
                 int failedCount = 0;

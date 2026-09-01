@@ -84,6 +84,10 @@ public final class ViaFabricPlusPlatformLoader implements ViaPlatformLoader {
 
         providers.use(NettyPipelineProvider.class, new ViaFabricPlusNettyPipelineProvider());
 
+        // MODIFIED for porting: stands in for the ViaFabricPlus mixins that target ViaVersion classes,
+        // which cannot be inlined into a Minecraft source tree. See ViaFabricPlusProtocolPatches.
+        ViaFabricPlusProtocolPatches.apply();
+
         ViaFabricPlusImpl.LOADING_CYCLE.invoker().onLoadCycle(LoadingCycleCallback.LoadingCycle.POST_VIAVERSION_LOAD);
     }
 
