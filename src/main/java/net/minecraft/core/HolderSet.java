@@ -1,5 +1,7 @@
 package net.minecraft.core;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.google.common.annotations.VisibleForTesting;
 import com.mojang.datafixers.util.Either;
 import java.util.Collection;
@@ -180,6 +182,12 @@ public interface HolderSet<T> extends Iterable<Holder<T>> {
 
         @Override
         protected List<Holder<T>> contents() {
+            // MODIFIED for porting: was VFP networking/registry_validation
+            // MixinHolderSet_Named#preventNullableEntries (@Inject HEAD). <= 1.21 had no unbound entries.
+            if (this.contents == null && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+                this.bind(List.of());
+            }
+
             if (this.contents == null) {
                 throw new IllegalStateException("Trying to access unbound tag '" + this.key + "' from registry " + this.owner);
             } else {
@@ -189,6 +197,12 @@ public interface HolderSet<T> extends Iterable<Holder<T>> {
 
         @Override
         public boolean isBound() {
+            // MODIFIED for porting: was VFP networking/registry_validation MixinHolderSet_Named#alwaysBound
+            // (@Inject HEAD cancellable). The unbound state did not exist for <= 1.21.
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+                return true;
+            }
+
             return this.contents != null;
         }
 

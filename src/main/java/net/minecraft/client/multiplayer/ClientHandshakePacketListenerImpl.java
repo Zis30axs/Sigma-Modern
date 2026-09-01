@@ -26,6 +26,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.Screen;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.raphimc.vialegacy.protocol.release.r1_6_4tor1_7_2_5.storage.ProtocolMetadataStorage;
 import net.minecraft.network.Connection;
@@ -239,7 +241,13 @@ public class ClientHandshakePacketListenerImpl implements ClientLoginPacketListe
     @Override
     public void handleCompression(final ClientboundLoginCompressionPacket packet) {
         if (!this.connection.isMemoryConnection()) {
-            this.connection.setupCompression(packet.getCompressionThreshold(), false);
+            // MODIFIED for porting: was VFP networking/limitation
+            // MixinClientHandshakePacketListenerImpl#pre1_17_1CompressionBehaviour (@Redirect on
+            // setupCompression). <= 1.17 validated the decompressed size.
+            this.connection
+                .setupCompression(
+                    packet.getCompressionThreshold(), ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17)
+                );
         }
     }
 

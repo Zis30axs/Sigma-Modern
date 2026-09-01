@@ -182,7 +182,10 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
         // maps the removed container-acknowledgement (transaction) onto it and packs the window id into
         // bits 16-23 of the ping id. 1.16 vanilla only answered an acknowledgement for window 0 or for the
         // container that is currently open, so any other window id must not be answered here either.
-        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+        // The upstream mixin dereferences minecraft.player unguarded; this listener also serves the
+        // configuration phase, where there is no player yet, so a missing player falls through to the
+        // plain vanilla answer instead of throwing.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4) && this.minecraft.player != null) {
             final short inventoryId = (short)(packet.getId() >> 16 & 0xFF);
             if (inventoryId != 0 && inventoryId != this.minecraft.player.containerMenu.containerId) {
                 return;

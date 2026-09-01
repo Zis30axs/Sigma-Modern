@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer.resolver;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import com.mojang.logging.LogUtils;
 import java.util.Hashtable;
 import java.util.Optional;
@@ -35,6 +37,14 @@ public interface ServerRedirectHandler {
         }
 
         return originalAddress -> {
+            // MODIFIED for porting: was VFP networking/srv_resolving
+            // MixinServerRedirectHandler#disableSrvForPre1_3 (@Inject HEAD cancellable on the DNS SRV
+            // redirect lambda). SRV records predate 1.3, so anything older must connect to the literal
+            // address the user typed.
+            if (ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.r1_3_1tor1_3_2)) {
+                return Optional.empty();
+            }
+
             if (originalAddress.getPort() == 25565) {
                 try {
                     Attributes attributes = context.getAttributes("_minecraft._tcp." + originalAddress.getHost(), new String[]{"SRV"});

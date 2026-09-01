@@ -8,6 +8,8 @@ import com.mojang.serialization.DynamicOps;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.HolderOwner;
@@ -65,9 +67,17 @@ public class HolderSetCodec<E> implements Codec<HolderSet<E>> {
     }
 
     private static <E> DataResult<HolderSet<E>> lookupTag(final HolderGetter<E> registry, final TagKey<E> key) {
-        return (DataResult)registry.get(key)
+        DataResult<HolderSet<E>> result = (DataResult)registry.get(key)
             .map(DataResult::success)
             .orElseGet(() -> DataResult.error(() -> "Missing tag: '" + key.location() + "' in '" + key.registry().identifier() + "'"));
+        // MODIFIED for porting: was VFP networking/registry_validation MixinHolderSetCodec#workaroundValidation
+        // (@Inject RETURN cancellable). <= 1.21 servers reference tags that were never sent over the
+        // protocol; rather than validating at protocol level, the error becomes an empty holder set.
+        if (result.isError() && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            return DataResult.success((HolderSet<E>)HolderSet.empty());
+        }
+
+        return result;
     }
 
     public <T> DataResult<T> encode(final HolderSet<E> input, final DynamicOps<T> ops, final T prefix) {

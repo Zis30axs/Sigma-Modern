@@ -82,6 +82,11 @@ import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.Hud;
 import com.viaversion.viafabricplus.injection.access.execute_inputs_sync.IMouseKeyboardHandlers;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.protocols.v1_11_1to1_12.Protocol1_11_1To1_12;
+import com.viaversion.viaversion.protocols.v1_9_1to1_9_3.packet.ServerboundPackets1_9_3;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.client.gui.components.DebugScreenOverlay;
 import net.minecraft.client.gui.components.EditBox;
@@ -2115,6 +2120,17 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 this.player.sendOpenInventory();
             } else {
                 this.tutorial.onOpenInventory();
+                // MODIFIED for porting: was VFP networking/open_inventory_packet
+                // MixinMinecraft#sendOpenInventoryPacket (@Inject after Tutorial#onOpenInventory).
+                // <= 1.11.1 reported opening the inventory to the server for the achievement.
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+                    final PacketWrapper clientCommand = PacketWrapper.create(
+                        ServerboundPackets1_9_3.CLIENT_COMMAND, ProtocolTranslator.getPlayNetworkUserConnection()
+                    );
+                    clientCommand.write(Types.VAR_INT, 2); // Open Inventory Achievement
+                    clientCommand.scheduleSendToServer(Protocol1_11_1To1_12.class);
+                }
+
                 this.gui.setScreen(new InventoryScreen(this.player));
             }
         }
