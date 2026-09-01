@@ -150,11 +150,14 @@ public class ClientConfigurationPacketListenerImpl extends ClientCommonPacketLis
 
     @Override
     public void handleConfigurationFinished(final ClientboundFinishConfigurationPacket packet) {
-        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
-        // VFP 4.6.3 config-state guard: old protocols emulate configuration and may flush queued play packets here.
+        // MODIFIED for porting: was VFP config_state
+        // MixinClientConfigurationPacketListenerImpl#disableAutoRead (@Inject HEAD). Must stay above
+        // ensureRunningOnSameThread - see the twin in ClientPacketListener#handleConfigurationStart.
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
             this.connection.channel.config().setAutoRead(false);
         }
+
+        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         RegistryAccess.Frozen registries = this.runWithResources(
             knownPacksProvider -> this.registryDataCollector
                 .collectGameRegistries(knownPacksProvider, this.receivedRegistries, this.connection.isMemoryConnection())

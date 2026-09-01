@@ -1,5 +1,6 @@
 package net.minecraft.client;
 
+import com.viaversion.viafabricplus.features.world.item_picking.ItemPick1_21_3;
 import com.google.common.collect.ImmutableList;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.exceptions.AuthenticationException;
@@ -1798,6 +1799,15 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             return false;
         }
 
+        // MODIFIED for porting: was VFP swinging MixinMinecraft#fixSwingPacketOrder
+        // (@Inject at the first hitResult GETFIELD in startAttack). <= 1.8 sent the swing animation before
+        // the attack / start-destroy packet, so the swing is issued up front and the two later swing calls
+        // in this method are suppressed by the companion hook.
+        final boolean vfp$earlySwing = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8);
+        if (vfp$earlySwing) {
+            this.player.swing(InteractionHand.MAIN_HAND);
+        }
+
         if (this.hitResult == null) {
             LOGGER.error("Null returned as 'hitResult', this shouldn't happen!");
             if (this.gameMode.hasMissTime()) {
@@ -1832,7 +1842,12 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 PiercingWeapon piercingWeapon = heldItem.get(DataComponents.PIERCING_WEAPON);
                 if (piercingWeapon != null) {
                     this.gameMode.piercingAttack(piercingWeapon);
-                    this.player.swing(InteractionHand.MAIN_HAND);
+                    // MODIFIED for porting: was VFP swinging MixinMinecraft#fixSwingPacketOrder
+                    // (@WrapWithCondition, no ordinal, on every LocalPlayer#swing in startAttack)
+                    if (!vfp$earlySwing) {
+                        this.player.swing(InteractionHand.MAIN_HAND);
+                    }
+
                     return true;
                 }
 
@@ -1861,10 +1876,24 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                         this.player.resetAttackStrengthTicker();
                 }
 
-                this.player.swing(InteractionHand.MAIN_HAND);
+                // MODIFIED for porting: was VFP swinging MixinMinecraft#fixSwingPacketOrder
+                // (@WrapWithCondition, no ordinal, on every LocalPlayer#swing in startAttack)
+                if (!vfp$earlySwing) {
+                    this.player.swing(InteractionHand.MAIN_HAND);
+                }
+
                 return endAttack;
             }
         }
+    }
+
+    // MODIFIED for porting: was VFP swinging MixinMinecraft#disableSwing / #disableSwing2 (@Redirect body)
+    private InteractionResult.SwingSource vfpSwingSource(final InteractionResult.Success success) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            return InteractionResult.SwingSource.NONE;
+        }
+
+        return success.swingSource();
     }
 
     private void startUseItem() {
@@ -1897,7 +1926,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
                                 if (this.player.isWithinEntityInteractionRange(entity, 0.0)
                                     && this.gameMode.interact(this.player, entity, entityHit, hand) instanceof InteractionResult.Success success) {
-                                    if (success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+                                    // MODIFIED for porting: was VFP swinging MixinMinecraft#disableSwing
+                                    // (@Redirect on Success#swingSource ordinal 0 in startUseItem). <= 1.14.4
+                                    // did not swing for entity interaction. The BLOCK branch (ordinal 1) is
+                                    // deliberately left alone upstream and must keep swinging.
+                                    if (this.vfpSwingSource(success) == InteractionResult.SwingSource.CLIENT) {
                                         this.player.swing(hand);
                                     }
 
@@ -1926,7 +1959,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                     }
 
                     if (!heldItem.isEmpty() && this.gameMode.useItem(this.player, hand) instanceof InteractionResult.Success success) {
-                        if (success.swingSource() == InteractionResult.SwingSource.CLIENT) {
+                        // MODIFIED for porting: was VFP swinging MixinMinecraft#disableSwing2
+                        // (@Redirect on Success#swingSource ordinal 2 in startUseItem)
+                        if (this.vfpSwingSource(success) == InteractionResult.SwingSource.CLIENT) {
                             this.player.swing(hand);
                         }
 
@@ -2148,7 +2183,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
         while (this.options.keyDrop.consumeClick()) {
             if (!this.player.isSpectator() && this.player.drop(this.hasControlDown())) {
-                this.player.swing(InteractionHand.MAIN_HAND);
+                // MODIFIED for porting: was VFP swinging MixinMinecraft#disableSwing
+                // (@WrapWithCondition on LocalPlayer#swing in handleKeybinds). < 1.15 did not swing on drop.
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_15)) {
+                    this.player.swing(InteractionHand.MAIN_HAND);
+                }
             }
         }
 
@@ -2622,6 +2661,14 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     private void pickBlockOrEntity() {
         // Sigma hook: middle click - pick the block or entity being looked at.
         if (EventBus.call(new EventClick(EventClick.Button.MIDDLE)).isCancelled()) {
+            return;
+        }
+
+        // MODIFIED for porting: was VFP world/item_picking MixinMinecraft#pickItemClientside
+        // (@Inject HEAD cancellable). <= 1.21.2 had no server-side pick-item packet: the client resolved the
+        // stack itself and sent the legacy slot packet.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+            ItemPick1_21_3.doItemPick(this);
             return;
         }
 

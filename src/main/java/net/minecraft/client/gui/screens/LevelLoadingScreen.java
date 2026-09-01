@@ -1,6 +1,10 @@
 package net.minecraft.client.gui.screens;
 
+import net.minecraft.network.protocol.common.ServerboundKeepAlivePacket;
+import net.minecraft.core.BlockPos;
+import com.viaversion.viafabricplus.injection.access.networking.downloading_terrain.ILevelLoadingScreen;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
 import com.viaversion.viafabricplus.util.ChatUtil; // MODIFIED for porting: ViaFabricPlus
 import com.viaversion.viaversion.api.connection.UserConnection; // MODIFIED for porting: ViaFabricPlus
@@ -32,7 +36,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
 @OnlyIn(Dist.CLIENT)
-public class LevelLoadingScreen extends Screen {
+public class LevelLoadingScreen extends Screen implements ILevelLoadingScreen {
     private static final Component DOWNLOADING_TERRAIN_TEXT = Component.translatable("multiplayer.downloadingTerrain");
     private static final Component READY_TO_PLAY_TEXT = Component.translatable("narrator.ready_to_play");
     private static final long NARRATION_DELAY_MS = 2000L;
@@ -42,6 +46,13 @@ public class LevelLoadingScreen extends Screen {
     private long lastNarration = -1L;
     private LevelLoadingScreen.Reason reason;
     private @Nullable TextureAtlasSprite cachedNetherPortalSprite;
+    // MODIFIED for porting: was VFP networking/level_loading MixinLevelLoadingScreen @Unique state.
+    // <= 1.20.2 targets do not get a level-ready signal the modern LevelLoadTracker understands, so the
+    // legacy close path is driven from these four fields instead.
+    private final long vfpLoadStartTime = Util.getMillis();
+    private int vfpTickCounter;
+    private boolean vfpReady;
+    private boolean vfpCloseOnNextTick;
     private static final Object2IntMap<ChunkStatus> COLORS = Util.make(new Object2IntOpenHashMap<>(), map -> {
         map.defaultReturnValue(0);
         map.put(ChunkStatus.EMPTY, 5526612);
@@ -88,11 +99,78 @@ public class LevelLoadingScreen extends Screen {
 
     @Override
     public void tick() {
+        // MODIFIED for porting: was VFP networking/level_loading MixinLevelLoadingScreen#modifyCloseCondition
+        // (@Inject HEAD cancellable). Replaces the whole vanilla tick for <= 1.20.2 targets.
+        if (this.vfpLegacyTick()) {
+            return;
+        }
+
         super.tick();
         this.smoothedProgress = this.smoothedProgress + (this.loadTracker.serverProgress() - this.smoothedProgress) * 0.2F;
         if (this.loadTracker.isLevelReady()) {
             this.onClose();
         }
+    }
+
+    // MODIFIED for porting: was VFP networking/level_loading MixinLevelLoadingScreen#modifyCloseCondition body.
+    // Returns true when the vanilla tick must not run.
+    private boolean vfpLegacyTick() {
+        // Joining singleplayer resets the target version only once the integrated server starts, which is
+        // after this screen has already been opened and ticked; running the legacy path there NPEs on the
+        // missing network handler.
+        if (Minecraft.getInstance() != null && Minecraft.getInstance().isLocalServer()) {
+            return false;
+        }
+
+        if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2)) {
+            return false;
+        }
+
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18)) {
+            if (this.vfpReady) {
+                this.onClose();
+            }
+
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_1)) {
+                this.vfpTickCounter++;
+                if (this.vfpTickCounter % 20 == 0) {
+                    this.minecraft.getConnection().send(new ServerboundKeepAlivePacket(0));
+                }
+            }
+
+            return true;
+        }
+
+        if (System.currentTimeMillis() > this.vfpLoadStartTime + 30000L) {
+            this.onClose();
+            return true;
+        }
+
+        if (this.vfpCloseOnNextTick) {
+            if (this.minecraft.player == null) {
+                return true;
+            }
+
+            final BlockPos blockPos = this.minecraft.player.blockPosition();
+            final boolean isOutOfHeightLimit = this.minecraft.level != null && this.minecraft.level.isOutsideBuildHeight(blockPos.getY());
+            if (isOutOfHeightLimit
+                || this.minecraft.levelRenderer.isSectionCompiledAndVisible(blockPos)
+                || this.minecraft.player.isSpectator()
+                || !this.minecraft.player.isAlive()) {
+                this.onClose();
+            }
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_1)) {
+            this.vfpCloseOnNextTick = this.vfpReady || System.currentTimeMillis() > this.vfpLoadStartTime + 2000L;
+        } else {
+            this.vfpCloseOnNextTick = this.vfpReady;
+        }
+
+        return true;
+    }
+
+    @Override
+    public void viaFabricPlus$setReady() {
+        this.vfpReady = true;
     }
 
     @Override

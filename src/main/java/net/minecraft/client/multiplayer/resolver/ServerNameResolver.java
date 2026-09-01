@@ -1,5 +1,6 @@
 package net.minecraft.client.multiplayer.resolver;
 
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.google.common.annotations.VisibleForTesting;
@@ -24,6 +25,14 @@ public class ServerNameResolver {
     }
 
     public Optional<ResolvedServerAddress> resolveAddress(final ServerAddress address) {
+        // MODIFIED for porting: was VFP networking/srv_resolving MixinServerNameResolver#oldResolveBehaviour
+        // (@Inject HEAD cancellable). For <= 1.16.4 the SRV redirect is already applied in
+        // ServerAddress#parseString, so this method must resolve and nothing else - no blocked-server check
+        // and no second redirect lookup on the already-resolved address.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            return this.resolver.resolve(address);
+        }
+
         Optional<ResolvedServerAddress> resolvedAddress = this.resolver.resolve(address);
         if ((!resolvedAddress.isPresent() || this.addressCheck.isAllowed(resolvedAddress.get())) && this.addressCheck.isAllowed(address)) {
             Optional<ServerAddress> redirectedAddress = this.redirectHandler.lookupRedirect(address);

@@ -1059,11 +1059,16 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
     @Override
     public void handleConfigurationStart(final ClientboundStartConfigurationPacket packet) {
-        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
-        // MODIFIED for porting: was VFP config_state MixinClientPacketListener#disableAutoRead (@Inject HEAD)
+        // MODIFIED for porting: was VFP config_state MixinClientPacketListener#disableAutoRead (@Inject HEAD).
+        // This has to stay above ensureRunningOnSameThread: that call reschedules the packet and throws on
+        // the netty thread, so anything below it only runs one main-thread hop later - by which time the
+        // netty thread has already read further packets with auto-read still on, which is the exact race
+        // the hook exists to close.
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
             this.connection.channel.config().setAutoRead(false);
         }
+
+        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.minecraft.gui.chatListener().flushQueue();
         // MODIFIED for porting: was VFP dontSendChatAck (@WrapWithCondition >=1_20_5 sends)
         if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_5)) {
@@ -2870,8 +2875,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
     public void sendCommand(final String command) {
         SignableCommand<ClientSuggestionProvider> signableCommand = SignableCommand.of(this.commands.parse(command, this.suggestionsProvider));
-        // MODIFIED for porting: was VFP alwaysSignCommands (@Redirect List.isEmpty <=1_20_3 treats as signable)
-        if (!(ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3) && signableCommand.arguments().isEmpty())) {
+        // MODIFIED for porting: was VFP remove_signed_commands MixinClientPacketListener#alwaysSignCommands
+        // (@Redirect on List#isEmpty in sendCommand): the emptiness test becomes
+        // "newerThan(1.20.3) && isEmpty()", so every target <= 1.20.3 takes the signed branch regardless of
+        // whether the command has signable arguments.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_3) && signableCommand.arguments().isEmpty()) {
             this.send(new ServerboundChatCommandPacket(command));
         } else {
             Instant timeStamp = Instant.now();
@@ -2886,21 +2894,26 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     }
 
     public void sendUnattendedCommand(final String command, final @Nullable Screen screenAfterCommand) {
-        // MODIFIED for porting: was VFP run_command_action dontOpenConfirmationScreens + remove_signed_commands alwaysSignCommands
+        // MODIFIED for porting: two independent VFP hooks meet in this method and must not share a gate.
+        // run_command_action MixinClientPacketListener#dontOpenConfirmationScreens (@Redirect on
+        // verifyCommand) downgrades PARSE_ERRORS/PERMISSIONS_REQUIRED to NO_ISSUES for every target
+        // <= 1.21.5, while remove_signed_commands MixinClientPacketListener#alwaysSignCommands (@Redirect on
+        // send) switches to the signed command packet only for <= 1.20.3.
         ClientPacketListener.CommandCheckResult viaCheckResult = this.verifyCommand(command);
         final boolean vfp$legacySigning = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3);
-        if (vfp$legacySigning && (viaCheckResult == ClientPacketListener.CommandCheckResult.PARSE_ERRORS
-            || viaCheckResult == ClientPacketListener.CommandCheckResult.PERMISSIONS_REQUIRED)) {
+        final boolean vfp$skipConfirmation = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5);
+        if (vfp$skipConfirmation
+            && (viaCheckResult == ClientPacketListener.CommandCheckResult.PARSE_ERRORS
+                || viaCheckResult == ClientPacketListener.CommandCheckResult.PERMISSIONS_REQUIRED)) {
             viaCheckResult = ClientPacketListener.CommandCheckResult.NO_ISSUES;
         }
 
         switch (viaCheckResult) {
             case NO_ISSUES:
                 if (vfp$legacySigning) {
-                    final Instant viaTimeStamp = Instant.now();
-                    final long viaSalt = Crypt.SaltSupplier.getLong();
+                    // upstream writes salt 0L here, not a fresh random salt
                     final LastSeenMessagesTracker.Update viaUpdate = this.lastSeenMessages.generateAndApplyUpdate();
-                    this.send(new ServerboundChatCommandSignedPacket(command, viaTimeStamp, viaSalt, ArgumentSignatures.EMPTY, viaUpdate.update()));
+                    this.send(new ServerboundChatCommandSignedPacket(command, Instant.now(), 0L, ArgumentSignatures.EMPTY, viaUpdate.update()));
                 } else {
                     this.send(new ServerboundChatCommandPacket(command));
                 }

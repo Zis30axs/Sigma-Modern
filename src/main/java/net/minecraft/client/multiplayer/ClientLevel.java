@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer;
 
+import com.viaversion.viafabricplus.features.world.disable_sequencing.PendingUpdateManager1_18_2;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.world.Weather;
 import com.google.common.collect.ImmutableMap;
@@ -201,7 +203,10 @@ public class ClientLevel extends Level
     private final ClientChunkCache chunkSource;
     private final Deque<Runnable> lightUpdateQueue = Queues.newArrayDeque();
     private int serverSimulationDistance;
-    private final BlockStatePredictionHandler blockStatePredictionHandler = new BlockStatePredictionHandler();
+    // MODIFIED for porting: was VFP world/disable_sequencing MixinClientLevel#removePendingUpdateManager
+    // (@Mutable @Shadow @Final + @Inject <init> RETURN) - final dropped so the constructor can swap in the
+    // no-op handler.
+    private BlockStatePredictionHandler blockStatePredictionHandler = new BlockStatePredictionHandler();
     private final Set<BlockEntity> globallyRenderedBlockEntities = new ReferenceOpenHashSet<>();
     private final ClientExplosionTracker explosionTracker = new ClientExplosionTracker();
     private final WorldBorder worldBorder = new WorldBorder();
@@ -294,6 +299,12 @@ public class ClientLevel extends Level
         this.updateSkyBrightness();
         // MODIFIED for porting: sodium core.world.biome ClientLevelMixin#captureSeed (<init> RETURN)
         this.sodium$biomeZoomSeed = biomeZoomSeed;
+        // MODIFIED for porting: was VFP world/disable_sequencing MixinClientLevel#removePendingUpdateManager
+        // (@Inject <init> RETURN). With sequencing disabled the client must never predict block changes nor
+        // emit sequence ids that pre-1.19 servers cannot acknowledge.
+        if (DebugSettings.INSTANCE.disableSequencing.isEnabled()) {
+            this.blockStatePredictionHandler = new PendingUpdateManager1_18_2();
+        }
     }
 
     private EnvironmentAttributeSystem.Builder addEnvironmentAttributeLayers(final EnvironmentAttributeSystem.Builder environmentAttributes) {
