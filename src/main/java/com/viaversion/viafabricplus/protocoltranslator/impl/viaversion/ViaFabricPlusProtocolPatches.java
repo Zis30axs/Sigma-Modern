@@ -22,16 +22,26 @@
 package com.viaversion.viafabricplus.protocoltranslator.impl.viaversion;
 
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
+import com.viaversion.viafabricplus.features.classic.world_height.WorldHeightSupport;
 import com.viaversion.viafabricplus.features.limitation.max_chat_length.MaxChatLength;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.viaversion.viafabricplus.util.NotificationUtil;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.minecraft.GameMode;
 import com.viaversion.viaversion.api.protocol.ProtocolManager;
+import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
 import com.viaversion.viaversion.api.protocol.packet.State;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.api.minecraft.BlockChangeRecord;
+import com.viaversion.viaversion.api.minecraft.BlockChangeRecord1_16_2;
 import com.viaversion.viaversion.protocols.v1_10to1_11.Protocol1_10To1_11;
+import com.viaversion.viaversion.protocols.v1_15_2to1_16.packet.ClientboundPackets1_16;
+import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.Protocol1_16_1To1_16_2;
+import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.packet.ClientboundPackets1_16_2;
+import com.viaversion.viaversion.protocols.v1_16_4to1_17.Protocol1_16_4To1_17;
+import java.util.ArrayList;
+import java.util.List;
 import com.viaversion.viaversion.protocols.v1_19_3to1_19_4.packet.ServerboundPackets1_19_4;
 import com.viaversion.viaversion.protocols.v1_20_2to1_20_3.packet.ServerboundPackets1_20_3;
 import com.viaversion.viaversion.protocols.v1_20_3to1_20_5.Protocol1_20_3To1_20_5;
@@ -94,6 +104,83 @@ public final class ViaFabricPlusProtocolPatches {
         applyRemoveSignedCommands(protocolManager);
         applyConfigStatePacketQueue(protocolManager);
         applyMaxChatLength(protocolManager);
+        applyClassicWorldHeight(protocolManager);
+    }
+
+    // was VFP features/classic/world_height MixinEntityPacketRewriter1_17#handleClassicWorldHeight,
+    // MixinWorldPacketRewriter1_17#handleClassicWorldHeight and
+    // MixinWorldPacketRewriter1_16_2#modifySectionCountToSupportClassicWorldHeight.
+    //
+    // The first two wrap ViaVersion's own handler; WorldHeightSupport#handleJoinGame / #handleRespawn /
+    // #handleChunkData all run the parent handler FIRST and then patch the wrapper, which is exactly
+    // Protocol#appendClientbound semantics - so they are appended with a no-op parent, reusing the in-tree
+    // bodies verbatim.
+    //
+    // WorldHeightSupport#handleUpdateLight is NOT ported: it runs INSTEAD of ViaVersion's handler for
+    // classic and falls back to it otherwise, and the public Protocol interface exposes no way to read an
+    // already-registered handler. Overriding it would drop the 1.17 light handling for every non-classic
+    // target <= 1.16.4, which is worse than the classic-only lighting glitch. Recorded in VFP_AUDIT.md.
+    private static void applyClassicWorldHeight(final ProtocolManager protocolManager) {
+        final Protocol1_16_4To1_17 protocol1_16_4To1_17 = protocolManager.getProtocol(Protocol1_16_4To1_17.class);
+        if (protocol1_16_4To1_17 != null) {
+            protocol1_16_4To1_17.appendClientbound(ClientboundPackets1_16_2.LOGIN, WorldHeightSupport.handleJoinGame(wrapper -> {
+            }));
+            protocol1_16_4To1_17.appendClientbound(ClientboundPackets1_16_2.RESPAWN, WorldHeightSupport.handleRespawn(wrapper -> {
+            }));
+            protocol1_16_4To1_17.appendClientbound(ClientboundPackets1_16_2.LEVEL_CHUNK, WorldHeightSupport.handleChunkData(wrapper -> {
+            }));
+        } else {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_16_4To1_17 is not registered, classic world height will be clamped");
+        }
+
+        // The 1.16 -> 1.16.2 multi-block-change split is hardcoded to 16 chunk sections upstream; classic
+        // worlds can be taller, so the same handler is re-registered with a 64-section array. replaceClientbound
+        // keeps the existing mapped type (SECTION_BLOCKS_UPDATE), so packet ids stay correct.
+        final Protocol1_16_1To1_16_2 protocol1_16_1To1_16_2 = protocolManager.getProtocol(Protocol1_16_1To1_16_2.class);
+        if (protocol1_16_1To1_16_2 != null) {
+            protocol1_16_1To1_16_2.replaceClientbound(ClientboundPackets1_16.CHUNK_BLOCKS_UPDATE, wrapper -> {
+                wrapper.cancel();
+
+                final int chunkX = wrapper.read(Types.INT);
+                final int chunkZ = wrapper.read(Types.INT);
+
+                long chunkPosition = 0;
+                chunkPosition |= (chunkX & 0x3FFFFFL) << 42;
+                chunkPosition |= (chunkZ & 0x3FFFFFL) << 20;
+
+                @SuppressWarnings("unchecked")
+                final List<BlockChangeRecord>[] sectionRecords = new List[64];
+                for (final BlockChangeRecord record : wrapper.read(Types.BLOCK_CHANGE_ARRAY)) {
+                    final int chunkY = record.getY() >> 4;
+                    if (chunkY < 0 || chunkY >= sectionRecords.length) {
+                        continue;
+                    }
+
+                    List<BlockChangeRecord> list = sectionRecords[chunkY];
+                    if (list == null) {
+                        sectionRecords[chunkY] = list = new ArrayList<>();
+                    }
+
+                    final int blockId = protocol1_16_1To1_16_2.getMappingData().getNewBlockStateId(record.getBlockId());
+                    list.add(new BlockChangeRecord1_16_2(record.getSectionX(), record.getSectionY(), record.getSectionZ(), blockId));
+                }
+
+                for (int chunkY = 0; chunkY < sectionRecords.length; chunkY++) {
+                    final List<BlockChangeRecord> sectionRecord = sectionRecords[chunkY];
+                    if (sectionRecord == null) {
+                        continue;
+                    }
+
+                    final PacketWrapper newPacket = wrapper.create(ClientboundPackets1_16_2.SECTION_BLOCKS_UPDATE);
+                    newPacket.write(Types.LONG, chunkPosition | (chunkY & 0xFFFFFL));
+                    newPacket.write(Types.BOOLEAN, false); // Ignore light updates
+                    newPacket.write(Types.VAR_LONG_BLOCK_CHANGE_ARRAY, sectionRecord.toArray(new BlockChangeRecord[0]));
+                    newPacket.send(Protocol1_16_1To1_16_2.class);
+                }
+            });
+        } else {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_16_1To1_16_2 is not registered, tall classic worlds will drop block changes above y=255");
+        }
     }
 
     // was VFP features/limitation/max_chat_length/MixinProtocol1_10To1_11#changeMaxChatLength
