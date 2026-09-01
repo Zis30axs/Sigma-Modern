@@ -22,6 +22,7 @@
 package com.viaversion.viafabricplus.protocoltranslator.impl.viaversion;
 
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
+import com.viaversion.viafabricplus.features.limitation.max_chat_length.MaxChatLength;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.viaversion.viafabricplus.util.NotificationUtil;
 import com.viaversion.viaversion.api.Via;
@@ -30,6 +31,7 @@ import com.viaversion.viaversion.api.protocol.ProtocolManager;
 import com.viaversion.viaversion.api.protocol.packet.State;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.protocols.v1_10to1_11.Protocol1_10To1_11;
 import com.viaversion.viaversion.protocols.v1_19_3to1_19_4.packet.ServerboundPackets1_19_4;
 import com.viaversion.viaversion.protocols.v1_20_2to1_20_3.packet.ServerboundPackets1_20_3;
 import com.viaversion.viaversion.protocols.v1_20_3to1_20_5.Protocol1_20_3To1_20_5;
@@ -38,6 +40,7 @@ import com.viaversion.viaversion.protocols.v1_20to1_20_2.Protocol1_20To1_20_2;
 import com.viaversion.viaversion.protocols.v1_20to1_20_2.packet.ServerboundConfigurationPackets1_20_2;
 import com.viaversion.viaversion.protocols.v1_20to1_20_2.packet.ServerboundPackets1_20_2;
 import com.viaversion.viaversion.protocols.v1_20to1_20_2.storage.ProtocolStorables1_20_2;
+import com.viaversion.viaversion.protocols.v1_9_1to1_9_3.packet.ServerboundPackets1_9_3;
 import com.viaversion.viaversion.protocols.v1_21_4to1_21_5.packet.ServerboundPackets1_21_5;
 import com.viaversion.viaversion.protocols.v1_21_5to1_21_6.Protocol1_21_5To1_21_6;
 import com.viaversion.viaversion.protocols.v1_21_5to1_21_6.packet.ServerboundPackets1_21_6;
@@ -90,6 +93,28 @@ public final class ViaFabricPlusProtocolPatches {
 
         applyRemoveSignedCommands(protocolManager);
         applyConfigStatePacketQueue(protocolManager);
+        applyMaxChatLength(protocolManager);
+    }
+
+    // was VFP features/limitation/max_chat_length/MixinProtocol1_10To1_11#changeMaxChatLength
+    // (@ModifyConstant replacing the hardcoded 100 in the anonymous Protocol1_10To1_11$6 CHAT handler with
+    // MaxChatLength.getChatLength()). Re-registering that serverbound handler is public API and reproduces
+    // ViaVersion's own body (Protocol1_10To1_11.java:175-187) with the constant swapped, so classic servers
+    // advertising LONGER_MESSAGES and Bedrock targets are no longer cut at 100 characters.
+    private static void applyMaxChatLength(final ProtocolManager protocolManager) {
+        final Protocol1_10To1_11 protocol = protocolManager.getProtocol(Protocol1_10To1_11.class);
+        if (protocol == null) {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_10To1_11 is not registered, chat stays capped at 100 characters");
+            return;
+        }
+
+        protocol.registerServerbound(ServerboundPackets1_9_3.CHAT, wrapper -> {
+            final String message = wrapper.passthrough(Types.STRING);
+            final int limit = MaxChatLength.getChatLength();
+            if (message.length() > limit) {
+                wrapper.set(Types.STRING, 0, message.substring(0, limit).trim());
+            }
+        }, true);
     }
 
     // was VFP features/networking/remove_signed_commands/MixinProtocol1_20_3To1_20_5#removeCommandHandlers

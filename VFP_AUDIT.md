@@ -277,6 +277,36 @@
 
 ## 库目标 mixin（NOT_APPLICABLE）/ library-target mixins
 
+### 本轮已用公开 API 重建 / rebuilt this round
+
+`ViaFabricPlusProtocolPatches` 目前重建了 5 个：
+
+| 上游 mixin | 重建方式 | commit |
+|---|---|---|
+| `features/movement/packet/MixinEntityPacketRewriter1_21_2#dontCancelIdlePacket` | `Protocol1_21To1_21_2.appendServerbound(MOVE_PLAYER_STATUS_ONLY, w -> w.setCancelled(false))`；用 javap 确认 `lambda$registerPackets$14` 就是该 handler 且只含一个 `cancel()` | `cb9c21ab` |
+| `features/networking/packet_handling/MixinEntityPacketRewriter1_19_4#fixTeleportBehaviour` | `Protocol1_19_3To1_19_4.registerClientbound(TELEPORT_ENTITY, TELEPORT_ENTITY, passthrough, override)` | `cb9c21ab` |
+| `features/networking/remove_signed_commands/MixinProtocol1_20_3To1_20_5#removeCommandHandlers` | 5 个 `registerServerbound(..., override=true)` | `a712df3c` |
+| `features/networking/remove_signed_commands/MixinProtocol1_21_5To1_21_6#cancelInvalidPackets` | `registerServerbound(CHANGE_GAME_MODE, CHAT_COMMAND, handler, true)` | `a712df3c` |
+| `features/networking/config_state/MixinProtocol1_20To1_20_2#dontQueueConfigPackets` | 3 个 `registerServerbound(State.CONFIGURATION, id, -1, handler, true)`；排队分支逐字复现 Via 自己的 `queueServerboundPacket` | `a712df3c` |
+| `features/limitation/max_chat_length/MixinProtocol1_10To1_11#changeMaxChatLength` | `registerServerbound(ServerboundPackets1_9_3.CHAT, handler, true)`，把硬编码的 100 换成 `MaxChatLength.getChatLength()` | 本轮 |
+
+### 明确决定不重建的一个 / one deliberately left alone
+
+`features/networking/level_loading/MixinEntityPacketRewriter1_20_3#sendChunksSentGameEvent`（`@Overwrite` 成空方法）。
+它的效果是让 Via 不再在 LOGIN / RESPAWN / INITIALIZE_BORDER 时提前 send + cancel，也不再合成
+`GAME_EVENT 13`（LEVEL_CHUNKS_LOAD_START，1.20.3 才有的包，≤1.20.2 服务端不可能自己发）。
+
+公开 API 没有干净的等价物：`Protocol` 不暴露已注册 handler 的 getter，重建 LOGIN / RESPAWN 就得逐字段复制
+Via 的 `map(...)` 列表，写错一个字段就是协议错位。仅取消合成的 `GAME_EVENT 13` 也不行 —— 它是在
+`Protocol1_20_2To1_20_3` **之后**的链路上 `send` 的，要拦就得改后一个 protocol 的 GAME_EVENT handler 并在
+appended handler 里重读已消费的读指针，风险高于收益。
+
+**与本轮 `MixinLevelLoadingScreen` 移植的关系**（审计提示过这个顺序有风险）：本轮内联的
+`vfpLegacyTick()` 对 ≤1.20.2 目标**整体替换**了 vanilla 的 `tick()`，所以 vanilla 那条
+`loadTracker.isLevelReady() -> onClose()` 路径不再执行；合成出来的 `GAME_EVENT 13` 只会更新一个此路径不再读取的
+tracker，不会造成二次关屏。两处的组合结果是自洽的，但**这一条属于已知的行为偏差**，记录在此。
+
+
 这 48 个 mixin 的 `@Mixin` 目标是 jar 依赖里的类，源码树里没有文件可改，所以在“逐文件内联”的意义上是 NOT_APPLICABLE。**但其中一部分仍有真实行为缺口。**凡是能通过公开 API 在 bootstrap 阶段重建的，都在这里注明；本轮已重建两个（见 `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ViaFabricPlusProtocolPatches.java`，由 `ViaFabricPlusPlatformLoader#load()` 在 `ProtocolManager#registerProtocols` 之后调用）。
 
 | 上游 mixin | 目标类 | 优先级 | 备注 |
