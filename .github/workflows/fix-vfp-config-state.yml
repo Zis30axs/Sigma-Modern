@@ -1,0 +1,116 @@
+name: Fix VFP Config State Race
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fix-vfp-config-state.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vfp-config-state-fix
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Port missing ViaFabricPlus config-state guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match in {path}, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          client_config = 'src/main/java/net/minecraft/client/multiplayer/ClientConfigurationPacketListenerImpl.java'
+          replace_once(
+              client_config,
+              'package net.minecraft.client.multiplayer;\n\n',
+              'package net.minecraft.client.multiplayer;\n\nimport com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;\nimport com.viaversion.viaversion.api.protocol.version.ProtocolVersion;\n',
+              'ClientConfiguration VFP imports'
+          )
+          replace_once(
+              client_config,
+              '    public void handleConfigurationFinished(final ClientboundFinishConfigurationPacket packet) {\n        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());\n',
+              '    public void handleConfigurationFinished(final ClientboundFinishConfigurationPacket packet) {\n        PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());\n        // VFP 4.6.3 config-state guard: old protocols emulate configuration and may flush queued play packets here.\n        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {\n            this.connection.channel.config().setAutoRead(false);\n        }\n',
+              'ClientConfiguration disable autoRead'
+          )
+          replace_once(
+              client_config,
+              '            }));\n    }\n\n    private static RegistryAccess.Frozen filterRegistries',
+              '            }));\n        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {\n            this.connection.channel.config().setAutoRead(true);\n        }\n    }\n\n    private static RegistryAccess.Frozen filterRegistries',
+              'ClientConfiguration enable autoRead'
+          )
+
+          unconfigured = 'src/main/java/net/minecraft/network/UnconfiguredPipelineHandler.java'
+          replace_once(
+              unconfigured,
+              'package net.minecraft.network;\n\n',
+              'package net.minecraft.network;\n\nimport com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;\nimport com.viaversion.viaversion.api.protocol.version.ProtocolVersion;\n',
+              'UnconfiguredPipeline VFP imports'
+          )
+          replace_once(
+              unconfigured,
+              '            ctx.pipeline().replace(ctx.name(), "decoder", newHandler);\n            ctx.channel().config().setAutoRead(true);\n',
+              '            ctx.pipeline().replace(ctx.name(), "decoder", newHandler);\n            // VFP 4.6.3 keeps autoRead under listener control for <=1.20.3 config emulation.\n            if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {\n                ctx.channel().config().setAutoRead(true);\n            }\n',
+              'UnconfiguredPipeline autoRead guard'
+          )
+
+          swap = 'src/main/java/net/minecraft/network/ProtocolSwapHandler.java'
+          replace_once(
+              swap,
+              'package net.minecraft.network;\n\n',
+              'package net.minecraft.network;\n\nimport com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;\nimport com.viaversion.viaversion.api.protocol.version.ProtocolVersion;\n',
+              'ProtocolSwap VFP imports'
+          )
+          replace_once(
+              swap,
+              '        if (packet.isTerminal()) {\n            ctx.channel().config().setAutoRead(false);\n            ctx.pipeline().addBefore(ctx.name(), "inbound_config", new UnconfiguredPipelineHandler.Inbound());\n',
+              '        if (packet.isTerminal()) {\n            // VFP 4.6.3 brackets old emulated configuration transitions in the packet listeners instead.\n            if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {\n                ctx.channel().config().setAutoRead(false);\n            }\n            ctx.pipeline().addBefore(ctx.name(), "inbound_config", new UnconfiguredPipelineHandler.Inbound());\n',
+              'ProtocolSwap autoRead guard'
+          )
+          PY
+
+      - name: Check diff
+        run: git diff --check
+
+      - name: Build client
+        run: mvn -B -DskipTests package dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/dependency
+
+      - name: Commit validated fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-vfp-config-state.yml
+          git add \
+            src/main/java/net/minecraft/client/multiplayer/ClientConfigurationPacketListenerImpl.java \
+            src/main/java/net/minecraft/network/UnconfiguredPipelineHandler.java \
+            src/main/java/net/minecraft/network/ProtocolSwapHandler.java
+          git diff --cached --check
+          git commit -m "Fix VFP legacy config-state protocol race"
+          git push origin HEAD:main
