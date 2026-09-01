@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.authlib.GameProfile;
 import com.mojang.logging.LogUtils;
 import java.util.List;
@@ -149,6 +151,10 @@ public class ClientConfigurationPacketListenerImpl extends ClientCommonPacketLis
     @Override
     public void handleConfigurationFinished(final ClientboundFinishConfigurationPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // VFP 4.6.3 config-state guard: old protocols emulate configuration and may flush queued play packets here.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+            this.connection.channel.config().setAutoRead(false);
+        }
         RegistryAccess.Frozen registries = this.runWithResources(
             knownPacksProvider -> this.registryDataCollector
                 .collectGameRegistries(knownPacksProvider, this.receivedRegistries, this.connection.isMemoryConnection())
@@ -190,6 +196,9 @@ public class ClientConfigurationPacketListenerImpl extends ClientCommonPacketLis
                     return true;
                 }
             }));
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+            this.connection.channel.config().setAutoRead(true);
+        }
     }
 
     private static RegistryAccess.Frozen filterRegistries(final RegistryAccess.Frozen original, final Stream<ResourceKey<? extends Registry<?>>> keysToInclude) {
