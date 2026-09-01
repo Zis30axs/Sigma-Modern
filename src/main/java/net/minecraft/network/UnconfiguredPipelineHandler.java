@@ -1,5 +1,7 @@
 package net.minecraft.network;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -20,7 +22,10 @@ public class UnconfiguredPipelineHandler {
     private static UnconfiguredPipelineHandler.InboundConfigurationTask setupInboundHandler(final ChannelInboundHandler newHandler) {
         return ctx -> {
             ctx.pipeline().replace(ctx.name(), "decoder", newHandler);
-            ctx.channel().config().setAutoRead(true);
+            // VFP 4.6.3 keeps autoRead under listener control for <=1.20.3 config emulation.
+            if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
+                ctx.channel().config().setAutoRead(true);
+            }
         };
     }
 
