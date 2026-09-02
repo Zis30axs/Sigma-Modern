@@ -1,5 +1,8 @@
 package net.minecraft.world.item;
 
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
+import net.minecraft.tags.ItemTags;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import com.mojang.logging.LogUtils;
@@ -190,14 +193,22 @@ public class Item implements ItemLike, FeatureElement, net.irisshaders.iris.api.
 
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
-        Consumable consumable = stack.get(DataComponents.CONSUMABLE);
+        // MODIFIED for porting: was VFP item/sword_blocking MixinBlockItemPacketRewriter1_21_X#changeSwordFixVersionRange
+        // (@Redirect narrowing the version test in ViaVersion's appendItemDataFixComponents). ViaVersion adds
+        // CONSUMABLE and BLOCKS_ATTACKS to the five legacy sword ids for every target <= 1.8, which also
+        // catches classic / alpha / pre-beta-1.8 servers that never had sword blocking. Upstream narrows the
+        // fix to b1_8tob1_8_1..1.8 inside the rewriter; that call site is jar-internal here, so the two
+        // synthesized components are ignored on a sword instead, at the one place the client acts on them.
+        final boolean vfpSuppressSwordBlocking = stack.is(ItemTags.SWORDS)
+            && ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.b1_8tob1_8_1);
+        Consumable consumable = vfpSuppressSwordBlocking ? null : stack.get(DataComponents.CONSUMABLE);
         if (consumable != null) {
             return consumable.startConsuming(player, stack, hand);
         } else {
             Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
             if (equippable != null && equippable.swappable()) {
                 return equippable.swapWithEquipmentSlot(stack, player);
-            } else if (stack.has(DataComponents.BLOCKS_ATTACKS)) {
+            } else if (!vfpSuppressSwordBlocking && stack.has(DataComponents.BLOCKS_ATTACKS)) {
                 player.startUsingItem(hand);
                 return InteractionResult.CONSUME;
             } else {
@@ -299,10 +310,14 @@ public class Item implements ItemLike, FeatureElement, net.irisshaders.iris.api.
     }
 
     public ItemUseAnimation getUseAnimation(final ItemStack itemStack) {
-        Consumable consumable = itemStack.get(DataComponents.CONSUMABLE);
+        // MODIFIED for porting: same sword_blocking gate as in use() - without it the block animation still
+        // plays for the suppressed versions.
+        final boolean vfpSuppressSwordBlocking = itemStack.is(ItemTags.SWORDS)
+            && ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.b1_8tob1_8_1);
+        Consumable consumable = vfpSuppressSwordBlocking ? null : itemStack.get(DataComponents.CONSUMABLE);
         if (consumable != null) {
             return consumable.animation();
-        } else if (itemStack.has(DataComponents.BLOCKS_ATTACKS)) {
+        } else if (!vfpSuppressSwordBlocking && itemStack.has(DataComponents.BLOCKS_ATTACKS)) {
             return ItemUseAnimation.BLOCK;
         } else {
             return itemStack.has(DataComponents.KINETIC_WEAPON) ? ItemUseAnimation.SPEAR : ItemUseAnimation.NONE;

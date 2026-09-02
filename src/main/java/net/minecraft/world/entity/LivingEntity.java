@@ -186,6 +186,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     protected static final int LIVING_ENTITY_FLAG_OFF_HAND = 2;
     protected static final int LIVING_ENTITY_FLAG_SPIN_ATTACK = 4;
     protected static final EntityDataAccessor<Byte> DATA_LIVING_ENTITY_FLAGS = SynchedEntityData.defineId(LivingEntity.class, EntityDataSerializers.BYTE);
+
+    // MODIFIED for porting: exposes the living-entity-flags data id for VFP entity/metadata
+    // MixinEntityPacketRewriter1_9#preventMetadataForClientPlayer, which is applied in
+    // ClientPacketListener#handleSetEntityData because its ViaVersion-side injection point is jar-internal.
+    public static int vfpLivingEntityFlagsId() {
+        return DATA_LIVING_ENTITY_FLAGS.id();
+    }
     private static final EntityDataAccessor<Float> DATA_HEALTH_ID = SynchedEntityData.defineId(LivingEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<List<ParticleOptions>> DATA_EFFECT_PARTICLES = SynchedEntityData.defineId(
         LivingEntity.class, EntityDataSerializers.PARTICLES

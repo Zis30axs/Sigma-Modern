@@ -700,7 +700,18 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         Entity entity = this.level.getEntity(packet.id());
         if (entity != null) {
-            entity.getEntityData().assignValues(packet.packedItems());
+            // MODIFIED for porting: was VFP entity/metadata MixinEntityPacketRewriter1_9#preventMetadataForClientPlayer
+            // (@Inject cancellable at the PLAYER type test in ViaVersion's handleEntityData). ViaVersion derives
+            // the 1.9 hand-active flag from the 1.8 status byte; upstream drops that derived entry for the
+            // tracked client entity so a <= 1.8 server cannot overwrite the local player's own item-use and
+            // blocking state. That rewriter is jar-internal here, so the derived living-entity-flags entry is
+            // dropped on arrival instead - same effect, one step later in the same packet.
+            List<SynchedEntityData.DataValue<?>> packedItems = packet.packedItems();
+            if (entity == this.minecraft.player && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                packedItems = packedItems.stream().filter(value -> value.id() != LivingEntity.vfpLivingEntityFlagsId()).toList();
+            }
+
+            entity.getEntityData().assignValues(packedItems);
         }
     }
 
