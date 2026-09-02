@@ -21,6 +21,7 @@
 
 package com.viaversion.viafabricplus.protocoltranslator;
 
+import com.viaversion.viaversion.api.data.entity.EntityTracker;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -251,6 +252,17 @@ public final class ProtocolTranslator {
                 pipeline.add(pair.protocol());
                 pair.protocol().init(user);
             }
+        }
+
+        // MODIFIED for porting: part of VFP interaction/container_clicking MixinEntityTrackerBase#canInstaBuild
+        // (@Overwrite returning true unconditionally). The live-connection half is installed in
+        // ContainerAndLevelLoadingPatches from the clientbound LOGIN/RESPAWN/GAME_EVENT/PLAYER_ABILITIES
+        // handlers, but a dummy connection never processes any of those, so its trackers would keep
+        // instaBuild = false and ViaVersion would cancel the serverbound SET_CREATIVE_MODE_SLOT that
+        // ItemTranslator#mcToVia sends through this pipeline - breaking item translation for every target
+        // below 26.2. Set it here for the same reason the overwrite exists.
+        for (final EntityTracker tracker : user.getEntityTrackers()) {
+            tracker.setInstaBuild(true);
         }
 
         final ProtocolInfo info = user.getProtocolInfo();

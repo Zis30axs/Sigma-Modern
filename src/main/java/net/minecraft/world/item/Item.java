@@ -325,6 +325,13 @@ public class Item implements ItemLike, FeatureElement, net.irisshaders.iris.api.
     }
 
     public int getUseDuration(final ItemStack itemStack, final LivingEntity user) {
+        // MODIFIED for porting: same sword_blocking gate as use()/getUseAnimation. Currently unreachable
+        // because use() already refuses to start the action, but leaving the duration at 72000 for a version
+        // that has no sword blocking would go live the moment anything starts the use action another way.
+        if (itemStack.is(ItemTags.SWORDS) && ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.b1_8tob1_8_1)) {
+            return 0;
+        }
+
         Consumable consumable = itemStack.get(DataComponents.CONSUMABLE);
         if (consumable != null) {
             return consumable.consumeTicks();

@@ -126,6 +126,28 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
         this.receiving = receiving;
     }
 
+    // MODIFIED for porting: was VFP core.integration MixinConnection#userEventTriggered (merged override of
+    // SimpleChannelInboundHandler#userEventTriggered). Krypton's mixins reorder parts of the network pipeline
+    // and expose this event instead of being made compatible, so the compression handlers have to be put back
+    // in order when it fires. The event class is matched by name because Krypton is not on this classpath at
+    // all - which also means nothing can fire it here today; the branch exists so the behaviour is present if
+    // it ever can.
+    @Override
+    public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+        if (evt.getClass().getName().equals("me.steinborn.krypton.mod.shared.misc.KryptonPipelineEvent")
+            && "COMPRESSION_ENABLED".equals(evt.toString())) {
+            ViaChannelInitializer.reorderPipeline(ctx.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
+            ViaFabricPlusImpl.INSTANCE
+                .getLogger()
+                .warn(
+                    "ViaFabricPlus has detected that the Krypton mod is installed. Please note that Krypton is mostly snake oil on the client side, and it is not recommended to use it."
+                );
+            return;
+        }
+
+        super.userEventTriggered(ctx, evt);
+    }
+
     // MODIFIED for porting: was VFP bedrock MixinConnection#channelRegistered (merged override of
     // SimpleChannelInboundHandler#channelRegistered). RakNet and NetherNet channels never fire channelActive on
     // their own, so on a Bedrock target it is invoked manually as soon as the channel is registered.

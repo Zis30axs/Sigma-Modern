@@ -1060,14 +1060,24 @@ public final class ItemStack
     );
 
     // MODIFIED for porting: was VFP item/tooltip MixinItemStack#hideAdditionalTooltip (@WrapWithCondition body)
+    // plus the read half of item/tooltip MixinComponentRewriter1_21_5.
+    //
+    // Upstream's write hook cannot be reproduced (ComponentRewriter1_21_5 is final and the flag is consumed
+    // inside handleShowItem before any packet handler sees it), so the signal ViaVersion writes itself is read
+    // instead: handleShowItem turns hide_additional_tooltip into exactly the 17 keys of
+    // BlockItemPacketRewriter1_21_5.HIDE_ADDITIONAL_KEYS, listed one-for-one above, and emits them as
+    // tooltip_display.hiddenComponents.
+    //
+    // TWO DELIBERATE DIVERGENCES, both toward what a native 1.21.4 client renders:
+    //  - Upstream's @WrapOperation writes its backup tag whenever the key is "hide_additional_tooltip",
+    //    without checking whether the server actually set the component, so it suppresses the additional
+    //    tooltip for EVERY chat-hover item on a <= 1.21.4 target. This fires only when the flag was really set.
+    //  - Upstream only ever sees chat-hover items, because nothing writes that backup tag for a real item.
+    //    This also fires for inventory, equipment and trade items, whose hiddenComponents ViaVersion fills
+    //    from the same 17-key list. Pre-1.21.5 has no way for a server to hide those 17 individually, so the
+    //    set can only mean "hide_additional_tooltip was set" and cannot misfire.
     private boolean vfpShowAdditionalTooltip(final TooltipDisplay display) {
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
-            final CompoundTag tag = ItemUtil.getTagOrNull(this);
-            final CompoundTag backup = tag == null ? null : tag.getCompoundOrEmpty(ItemUtil.vvNbtName(Protocol1_21_4To1_21_5.class, "backup"));
-            if (backup != null && backup.contains("hide_additional_tooltip")) {
-                return false;
-            }
-
             return !display.hiddenComponents().containsAll(VFP_HIDE_ADDITIONAL_TOOLTIP_COMPONENTS);
         } else {
             return true;

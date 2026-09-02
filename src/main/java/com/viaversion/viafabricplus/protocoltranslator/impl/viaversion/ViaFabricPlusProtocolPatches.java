@@ -170,13 +170,26 @@ public final class ViaFabricPlusProtocolPatches {
 
         // The remaining library-target rebuilds live in their own classes, grouped by upstream feature, to
         // keep this file reviewable. They all run behind the mapping barrier above.
-        ContainerAndLevelLoadingPatches.apply();
-        EntityAttributePatches.apply();
-        ItemAttackDamagePatches.apply();
-        LegacyItemAndRecipePatches.apply();
-        Protocol1_12_2To1_13Patches.apply();
-        ClassicCpeExtensionPatches.apply();
-        LibraryFieldAccessPatches.apply();
+        //
+        // Each group is isolated: a replace*/register* call throws if the protocol it targets failed to load
+        // its mapping data, and apply() runs inside a CompletableFuture.runAsync that swallows the exception,
+        // so one bad group would silently skip every group after it plus the rest of Via's bootstrap. Log and
+        // continue instead.
+        applyGroup("ContainerAndLevelLoadingPatches", ContainerAndLevelLoadingPatches::apply);
+        applyGroup("EntityAttributePatches", EntityAttributePatches::apply);
+        applyGroup("ItemAttackDamagePatches", ItemAttackDamagePatches::apply);
+        applyGroup("LegacyItemAndRecipePatches", LegacyItemAndRecipePatches::apply);
+        applyGroup("Protocol1_12_2To1_13Patches", Protocol1_12_2To1_13Patches::apply);
+        applyGroup("ClassicCpeExtensionPatches", ClassicCpeExtensionPatches::apply);
+        applyGroup("LibraryFieldAccessPatches", LibraryFieldAccessPatches::apply);
+    }
+
+    private static void applyGroup(final String name, final Runnable group) {
+        try {
+            group.run();
+        } catch (final Throwable t) {
+            ViaFabricPlusImpl.INSTANCE.getLogger().error("Failed to apply ViaFabricPlus protocol patches from {}", name, t);
+        }
     }
 
     // The three ViaVersion-side producers of ViaFabricPlus' sync-task custom payload. Without them the
