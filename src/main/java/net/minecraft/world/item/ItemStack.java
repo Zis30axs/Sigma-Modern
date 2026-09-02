@@ -934,7 +934,7 @@ public final class ItemStack
         // MODIFIED for porting: was VFP item/tooltip MixinItemStack#hideAdditionalTooltip (@WrapWithCondition on
         // Item#appendHoverText). <= 1.21.4 only: ViaVersion stashes the 1.21.5 tooltip_display flags in a backup
         // tag, and hide_additional_tooltip there suppresses this line.
-        if (this.vfpShowAdditionalTooltip()) {
+        if (this.vfpShowAdditionalTooltip(display)) {
             this.getItem().appendHoverText(this, context, display, builder, tooltipFlag);
         }
 
@@ -1015,12 +1015,60 @@ public final class ItemStack
         }
     }
 
+    // MODIFIED for porting: was VFP item/tooltip MixinComponentRewriter1_21_5#storeBackupTag (@WrapOperation on
+    // the TagUtil#removeNamespaced(tag, "hide_additional_tooltip") call in ComponentRewriter1_21_5
+    // #handleShowItem). <= 1.21.4 only, ungated upstream inside that rewriter. Upstream stashes the flag in the
+    // hover item's custom_data right before ViaVersion drops it, so vfpShowAdditionalTooltip can read it back;
+    // that write side is unreachable here, because ComponentRewriter1_21_5 is final, its instance is a private
+    // final field of Protocol1_21_4To1_21_5 with only a getter, and the flag is destroyed inside the rewriter
+    // before any packet handler could observe it.
+    //
+    // Equivalent signal: the same ComponentRewriter1_21_5#handleShowItem turns that flag into
+    // tooltip_display.hidden_components listing exactly BlockItemPacketRewriter1_21_5.HIDE_ADDITIONAL_KEYS -
+    // the 17 components below, written as plain identifiers. On a <= 1.21.4 target nothing else can put them
+    // there: the only other source is a per-component show_in_tooltip = false, which only covers unbreakable,
+    // can_place_on, can_break, dyed_color, attribute_modifiers, trim, enchantments, stored_enchantments and
+    // jukebox_playable - a disjoint set. So "all 17 hidden" holds exactly when the server sent
+    // hide_additional_tooltip. ViaVersion hides the 17 components' own tooltip lines itself; the item's
+    // Item#appendHoverText, which 1.21.5+ has no component for, is what still needs suppressing here.
+    //
+    // Real inventory items reach the same state through BlockItemPacketRewriter1_21_5#updateItemData, which
+    // fills hidden_components from the same HIDE_ADDITIONAL_KEYS list (as mapped ids, kept correct through
+    // every later protocol by TooltipDisplay#rewrite) plus the same disjoint show_in_tooltip set. Upstream
+    // does not cover them, because nothing writes the backup tag for a real item - StructuredItemRewriter
+    // #backupInconvertibleData is empty and no shipped protocol overrides it - so upstream's reader only ever
+    // fires for chat-hover items. Firing here too is a strict superset that matches what a native 1.21.4
+    // client renders; pre-1.21.5 has no way for a server to hide those 17 individually, so it cannot misfire.
+    private static final List<DataComponentType<?>> VFP_HIDE_ADDITIONAL_TOOLTIP_COMPONENTS = List.of(
+        DataComponents.BANNER_PATTERNS,
+        DataComponents.BEES,
+        DataComponents.BLOCK_ENTITY_DATA,
+        DataComponents.BLOCK_STATE,
+        DataComponents.BUNDLE_CONTENTS,
+        DataComponents.CHARGED_PROJECTILES,
+        DataComponents.CONTAINER,
+        DataComponents.CONTAINER_LOOT,
+        DataComponents.FIREWORK_EXPLOSION,
+        DataComponents.FIREWORKS,
+        DataComponents.INSTRUMENT,
+        DataComponents.MAP_ID,
+        DataComponents.PAINTING_VARIANT,
+        DataComponents.POT_DECORATIONS,
+        DataComponents.POTION_CONTENTS,
+        DataComponents.TROPICAL_FISH_PATTERN,
+        DataComponents.WRITTEN_BOOK_CONTENT
+    );
+
     // MODIFIED for porting: was VFP item/tooltip MixinItemStack#hideAdditionalTooltip (@WrapWithCondition body)
-    private boolean vfpShowAdditionalTooltip() {
+    private boolean vfpShowAdditionalTooltip(final TooltipDisplay display) {
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
             final CompoundTag tag = ItemUtil.getTagOrNull(this);
             final CompoundTag backup = tag == null ? null : tag.getCompoundOrEmpty(ItemUtil.vvNbtName(Protocol1_21_4To1_21_5.class, "backup"));
-            return backup == null || !backup.contains("hide_additional_tooltip");
+            if (backup != null && backup.contains("hide_additional_tooltip")) {
+                return false;
+            }
+
+            return !display.hiddenComponents().containsAll(VFP_HIDE_ADDITIONAL_TOOLTIP_COMPONENTS);
         } else {
             return true;
         }

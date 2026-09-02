@@ -21,26 +21,21 @@
 
 package com.viaversion.viafabricplus.protocoltranslator.impl.platform;
 
-import com.viaversion.viaversion.api.Via;
 import java.io.File;
-import net.raphimc.vialegacy.ViaLegacyPlatformImpl;
+import net.raphimc.viabedrock.ViaBedrockPlatformImpl;
 
-public final class ViaFabricPlusViaLegacyPlatform extends ViaLegacyPlatformImpl {
+/**
+ * MODIFIED for porting: carries {@link ViaFabricPlusViaBedrockConfig} into ViaBedrock. ViaBedrockPlatformImpl's
+ * constructor calls {@code this.init(new File(getDataFolder(), "viabedrock.yml"))}, and that default method is
+ * what builds the stock config - so overriding it is the supported way to substitute one. The logger is already
+ * assigned by the time the super constructor gets here, and this class holds no state of its own, so being
+ * called from the super constructor is safe.
+ */
+public final class ViaFabricPlusViaBedrockPlatform extends ViaBedrockPlatformImpl {
 
-    @Override
-    public String getCpeAppName() {
-        return Via.getPlatform().getPlatformName() + " " + Via.getPlatform().getPlatformVersion();
-    }
-
-    // MODIFIED for porting: carries ViaFabricPlusViaLegacyConfig into ViaLegacy, standing in for the
-    // ViaFabricPlus mixin on the jar class net.raphimc.vialegacy.ViaLegacyConfig. ViaLegacyPlatformImpl's
-    // constructor calls this.init(new File(getDataFolder(), "vialegacy.yml")), and that default method is what
-    // builds the stock config - so overriding it is the supported way to substitute one. The logger is already
-    // assigned by the time the super constructor gets here, and this class holds no state of its own, so being
-    // called from the super constructor is safe.
     @Override
     public void init(final File configFile) {
-        this.init(new ViaFabricPlusViaLegacyConfig(configFile, this.getLogger()));
+        this.init(new ViaFabricPlusViaBedrockConfig(configFile, this.getLogger()));
     }
 
 }

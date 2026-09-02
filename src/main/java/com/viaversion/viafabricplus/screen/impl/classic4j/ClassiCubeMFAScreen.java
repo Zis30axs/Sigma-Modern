@@ -70,7 +70,10 @@ public final class ClassiCubeMFAScreen extends VFPScreen {
 
                 @Override
                 public void handleException(Throwable throwable) {
-                    setupSubtitle(Component.nullToEmpty(throwable.getMessage()));
+                    // was VFP compat/classic4j/MixinCCAuthenticationResponse#mapTranslations (@Redirect on the
+                    // CCError.description GETFIELD in CCAuthenticationResponse#getErrorDisplay) - the second of the
+                    // two LoginProcessHandler#handleException implementations that message reaches.
+                    setupSubtitle(Component.nullToEmpty(ClassiCubeErrorTranslations.translate(throwable.getMessage())));
                 }
             });
         }).pos(width / 2 - 75, mfaField.getY() + (20 * 4) + 5).size(150, 20).build());

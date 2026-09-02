@@ -60,8 +60,8 @@ public final class CPEAdditions {
         EXTENDED_CLASSIC_ITEMS.add(Items.JUKEBOX);
         EXTENDED_CLASSIC_ITEMS.add(Items.STONE_BRICKS);
 
-        // MODIFIED for porting: ENV_WEATHER_TYPE disabled (needs library mixin; loaderless TODO)
-        // EXT_WEATHER_TYPE = createNewPacket(...);
+        // MODIFIED for porting: ENV_WEATHER_TYPE must be set up after ViaLegacy has initialised its protocols, so
+        // protocoltranslator.impl.viaversion.ClassicCpeExtensionPatches does it instead of this method.
     }
 
     public static boolean isSnowing() {

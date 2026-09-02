@@ -30,6 +30,7 @@ import com.viaversion.viabackwards.ViaBackwardsPlatformImpl;
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
 import com.viaversion.viafabricplus.protocoltranslator.impl.command.ViaFabricPlusCommandHandler;
+import com.viaversion.viafabricplus.protocoltranslator.impl.platform.ViaFabricPlusViaBedrockPlatform;
 import com.viaversion.viafabricplus.protocoltranslator.impl.platform.ViaFabricPlusViaLegacyPlatform;
 import com.viaversion.viafabricplus.protocoltranslator.impl.platform.ViaFabricPlusViaVersionPlatform;
 import com.viaversion.viafabricplus.protocoltranslator.impl.viaversion.ViaFabricPlusPlatformLoader;
@@ -37,6 +38,7 @@ import com.viaversion.viafabricplus.protocoltranslator.netty.NoReadFlowControlHa
 import com.viaversion.viafabricplus.protocoltranslator.netty.ViaFabricPlusDecoder;
 import com.viaversion.viafabricplus.protocoltranslator.protocol.ViaFabricPlusProtocol;
 import com.viaversion.viafabricplus.protocoltranslator.util.NoPacketSendChannel;
+import com.viaversion.viafabricplus.protocoltranslator.util.NoPacketSendUserConnection;
 import com.viaversion.viafabricplus.protocoltranslator.impl.viaversion.ViaFabricPlusProtocolPatches;
 import com.viaversion.viaversion.ViaManagerImpl;
 import com.viaversion.viaversion.api.Via;
@@ -47,7 +49,6 @@ import com.viaversion.viaversion.api.protocol.ProtocolPipeline;
 import com.viaversion.viaversion.api.protocol.packet.State;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.api.protocol.version.VersionType;
-import com.viaversion.viaversion.connection.UserConnectionImpl;
 import com.viaversion.viaversion.platform.NoopInjector;
 import com.viaversion.viaversion.platform.ViaChannelInitializer;
 import com.viaversion.viaversion.platform.ViaDecodeHandler;
@@ -75,7 +76,6 @@ import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.Connection;
 import net.minecraft.network.HandlerNames;
 import net.minecraft.util.Util;
-import net.raphimc.viabedrock.ViaBedrockPlatformImpl;
 import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.raphimc.viabedrock.netty.BatchLengthCodec;
 import net.raphimc.viabedrock.netty.DisconnectHandler;
@@ -241,7 +241,9 @@ public final class ProtocolTranslator {
     }
 
     public static UserConnection createDummyUserConnection(final ProtocolVersion clientVersion, final ProtocolVersion serverVersion) {
-        final UserConnection user = new UserConnectionImpl(NoPacketSendChannel.INSTANCE, true);
+        // MODIFIED for porting: was VFP core/integration MixinUserConnectionImpl#handleNoPacketSendChannel - the
+        // dummy translator connection must swallow every write, see NoPacketSendUserConnection.
+        final UserConnection user = new NoPacketSendUserConnection(NoPacketSendChannel.INSTANCE);
         final ProtocolPipeline pipeline = new ProtocolPipelineImpl(user);
         final List<ProtocolPathEntry> path = Via.getManager().getProtocolManager().getProtocolPath(clientVersion, serverVersion);
         if (path != null) {
@@ -311,7 +313,9 @@ public final class ProtocolTranslator {
                     new ViaBackwardsPlatformImpl();
                     new ViaFabricPlusViaLegacyPlatform();
                     new ViaAprilFoolsPlatformImpl();
-                    new ViaBedrockPlatformImpl();
+                    // MODIFIED for porting: was VFP core/integration MixinViaBedrockConfig
+                    // #shouldEnableExperimentalFeatures - the platform subclass supplies the GUI-backed config.
+                    new ViaFabricPlusViaBedrockPlatform();
                 }
             );
             // MODIFIED for porting: stands in for the ViaFabricPlus mixins whose target is a ViaVersion

@@ -21,11 +21,13 @@
 
 package com.viaversion.viafabricplus.protocoltranslator.impl.command.classic;
 
-import com.viaversion.viafabricplus.injection.access.core.IExtensionProtocolMetadataStorage;
 import com.viaversion.viafabricplus.protocoltranslator.impl.command.VFPSubCommand;
+import com.viaversion.viafabricplus.protocoltranslator.impl.viaversion.LibraryFieldAccessPatches;
 import com.viaversion.viaversion.api.command.ViaCommandSender;
+import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.raphimc.vialegacy.api.LegacyProtocolVersion;
+import net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.data.ClassicProtocolExtension;
 import net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.storage.ExtensionProtocolMetadataStorage;
 
 public final class ListExtensionsCommand implements VFPSubCommand {
@@ -46,7 +48,17 @@ public final class ListExtensionsCommand implements VFPSubCommand {
             sendMessage(sender, ChatFormatting.RED + "Only for " + LegacyProtocolVersion.c0_30cpe.getName());
             return true;
         }
-        ((IExtensionProtocolMetadataStorage) getUser().get(ExtensionProtocolMetadataStorage.class)).viaFabricPlus$getServerExtensions().forEach((extension, version) -> {
+        // MODIFIED for porting: was the (IExtensionProtocolMetadataStorage) cast on ViaLegacy's storage, which only
+        // worked because VFP mixed that interface into the library class - here it would throw ClassCastException
+        // on every listextensions call. The map is read by LibraryFieldAccessPatches instead; a null return means
+        // the private field could not be read, which is reported rather than printed as an empty list.
+        final Map<ClassicProtocolExtension, Integer> serverExtensions =
+            LibraryFieldAccessPatches.serverExtensions(getUser().get(ExtensionProtocolMetadataStorage.class));
+        if (serverExtensions == null) {
+            sendMessage(sender, ChatFormatting.RED + "Could not read the extension list from ViaLegacy");
+            return true;
+        }
+        serverExtensions.forEach((extension, version) -> {
             sendMessage(sender, ChatFormatting.GREEN + extension.getName() + ChatFormatting.GOLD + " v" + version);
         });
         return true;

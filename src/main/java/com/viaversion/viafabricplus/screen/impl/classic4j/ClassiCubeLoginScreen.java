@@ -92,7 +92,11 @@ public final class ClassiCubeLoginScreen extends VFPScreen {
                 @Override
                 public void handleException(Throwable throwable) {
                     ViaFabricPlusImpl.INSTANCE.getLogger().error("Error while logging in to ClassiCube!", throwable);
-                    setupSubtitle(Component.nullToEmpty(throwable.getMessage()));
+                    // was VFP compat/classic4j/MixinCCAuthenticationResponse#mapTranslations (@Redirect on the
+                    // CCError.description GETFIELD in CCAuthenticationResponse#getErrorDisplay). classic4j is a jar
+                    // dependency here, so its hardcoded English descriptions are translated on the way into the
+                    // subtitle instead - see ClassiCubeErrorTranslations. Version independent, as upstream.
+                    setupSubtitle(Component.nullToEmpty(ClassiCubeErrorTranslations.translate(throwable.getMessage())));
                 }
             });
         }).pos(width / 2 - 75, passwordField.getY() + (20 * 4) + 5).size(150, 20).build());

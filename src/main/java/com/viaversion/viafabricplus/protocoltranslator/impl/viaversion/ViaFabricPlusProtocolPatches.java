@@ -43,6 +43,14 @@ import com.viaversion.viaversion.exception.InformativeException;
 import com.viaversion.viaversion.api.minecraft.BlockChangeRecord;
 import com.viaversion.viaversion.api.minecraft.BlockChangeRecord1_16_2;
 import com.viaversion.viaversion.protocols.v1_10to1_11.Protocol1_10To1_11;
+import com.viaversion.viaversion.protocols.v1_11_1to1_12.Protocol1_11_1To1_12;
+import com.viaversion.viaversion.protocols.v1_12_2to1_13.Protocol1_12_2To1_13;
+import com.viaversion.viaversion.protocols.v1_20_2to1_20_3.Protocol1_20_2To1_20_3;
+import com.viaversion.viaversion.protocols.v1_20_5to1_21.Protocol1_20_5To1_21;
+import com.viaversion.viaversion.protocols.v1_21_4to1_21_5.Protocol1_21_4To1_21_5;
+import com.viaversion.viaversion.protocols.v1_8to1_9.Protocol1_8To1_9;
+import com.viaversion.viaversion.protocols.v26_1to26_2.Protocol26_1To26_2;
+import net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.Protocolc0_30cpeToc0_28_30;
 import com.viaversion.viaversion.protocols.v1_15_2to1_16.packet.ClientboundPackets1_16;
 import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.Protocol1_16_1To1_16_2;
 import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.packet.ClientboundPackets1_16_2;
@@ -108,6 +116,7 @@ public final class ViaFabricPlusProtocolPatches {
     public static void apply() {
         final ProtocolManager protocolManager = Via.getManager().getProtocolManager();
         awaitMappings(protocolManager,
+            // patched below
             Protocol1_21To1_21_2.class,
             Protocol1_19_3To1_19_4.class,
             Protocol1_20_3To1_20_5.class,
@@ -115,7 +124,19 @@ public final class ViaFabricPlusProtocolPatches {
             Protocol1_20To1_20_2.class,
             Protocol1_10To1_11.class,
             Protocol1_16_4To1_17.class,
-            Protocol1_16_1To1_16_2.class);
+            Protocol1_16_1To1_16_2.class,
+            Protocol1_18_2To1_19.class,
+            Protocol1_13_2To1_14.class,
+            Protocol1_21_7To1_21_9.class,
+            // patched by the group classes invoked at the end of this method
+            Protocol1_21_4To1_21_5.class,
+            Protocol26_1To26_2.class,
+            Protocol1_20_2To1_20_3.class,
+            Protocol1_20_5To1_21.class,
+            Protocol1_8To1_9.class,
+            Protocol1_11_1To1_12.class,
+            Protocol1_12_2To1_13.class,
+            Protocolc0_30cpeToc0_28_30.class);
 
         // was VFP features/movement/packet/MixinEntityPacketRewriter1_21_2#dontCancelIdlePacket
         // (@Redirect no-oping PacketWrapper#cancel in lambda$registerPackets$14, the
@@ -146,6 +167,16 @@ public final class ViaFabricPlusProtocolPatches {
         applyMaxChatLength(protocolManager);
         applyClassicWorldHeight(protocolManager);
         applySyncTaskProducers(protocolManager);
+
+        // The remaining library-target rebuilds live in their own classes, grouped by upstream feature, to
+        // keep this file reviewable. They all run behind the mapping barrier above.
+        ContainerAndLevelLoadingPatches.apply();
+        EntityAttributePatches.apply();
+        ItemAttackDamagePatches.apply();
+        LegacyItemAndRecipePatches.apply();
+        Protocol1_12_2To1_13Patches.apply();
+        ClassicCpeExtensionPatches.apply();
+        LibraryFieldAccessPatches.apply();
     }
 
     // The three ViaVersion-side producers of ViaFabricPlus' sync-task custom payload. Without them the

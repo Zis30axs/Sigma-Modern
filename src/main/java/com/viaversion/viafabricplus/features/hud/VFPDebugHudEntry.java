@@ -22,9 +22,8 @@
 package com.viaversion.viafabricplus.features.hud;
 
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
-import com.viaversion.viafabricplus.injection.access.core.bedrock.IChunkTracker;
-import com.viaversion.viafabricplus.injection.access.core.bedrock.IRakSessionCodec;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.protocoltranslator.impl.viaversion.LibraryFieldAccessPatches;
 import com.viaversion.viafabricplus.util.ChatUtil;
 import com.viaversion.viaversion.api.connection.ProtocolInfo;
 import com.viaversion.viaversion.api.connection.UserConnection;
@@ -76,19 +75,32 @@ public final class VFPDebugHudEntry implements DebugScreenEntry {
         }
         final ChunkTracker chunkTracker = connection.get(ChunkTracker.class);
         if (chunkTracker != null) {
-            final IChunkTracker mixinChunkTracker = (IChunkTracker) chunkTracker;
-            final int subChunkRequests = mixinChunkTracker.viaFabricPlus$getSubChunkRequests();
-            final int pendingSubChunks = mixinChunkTracker.viaFabricPlus$getPendingSubChunks();
-            final int chunks = mixinChunkTracker.viaFabricPlus$getChunks();
-            information.add("Chunk Tracker: R: " + subChunkRequests + ", P: " + pendingSubChunks + ", C: " + chunks);
+            // MODIFIED for porting: was the (IChunkTracker) cast on ViaBedrock's ChunkTracker, which only ever
+            // worked because VFP mixed that interface into the library class - here it would throw
+            // ClassCastException. The three counters come from LibraryFieldAccessPatches instead, and the line is
+            // dropped rather than filled with wrong numbers if a ViaBedrock update renames the fields.
+            final int subChunkRequests = LibraryFieldAccessPatches.subChunkRequests(chunkTracker);
+            final int pendingSubChunks = LibraryFieldAccessPatches.pendingSubChunks(chunkTracker);
+            final int chunks = LibraryFieldAccessPatches.chunks(chunkTracker);
+            if (subChunkRequests != LibraryFieldAccessPatches.UNAVAILABLE && pendingSubChunks != LibraryFieldAccessPatches.UNAVAILABLE
+                && chunks != LibraryFieldAccessPatches.UNAVAILABLE) {
+                information.add("Chunk Tracker: R: " + subChunkRequests + ", P: " + pendingSubChunks + ", C: " + chunks);
+            }
         }
         if (connection.getChannel() instanceof RakClientChannel rakClientChannel) {
             final RakSessionCodec rakSessionCodec = rakClientChannel.parent().pipeline().get(RakSessionCodec.class);
             if (rakSessionCodec != null) {
-                final IRakSessionCodec mixinRakSessionCodec = (IRakSessionCodec) rakSessionCodec;
-                final int transmitQueue = mixinRakSessionCodec.viaFabricPlus$getOutgoingPackets();
-                final int retransmitQueue = mixinRakSessionCodec.viaFabricPlus$SentDatagrams();
-                information.add("RTT: " + Math.round(rakSessionCodec.getRTT()) + " ms, P: " + rakSessionCodec.getPing() + " ms" + ", TQ: " + transmitQueue + ", RTQ: " + retransmitQueue);
+                // MODIFIED for porting: was the (IRakSessionCodec) cast on the netty RakSessionCodec handler. RTT
+                // and ping are public API and unchanged; only the two queue depths came from the mixin, so they now
+                // come from LibraryFieldAccessPatches and are appended only when both could be read - RakSessionCodec
+                // also nulls both queues once the session is closed.
+                final int transmitQueue = LibraryFieldAccessPatches.outgoingPackets(rakSessionCodec);
+                final int retransmitQueue = LibraryFieldAccessPatches.sentDatagrams(rakSessionCodec);
+                String rakInformation = "RTT: " + Math.round(rakSessionCodec.getRTT()) + " ms, P: " + rakSessionCodec.getPing() + " ms";
+                if (transmitQueue != LibraryFieldAccessPatches.UNAVAILABLE && retransmitQueue != LibraryFieldAccessPatches.UNAVAILABLE) {
+                    rakInformation += ", TQ: " + transmitQueue + ", RTQ: " + retransmitQueue;
+                }
+                information.add(rakInformation);
             }
         }
 
