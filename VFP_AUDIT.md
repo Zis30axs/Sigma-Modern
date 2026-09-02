@@ -9,7 +9,7 @@
 1. 枚举上游 `injection/mixin/` 下全部 **368** 个 mixin。
 2. 每个 mixin 逐 hook 展开：`@Inject` / `@Redirect` / `@ModifyExpressionValue` / `@ModifyArg(s)` / `@ModifyVariable` / `@ModifyConstant` / `@ModifyReturnValue` / `@ModifyReceiver` / `@WrapOperation` / `@WrapWithCondition` / `@WrapMethod` / `@Overwrite` / `@Accessor` / `@Invoker`，外加 accessor 接口实现、承载状态的 `@Unique` 字段、构造器 hook、静态初始化 hook。`@Definition` 不单独计数。
 3. 每个 hook 都去对应 vanilla 类里**读实际代码**确认行为与版本门控。`// MODIFIED for porting` 注释不算证据。
-4. 每条“已移植”结论再交给对抗性复核 agent 重读并尝试推翻。两轮审计分别推翻 6 条和 7 条。
+4. 每条“已移植”结论再交给对抗性复核 agent 重读并尝试推翻。两轮全量审计分别推翻 6 条和 7 条；最后一轮针对收尾工作的 39 行独立重验又推翻若干条并报出 9 处缺陷，其中 4 处已修。
 
 ## 总览 / summary
 
@@ -17,24 +17,28 @@
 |---|---|---|
 | 上游 mixin | 368 | 368 |
 | 上游 hook | 726 | 726 |
-| 已内联 hook | 152 | **660** |
-| 覆盖率 | 20.9% | **90.9%** |
-| COMPLETE | 67 | **315** |
-| REPLACED | 0 | **13** |
-| PARTIAL | 16 | **3** |
-| MISSING | 235 | **0** |
-| NOT_APPLICABLE | 50 | 37 |
+| 已内联 hook | 152 | **700** |
+| 覆盖率 | 20.9% | **96.4%** |
+| COMPLETE | 67 | **317** |
+| REPLACED | 0 | **36** |
+| PARTIAL | 16 | **1** |
+| MISSING | 235 | **5** |
+| NOT_APPLICABLE | 50 | 9 |
 
-剩余未内联的 66 个 hook = PARTIAL 行里的 **4** 个 + NOT_APPLICABLE 行里的 62 个（`@Mixin` 目标是 jar 里的类，源码树里没有文件可改，且没有公开 API 路线）。
+剩余 26 个未写出的 hook 分三类，没有第四类：
+
+- **7 个真的还开着**（6 行，见下面 §仍未完成）。每条都写明为什么无法复现以及确切代价。
+- **11 个在 NOT_APPLICABLE 行里**（9 行）。目标是 jar 里的类，且**已证明本树没有行为损失** —— 修复已在依赖的 jar 里、或它守卫的功能在这里不可能存在。证据是 bytecode / grep / 源码行号，不是“看起来合理”。
+- **8 个在 4 个 COMPLETE 行里**：上游为 MoreCulling 兼容加的 `getOcclusionShape` + `requireOriginalShape` 成对 hook。它们的守卫 `ViaFabricPlusMixinPlugin.MORE_CULLING_PRESENT` 唯一的赋值在一个本树从不调用的 `onLoad()` 里，所以那条分支恒假；照抄只会写出死代码。
 
 按优先级 / by priority:
 
 | 优先级 | COMPLETE | REPLACED | PARTIAL | MISSING | NOT_APPLICABLE | 合计 |
 |---|---|---|---|---|---|---|
-| P0 | 61 | 10 | 1 | 0 | 6 | 78 |
-| P1 | 125 | 2 | 0 | 0 | 4 | 131 |
-| P2 | 78 | 0 | 0 | 0 | 6 | 84 |
-| P3 | 51 | 1 | 2 | 0 | 21 | 75 |
+| P0 | 61 | 15 | 0 | 2 | 0 | 78 |
+| P1 | 125 | 6 | 0 | 0 | 0 | 131 |
+| P2 | 78 | 3 | 0 | 3 | 0 | 84 |
+| P3 | 53 | 12 | 1 | 0 | 9 | 75 |
 
 优先级定义：**P0** 协议/连接状态、报文生成与顺序、keep-alive / ping / transaction / teleport 确认、移动报文节奏。**P1** 玩家与实体物理、交互。**P2** 方块/物品/世界行为。**P3** 观感、GUI、屏幕、字体、音效、Bedrock 专属附加项。
 
@@ -42,39 +46,60 @@
 
 - **COMPLETE** — 每个 hook 都已按行为内联进对应 vanilla 类，版本门控一致。
 - **PARTIAL** — 部分 hook 已内联，缺口逐条列在下面。
-- **MISSING** — 完全没有移植。**现在为 0。**
+- **MISSING** — 该 mixin 的行为在本树里仍然没有落点。剩 5 行，全部在下面逐条说明。
 - **REPLACED** — 目标是 ViaVersion 的类，改用 ViaVersion 公开协议 API 在 bootstrap 阶段重建等价行为，全部集中在 `ViaFabricPlusProtocolPatches`。
 - **NOT_APPLICABLE** — 目标是 jar 依赖里的类且没有公开 API 路线。**这不等于没有行为缺口**，凡是仍有真实损失的都在 §库目标 一节写明。
 
-## 仍未完成 / still open (4 hooks)
+## 仍未完成 / still open (26 hooks, 6 rows)
 
 | 上游 mixin | hook | 优先级 | 剩余行为 |
 |---|---|---|---|
-| `features/large_container/MixinItemPacketRewriter1_14.java` | 1/2 | P0 | `@Inject dontResyncInventory`; `@Inject supportLargeContainers` |
-| `core/integration/MixinConnection.java` | 1/2 | P3 | `@Override (merged, non-annotated) userEventTriggered` |
-| `features/block/shape/MixinHopperBlock.java` | 2/4 | P3 | `@Override getOcclusionShape (MoreCulling workaround, VFP issue #45)`; `@Unique boolean viaFabricPlus$requireOriginalShape` |
+| `features/networking/limitation/nbt/MixinNamedCompoundTagType.java` | 0/1 | P0 | `@Redirect removeNBTSizeLimit` |
+| `features/networking/limitation/nbt/MixinTagType.java` | 0/1 | P0 | `@Redirect removeNBTSizeLimit` |
+| `features/entity/metadata/MixinCommonBoss.java` | 0/1 | P2 | `@Redirect ignoreHealthCheck` |
+| `features/entity/metadata/MixinEntityPacketRewriter1_15.java` | 0/1 | P2 | `@Redirect removeAndTrackHealth` |
+| `features/entity/metadata/MixinEntityTracker1_9.java` | 0/3 | P2 | `@Redirect removeMin`; `@Redirect removeMax`; `@Redirect remapNaNToZero` |
+| `features/scoreboard/MixinComponentUtil.java` | 1/1 | P3 | `@Redirect dontSkipEmptySections` |
 
-**`features/large_container/MixinItemPacketRewriter1_14.java`** — 1/2, 目标 `com.viaversion.viaversion.protocols.v1_13_2to1_14.rewriter.ItemPacketRewriter1_14 (JAR: viaversion-common 5.12.0-20260819.184210-4)`
+**`features/networking/limitation/nbt/MixinNamedCompoundTagType.java`** — 0/1, 目标 `com.viaversion.viaversion.api.type.types.misc.NamedCompoundTagType (viaversion-common JAR — no source file in the tree)`
 
-- `@Inject dontResyncInventory` — Silences ViaVersion's trade resync: re-registers serverbound SELECT_TRADE with a null handler and override=true so Via stops fabricating a serverbound CONTAINER_CLICK (window = latest trade window, slot -999, button 2, mode 5 drag, random action number, NaN force_resync item) on every trade selection. Applies to every target <= 1.13.2, i.e. whenever Protocol1_13_2To1_14 is in the pipeline.
-  - 落点: ItemPacketRewriter1_14#registerPackets at RETURN. Landing site in Sigma: a new block in ViaFabricPlusProtocolPatches#apply doing protocol1_13_2To1_14.registerServerbound(ServerboundPackets1_14.SELECT_TRADE, ServerboundPackets1_13.SELECT_TRADE, null, true), plus Protocol1_13_2To1_14.class added to the awaitMappings call at ViaFabricPlusProtocolPatches.java:94-102.
-- `@Inject supportLargeContainers` — In the clientbound OPEN_SCREEN handler, when type is minecraft:container or minecraft:chest and slots > 54 or slots <= 0, cancels Via's "Can't open inventory for player!" path and instead clears the packet, retypes it to CUSTOM_PAYLOAD and writes SyncTasks.PACKET_SYNC_IDENTIFIER + task uuid + windowId + slots + TextComponentTranslator.via1_14toViaLatest(title); the registered sync task then builds a ChestMenu(null, syncId, inventory, new SimpleContainer(size), ceil(size/9)) and a ContainerScreen on the client. Without it any legacy chest above 54 slots simply fails to open. Applies to targets <= 1.13.2.
-  - 落点: ItemPacketRewriter1_14#registerPackets' OPEN_SCREEN lambda (lambda$registerPackets$0), at the ProtocolLogger#warning invocation reached when typeId == -1 (ItemPacketRewriter1_14.java:104). Landing site in Sigma: ViaFabricPlusProtocolPatches, re-registering ClientboundPackets1_13.OPEN_SCREEN with override=true and reproducing Via's own body (ItemPacketRewriter1_14.java:67-109) with the large-contai
-- 备注: Real behaviour gap, recorded as NOT_APPLICABLE only because the @Mixin target is a JAR class. Both hooks COULD be reimplemented through Via public API at bootstrap: Protocol#registerServerbound(..., override=true) for the trade resync, and Protocol#registerClientbound/replaceClientbound on ClientboundPackets1_13.OPEN_SCREEN for the large container. The client half of the large-container feature is already ported and wired (util/network/SyncTasks.java, util/network/DataCustomPayload.java, and ClientCommonPacketListenerImpl.java:204-206 calls SyncTasks.handleSyncTask), so only the Via-side registration is absent - nothing in-tree currently calls SyncTasks.executeSyncTask. The mixin's constructor is a compile shim for `extends ItemRewriter<...>` (Mixin does not merge class-mixin constructors) and is not counted as a hook. \| POST-AUDIT: dontResyncInventory rebuilt through registerServerbound(SELECT_TRADE, null, override). supportLargeContainers is still open: it is an @Inject with @Local captures INSIDE ViaVersion's OPEN_WINDOW lambda, so expressing it through the public API needs that 
+- `@Redirect removeNBTSizeLimit` — Replaces TagLimiter.create(maxBytes, TagLimiter.DEFAULT_MAX_NESTING_LEVEL) with TagLimiter.noop(), so NBT arriving on a translated connection is read with no byte cap and no nesting cap. Ungated — applies to every target version. Without it, oversized or deeply nested NBT throws inside the decoder and drops the connection where upstream reads it.
+  - 落点: com/viaversion/viaversion/api/type/types/misc/NamedCompoundTagType.java:78 — the TagLimiter.create call in `public static CompoundTag read(ByteBuf, int maxBytes, boolean readName)`, which is also what the instance read(ByteBuf) (:48-54) and OptionalNamedCompoundTagType route through.
+- 备注: Not ported anywhere and not provably gap-free, so the recorded NOT_APPLICABLE does not hold. Nothing in the tree removes the limiter: grep over E:/.sigma/Sigma-Modern/src/main/java for TagLimiter / NamedCompoundTagType / noop() returns 0 hits, and there is no forced static-final rewrite of Types.NAMED_COMPOUND_TAG (the only NAMED_COMPOUND_TAG hits are reads in WorldHeightSupport.java:51-67; no Unsafe/VarHandle/privateLookupIn anywhere in the viafabricplus package). The cap is live in the shipped jar, so this is not the 'fix already in the jar' case: javap of viaversion-common-5.12.0-SNAPSHOT.jar shows NamedCompoundTagType.read(ByteBuf) -> read(buf, 2097152, true) and read(ByteBuf,int,boolean) -> TagLimiter.create(maxBytes, 512); TagLimiter.create(int,int) forwards to create(maxBytes, maxLevels, 262144) and TagLimiterImpl.countBytes/countTag/checkLevel each throw IllegalArgumentException, while upstream substitutes NoopTagLimiter.INSTANCE. So NBT past 2 MiB of raw bytes, 512 nesting levels or 262144 tags on a translated connection throws inside the Via decoder (read(ByteBuf) even rewr
 
-**`core/integration/MixinConnection.java`** — 1/2, 目标 `net.minecraft.network.Connection`
+**`features/networking/limitation/nbt/MixinTagType.java`** — 0/1, 目标 `com.viaversion.viaversion.api.type.types.misc.TagType (viaversion-common JAR — no source file in the tree)`
 
-- `@Override (merged, non-annotated) userEventTriggered` — Krypton mod-compat shim, all versions: when the incoming netty user event is me.steinborn.krypton.mod.shared.misc.KryptonPipelineEvent with toString()=="COMPRESSION_ENABLED", call ViaChannelInitializer.reorderPipeline(ctx.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS), log the Krypton warning and swallow the event; otherwise super.userEventTriggered.
-  - 落点: Connection has no userEventTriggered override at all - the port would be a new public void userEventTriggered(ChannelHandlerContext, Object) throws Exception on net.minecraft.network.Connection, next to the existing channelRegistered override at Connection.java:132-138.
-- 备注: The second hook is the merged @Override of SimpleChannelInboundHandler#userEventTriggered (a plain non-annotated method in the mixin, counted the same way the already-ported bedrock MixinConnection#channelRegistered merged override is counted at Connection.java:129-138). grep for userEventTriggered/Krypton across net/minecraft and com/viaversion returns nothing. This gap is unreachable in practice: Krypton is a Fabric mod that cannot be loaded into this tree, and the pipeline reorder it compensates for already runs unconditionally in Sigma - ViaChannelInitializer.reorderPipeline(pipeline, COMPRESS, DECOMPRESS) at Connection.java:793-794 inside setupCompression. Recorded for completeness only; do not spend P0/P1 time on it.
+- `@Redirect removeNBTSizeLimit` — Replaces TagLimiter.create(this.maxBytes, TagLimiter.DEFAULT_MAX_NESTING_LEVEL) with TagLimiter.noop() for the instance read, removing both the byte cap and the nesting cap on every translated Tag read. Ungated.
+  - 落点: com/viaversion/viaversion/api/type/types/misc/TagType.java:74 — the TagLimiter.create call in `public Tag read(ByteBuf)`, immediately before TagRegistry.read(id, in, tagLimiter, 0).
+- 备注: Still open, and the pre-closing NOT_APPLICABLE is a plausibility argument rather than a proof - the fix is NOT in the shipped jar. javap -c of viaversion-common-5.12.0-SNAPSHOT!com/viaversion/viaversion/api/type/types/misc/TagType.read(ByteBuf), offsets 11-18: getfield maxBytes; sipush 512; invokestatic TagLimiter.create(II) - the exact invocation the @Redirect replaces is present in the bytecode, and TagLimiter.create(II) delegates to create(III) with maxTags=262144 (javap TagLimiter). Constants: DEFAULT_MAX_BYTES=2097152, DEFAULT_MAX_NESTING_LEVEL=512, DEFAULT_MAX_TAGS=262144. Types.java:214 Types.TAG = new TagType() so limitBytes=true and maxBytes=2097152; Types.java:220 TRUSTED_TAG = new TagType(false) lifts only the byte cap and still keeps the 512-level and 262144-tag caps, so the 'point Types.TAG at TagType(false)' idea would not even be equivalent. Nothing in this tree does it anyway: grep -rn over src/main/java for TagLimiter, nbt.limiter, misc.TagType and TRUSTED_TAG returns zero hits (the only Types.TAG uses are reads/writes at ContainerAndLevelLoadingPatches.java:274 and 
 
-**`features/block/shape/MixinHopperBlock.java`** — 2/4, 目标 `net.minecraft.world.level.block.HopperBlock`
+**`features/entity/metadata/MixinCommonBoss.java`** — 0/1, 目标 `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)`
 
-- `@Override getOcclusionShape (MoreCulling workaround, VFP issue #45)` — Sets viaFabricPlus$requireOriginalShape = true then delegates to super, so the nested getShape call returns the vanilla shape once. The consuming branch in changeOutlineShape is guarded by ViaFabricPlusMixinPlugin.MORE_CULLING_PRESENT, which is false in this tree (ViaFabricPlusMixinPlugin.onLoad() is never called from anywhere in Sigma-Modern - verified by grep - so the flag stays at its default false). Without MoreCulling upstream also falls through to the <=1.12.2 branch, so upstream and Sigma both return vfpHopperShapeR1_12_2 from occlusion: no behavioural gap on any target version. Applies to <= 1.12.2 only.
-  - 落点: HopperBlock#getOcclusionShape (absent); the flag would be read at the HEAD of HopperBlock#getShape, before the <=v1_12_2 branch at HopperBlock.java:84
-- `@Unique boolean viaFabricPlus$requireOriginalShape` — One-shot state carrying 'this getShape call comes from getOcclusionShape'. Only meaningful together with the hook above and only when MoreCulling is present; dead in this tree.
-  - 落点: HopperBlock field block (absent)
-- 备注: Both real version-gated shape behaviours are inlined and correct; the only gap is upstream's MoreCulling compat shim, which is provably inert here (BlockBehaviour#getOcclusionShape at BlockBehaviour.java:303 delegates to state.getShape(...), so Sigma's occlusion already follows the legacy hopper shape exactly as upstream-without-MoreCulling does). Same deliberate omission is recorded for AbstractCauldronBlock:85, AnvilBlock:86 and BedBlock:196, so it is a tree-wide convention rather than an oversight. Only worth porting if a MoreCulling-style occlusion cache is ever added.
+- `@Redirect ignoreHealthCheck` — No-ops the health precondition so out-of-range or NaN boss health can never throw; needed for every <=1.8 target that displays a wither/ender dragon bar, and it is the pair of the three EntityTracker1_9 redirects that deliberately produce unclamped health.
+  - 落点: CommonBoss#<init> and CommonBoss#setHealth, at the `Preconditions.checkArgument(ZLjava/lang/Object;)V` calls (viaversion-common CommonBoss.java:56 and :78)
+- 备注: Half the guard is genuinely unreachable here, the other half is a live crash, so NOT_APPLICABLE is not defensible. Nothing in the tree touches CommonBoss, BossBar, BossBarProvider or Via's legacyAPI (grep over com/viaversion/viafabricplus -> 0 hits), so Preconditions.checkArgument(health >= 0 && health <= 1) at CommonBoss.java:56 (ctor) and :78 (setHealth) is intact. Out-of-range health cannot occur, for a reason the audit omits: the paired MixinEntityTracker1_9 removeMin/removeMax are also unported, so Via's own clamp Math.max(0.0f, Math.min(v/maxHealth, 1.0f)) at EntityTracker1_9.java:268 still runs and keeps every finite value (and both infinities) inside [0,1]. NaN is the gap: Math.min(NaN,1)=NaN and Math.max(0,NaN)=NaN, and upstream's neutralizer for exactly that (MixinEntityTracker1_9#remapNaNToZero) is unported too. A <=1.8 server sending NaN as wither/ender-dragon entity-data id 6 therefore reaches createLegacyBossBar(title, NaN, ...) at EntityTracker1_9.java:271 or bar.setHealth(NaN) at :278 and throws IllegalArgumentException on the packet path; AbstractProtocol.transform:4
+
+**`features/entity/metadata/MixinEntityPacketRewriter1_15.java`** — 0/1, 目标 `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1_15 (ViaVersion JAR)`
+
+- `@Redirect removeAndTrackHealth` — Replaces `filter().type(WOLF).removeIndex(18)` with a handler that stores the wolf health value in WolfHealthTracker1_14_4 (keyed by entity id), cancels that entry, and shifts indices >18 down by one - i.e. removeIndex's own renumbering plus the snapshot. Applies to <=1.14.4 targets.
+  - 落点: EntityPacketRewriter1_15#registerRewrites, at the `EntityDataFilter$Builder#removeIndex(I)` invocation (viaversion-common EntityPacketRewriter1_15.java:132)
+- 备注: The write half of the redirect was never rebuilt. grep -rn over all of src/main/java: zero references to Protocol1_14_4To1_15, EntityPacketRewriter1_15, EntityDataFilter or EntityTypes1_15, and WolfHealthTracker1_14_4#setWolfHealth (WolfHealthTracker1_14_4.java:48) has no caller anywhere in the tree. Via's own filter().type(WOLF).removeIndex(18) (EntityPacketRewriter1_15.java:132) therefore still runs unmodified, which does keep the half of upstream's replacement that is pure renumbering - EntityDataFilter.java:282-292 is exactly event.cancel() for index==18 and event.setIndex(dataIndex-1) for dataIndex>18 - so nothing is mis-numbered; what is missing is only the event.user().get(WolfHealthTracker1_14_4.class).setWolfHealth(event.entityId(), meta.value()) snapshot. ViaFabricPlusProtocol.java:120-121 still puts an (empty) tracker into every connection for serverVersion <= 1.14.4, so the storable exists but stays empty forever.
+
+**`features/entity/metadata/MixinEntityTracker1_9.java`** — 0/3, 目标 `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersion JAR)`
+
+- `@Redirect removeMin` — Returns the first argument of Math.min(value/maxHealth, 1.0F), i.e. removes the upper clamp so boss health above the assumed 200/300 max is not flattened to a full bar; <=1.8 targets, only when Via's bossbar-anti-flicker is disabled.
+  - 落点: EntityTracker1_9#handleEntityData, the `Math.min(FF)F` call inside `float health = Math.max(0.0f, Math.min(((float) entityData.getValue()) / maxHealth, 1.0f))`, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:264-268)
+- `@Redirect removeMax` — Returns the second argument of Math.max(0.0F, x), i.e. removes the lower clamp so negative boss health is passed through unchanged; <=1.8 targets, same branch.
+  - 落点: EntityTracker1_9#handleEntityData, the `Math.max(FF)F` call of the same health expression, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:268)
+- `@Redirect remapNaNToZero` — Wraps EntityData#getValue() in that branch so a Float NaN health becomes 0F; without it NaN survives both clamps and trips CommonBoss's precondition, throwing inside packet handling. <=1.8 targets, same branch.
+  - 落点: EntityTracker1_9#handleEntityData, the `EntityData#getValue()` call feeding the health division, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:268)
+- 备注: Nothing in the tree implements any of the three redirects, and the no-gap claim is not a proof - it is contradicted by the tree's own ledger. Reachability: the patched branch is EntityTracker1_9.java:264-281, guarded by isBossbarPatch() (default true, AbstractViaConfig.java:137 and assets/viaversion/config.yml:230) and !isBossbarAntiflicker() (default false, AbstractViaConfig.java:138, config.yml:232); ViaFabricPlusConfig overrides neither, so both defaults stand. It is on the packet path: handleEntityData is called from EntityPacketRewriter1_9.java:228 (SET_ENTITY_DATA) and SpawnPacketRewriter1_9.java:218/297. The clamps are still in the shipped jar (`Math.max(0.0f, Math.min(((float) entityData.getValue()) / maxHealth, 1.0f))`, EntityTracker1_9.java:268), so no fix is 'already in the jar'. grep over the whole tree for EntityTracker1_9 / BossBar / CommonBoss / bossbar finds only vanilla net.minecraft boss-bar code - no replacement route, no client-side equivalent, no config override. VFP_AUDIT.md:135 itself records 'Real gap covering all three redirects', while VFP_AUDIT.md:523 files
+
+**`features/scoreboard/MixinComponentUtil.java`** — 1/1, 目标 `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJsonString(String, boolean))`
+
+- `@Redirect dontSkipEmptySections` — Swaps StringFormat#fromString(String, ColorHandling, DeserializerUnknownHandling) for the 4-arg overload with false, so empty formatting-only sections survive the legacy->JSON conversion; applies to all pre-1.13 targets, ungated.
+  - 落点: No vanilla site - library methods com.viaversion.viaversion.util.ComponentUtil#legacyToJson (line 187) and #legacyToJsonString(String,boolean) (line 195), at the StringFormat.vanilla().fromString(...) call in each.
+- 备注: What IS present is correct and I verified it end to end. The flag's meaning is confirmed from the shaded mcstructs bytecode: StringFormat.fromString(String,ColorHandling,DeserializerUnknownHandling) delegates to the 4-arg overload with iconst_1, and inside the 4-arg body the boolean (iload 4) appears only at offsets 104-114 and 196-206, guarding `if (sb.length() > 0 \|\| !skipEmpty) components.add(...)` - so its ONLY effect is whether zero-length styled components are emitted; both overloads exist with the exact parameter types the patch uses. Protocol1_12_2To1_13Patches:304 reproduces ComponentUtil.legacyToJson with skipEmpty=false, and applyLegacyTextSections replaces SET_OBJECTIVE and SET_PLAYER_TEAM with byte-for-byte copies of Protocol1_12_2To1_13.java:401-419 and :421-470 (same passthrough/read/write order, same mode/action branches, Via.getConfig().is1_13TeamColourFix(), protocol.getLastColorChar - public at :879 - and a faithful copy of the protected rewriteTeamMemberName at :893-909 plus all 22 SCOREBOARD_TEAM_NAME_REWRITE entries from :92-113). CU is right (ClientboundPacke
 
 ## 用 ViaVersion 公开 API 重建 / rebuilt through the public protocol API
 
@@ -116,57 +141,29 @@
 
 ## 库目标 mixin（NOT_APPLICABLE）/ library-target mixins
 
-剩下 37 个 mixin 的目标是 jar 依赖里的类，且没有公开 API 路线。凡是仍有真实行为缺口的，下表 `备注` 列写明。
+剩下 9 个 mixin 的目标是 jar 依赖里的类，且没有公开 API 路线。凡是仍有真实行为缺口的，下表 `备注` 列写明。
 
 | 上游 mixin | 目标类 | 优先级 | hook | 备注 |
 |---|---|---|---|---|
-| `features/interaction/container_clicking/MixinBlockItemPacketRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.BlockItemPacketRewriter1_21_5` | P0 | 1 | Real behaviour gap, not a non-issue: Via's own handler at BlockItemPacketRewriter1_21_5.java:166 (replaceServerbound ServerboundPackets1_21_5.CONTAINER_CLICK) still translates any raw ServerboundContainerClickPacket that reaches the pipeline, bypassing the version-correct writer inlined at MultiPlayerGameMode.java:731. CAN be reimplemented through public API at bootstrap: protocol1_21_4To1_21_5.registerServerbound(Se |
-| `features/interaction/container_clicking/MixinEntityTrackerBase.java` | `com.viaversion.viaversion.data.entity.EntityTrackerBase` | P0 | 1 | Real gap. The instaBuild flag is the only thing gating cancellation of serverbound SET_CREATIVE_MODE_SLOT (StructuredItemRewriter.java:496 registerSetCreativeModeSlot1_21_5, BlockItemPacketRewriter1_21_5.java:155, ItemRewriter.java:261), and it is only ever set from clientbound LOGIN/RESPAWN/PLAYER_ABILITIES/GAME_EVENT (EntityRewriter.java:421-452, EntityPacketRewriter1_20_5.java:286-356) - so a creative-inventory ed |
-| `features/interaction/container_clicking/MixinItemPacketRewriter1_17.java` | `com.viaversion.viaversion.protocols.v1_16_4to1_17.rewriter.ItemPacketRewriter1_17` | P0 | 1 | Same real gap as MixinBlockItemPacketRewriter1_21_5 on the 1.17 path: Via's own handler at ItemPacketRewriter1_17.java:47 (replaceServerbound ServerboundPackets1_17.CONTAINER_CLICK) still translates a raw packet, bypassing the hand-built <= 1.16.4 writer at MultiPlayerGameMode.java:879. CAN be reimplemented through public API: protocol1_16_4To1_17.registerServerbound(ServerboundPackets1_17.CONTAINER_CLICK, Serverboun |
-| `features/networking/level_loading/MixinEntityPacketRewriter1_20_3.java` | `com.viaversion.viaversion.protocols.v1_20_2to1_20_3.rewriter.EntityPacketRewriter1_20_3 (v` | P0 | 1 | Recorded as a real gap, but I verified the residual effect is currently inert rather than harmful: the synthetic GAME_EVENT 13 reaches ClientPacketListener.java:1799-1801 and only advances LevelLoadTracker from WaitingForServer to WaitingForPlayerChunk (LevelLoadTracker.java:58-62, :151-156); isLevelReady() is consulted in exactly two places, LevelLoadingScreen.tick() :110 (dead for <=1.20.2 because the ported legacy |
-| `features/networking/limitation/nbt/MixinNamedCompoundTagType.java` | `com.viaversion.viaversion.api.type.types.misc.NamedCompoundTagType (viaversion-common JAR ` | P0 | 1 | No clean public-API route: unlike TagType there is no limit-free variant of this class, and Types.NAMED_COMPOUND_TAG / OPTIONAL_NAMED_COMPOUND_TAG / NAMED_COMPOUND_TAG_ARRAY are public static final (Types.java:207-209), so the only route is a bootstrap-time forced rewrite of those static finals to a NamedCompoundTagType subclass overriding read(ByteBuf) — Unsafe/VarHandle territory, not a supported API. |
-| `features/networking/limitation/nbt/MixinTagType.java` | `com.viaversion.viaversion.api.type.types.misc.TagType (viaversion-common JAR — no source f` | P0 | 1 | Partial public-API route exists and is not used: Via already ships TagType(false) (maxBytes = Integer.MAX_VALUE, TagType.java:62-65) as Types.TRUSTED_TAG (Types.java:220), so pointing Types.TAG / TAG_ARRAY / OPTIONAL_TAG at a TagType(false) would remove the byte cap — but those are public static final (Types.java:214-216) so it still needs a forced static-final rewrite, and the nesting cap would remain, unlike TagLim |
-| `core/integration/MixinUserConnectionImpl.java` | `com.viaversion.viaversion.connection.UserConnectionImpl` | P1 | 1 | COULD be reimplemented through public API, and it should be. UserConnectionImpl is public and non-final and its send entry points (sendRawPacket(ByteBuf), scheduleSendRawPacket(ByteBuf), sendRawPacketFuture(ByteBuf)) are public - so subclass it in com.viaversion.viafabricplus.protocoltranslator.util, override those three to release the buffer and return, and instantiate that subclass instead of UserConnectionImpl at  |
-| `features/entity/attribute/MixinEntityPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.EntityPacketRewriter1_20_5` | P1 | 1 | Real behaviour gap, not merely inapplicable. It COULD be reimplemented through public API: sendRangeAttributes ends in wrapper.scheduleSend(Protocol1_20_3To1_20_5.class), so the packet bypasses that protocol's own clientbound handlers - an appendClientbound(ClientboundPackets1_20_5.UPDATE_ATTRIBUTES, ...) registered on the NEXT protocol in the chain (Protocol1_20_5To1_21) inside ViaFabricPlusProtocolPatches.apply() c |
-| `features/entity/metadata/MixinEntityPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.EntityPacketRewriter1_9 (ViaVersion` | P1 | 1 | Real gap. Via derives the 1.9 PLAYER_HAND (hand-active) entity data from the 1.8 status byte; without the cancel, a 1.8 server's status metadata for the local player overwrites the client's own item-use/blocking state, which is why upstream drops it for the tracked clientEntityId. Reimplementable at bootstrap: append a clientbound SET_ENTITY_DATA handler on Protocol1_8To1_9 (or in ViaFabricPlusProtocol) that removes  |
-| `features/item/sword_blocking/MixinBlockItemPacketRewriter1_21_X.java` | `com.viaversion.viaversion.protocols.v1_21_2to1_21_4.rewriter.BlockItemPacketRewriter1_21_4` | P1 | 1 | Real behaviour gap, recorded rather than dismissed. It COULD be reimplemented at bootstrap through Via's public API: Protocol#appendClientbound on the item-carrying clientbound packets of Protocol1_21_2To1_21_4/Protocol1_21_4To1_21_5 (container content/slot, cursor and player inventory, set equipment, entity metadata, show_item) stripping StructuredDataKey.CONSUMABLE1_21_2 / BLOCKS_ATTACKS1_21_5 from those five ids w |
-| `features/entity/metadata/MixinCommonBoss.java` | `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)` | P2 | 1 | Real behaviour gap, not merely inapplicable. CommonBoss.java:56 and :78 assert 0<=health<=1; a <=1.8 server sending NaN wither/dragon health survives Via's own clamp (Math.max(0, Math.min(NaN/max, 1)) == NaN) and throws IllegalArgumentException inside EntityTracker1_9#handleEntityData, which runs on the packet path. No Via config toggle disables the assertion; the only bootstrap-level equivalent is to take over the 1 |
-| `features/entity/metadata/MixinEntityPacketRewriter1_15.java` | `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1_15 (ViaVe` | P2 | 1 | Real gap. The tracker is registered but never filled, so getWolfHealth always returns the `entity.getHealth()` fallback and the fully ported MixinWolf redirect is inert on <=1.14.4 servers (wolf tail angle stays at full health, whine sound never selected, client-side feed check mispredicts). Reimplementable at bootstrap only by replacing Protocol1_14_4To1_15's clientbound SET_ENTITY_DATA handler via registerClientbou |
-| `features/entity/metadata/MixinEntityTracker1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersion JAR)` | P2 | 3 | Real gap covering all three redirects; the branch they patch only runs while Via's bossbar-anti-flicker is off (its default). Together they turn `Math.max(0, Math.min(value/maxHealth, 1))` into a raw ratio and map NaN to 0. Reimplementable at bootstrap only by owning the path: enable bossbar-anti-flicker so Via skips its clamped update, then track ENDER_DRAGON/WITHER entity-data id 6 from an appended clientbound SET_ |
-| `features/item/attack_damage/MixinItemPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.ItemPacketRewriter1_9 (remap=false)` | P2 | 5 | Real behaviour gap, not merely inapplicable: on <=1.8 targets no vanilla-1.8 AttributeModifiers NBT is synthesised for weapons/tools/armour, so damage and armour values (and the tooltips built from them) are wrong even though the tooltip-side hooks of this same feature are ported. It COULD be reimplemented through the public API without touching the jar: after Protocol1_8To1_9's mapping future completes, appendClient |
-| `features/item/data_fix/MixinBlockItemPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.BlockItemPacketRewriter1_20_5` | P2 | 5 | Real behaviour gap: this mixin is how VFP emulates legacy item behaviour purely through components, so without it every pre-1.20.5 target loses the per-version TOOL component (mining speeds, suitable_for block sets, damage_per_block), b1.8.1 armour MAX_DAMAGE (durability tooltip) and the b1.7.3 food fix (MAX_STACK_SIZE 1 + empty FOOD), i.e. wrong block-breaking speed and tool damage on all older targets. It COULD be  |
-| `features/recipe/MixinEntityPacketRewriter1_12.java` | `com.viaversion.viaversion.protocols.v1_11_1to1_12.rewriter.EntityPacketRewriter1_12$1 (the` | P2 | 1 | Real behaviour gap, not a non-issue. Via's LOGIN handler does `if (protocolInfo.protocolVersion().newerThanOrEqualTo(v1_13)) wrapper.create(ClientboundPackets1_13.UPDATE_RECIPES, w -> w.write(VAR_INT, 0)).scheduleSend(Protocol1_12_2To1_13.class)`; a 26.2 client always satisfies that check, so on every join to a <=1.11.1 server an empty recipe list reaches the untouched ClientPacketListener#handleUpdateRecipes (src/ma |
-| `compat/classic4j/MixinCCAuthenticationResponse.java` | `de.florianreuth.classic4j.model.classicube.CCAuthenticationResponse (classic4j-2.3.0.jar)` | P3 | 1 | REAL but cosmetic gap. classic4j wraps getErrorDisplay() in a javax.security.auth.login.LoginException and hands it to LoginProcessHandler#handleException (verified by javap of ClassiCubeHandler), and Sigma's com/viaversion/viafabricplus/screen/impl/classic4j/ClassiCubeLoginScreen.java:95 does setupSubtitle(Component.nullToEmpty(throwable.getMessage())), so the user currently sees classic4j's hardcoded English ("Inva |
-| `compat/fabricapi/MixinClientRegistrySyncHandler.java` | `net.fabricmc.fabric.impl.client.registry.sync.ClientRegistrySyncHandler` | P3 | 1 | No behaviour gap: without Fabric API's registry-sync there is no S2C registry-sync payload and no "Received unknown remote registry entry" logger.error to cancel, so the hook has nothing to guard. Side effect worth knowing: DebugSettings.ignoreFabricSyncErrors (com/viaversion/viafabricplus/settings/impl/DebugSettings.java:39) is now a dead toggle - it is read nowhere in the tree. If Sigma ever adds its own registry-s |
-| `compat/ipnext/MixinAutoRefillHandler_ItemSlotMonitor.java` | `org.anti_ad.mc.ipnext.event.AutoRefillHandler$ItemSlotMonitor (@Pseudo, Inventory Profiles` | P3 | 3 | No gap. Three injection points counted: checkHandle@HEAD and checkShouldHandle@HEAD (one @Inject with method={...}) plus updateCurrent at the currentSlotId FIELD write (shift=AFTER), all cancelling when currentSlotId == 45 and target <= 1.8. @Shadow currentSlotId is not counted as a hook. Sigma has no auto-refill of its own (no AutoRefill/slot-45 handling under com/mentalfrostbyte), so nothing re-touches the offhand  |
-| `compat/mcstructs/MixinTextComponentSerializer.java` | `com.viaversion.viaversion.libs.mcstructs.text.serializer.TextComponentSerializer (shaded i` | P3 | 1 | No behaviour gap - the fix has been upstreamed into the shaded MCStructs that this build already depends on, so the @Overwrite would be a no-op here. Nothing to port. @Shadow legacyGson and @Shadow getGson() are not counted as hooks. If viaversion-common is ever downgraded, re-check this one: the missing piece would be the LegacyGson.checkStartingType/fixInvalidEscapes pre-pass for legacy (<= 1.8) chat JSON, and it c |
-| `compat/minecraftauth/MixinClasses.java` | `io.jsonwebtoken.lang.Classes (jjwt-api-0.13.0.jar, via MinecraftAuth)` | P3 | 1 | No behaviour gap. The @Overwrite exists only because Fabric's Knot classloader is not the TCCL, so jjwt's classloader chain fails under the Fabric loader. Sigma launches from Start.java with a plain `java -cp` app classloader, where TCCL == own CL == system CL, so the stock Classes.forName resolves and the workaround is unnecessary. Nothing to port; if a custom classloader is ever introduced by the launcher this beco |
-| `compat/minecraftauth/MixinDefaultJwtParserBuilder.java` | `io.jsonwebtoken.impl.DefaultJwtParserBuilder (jjwt-impl-0.13.0.jar, via MinecraftAuth)` | P3 | 1 | No behaviour gap - same root cause as MixinClasses: the @Redirect replaces jjwt's java.util.ServiceLoader lookup with `new GsonDeserializer<>()` purely to survive Fabric's Knot classloader. Under Sigma's normal classpath launch the service file is found, so MinecraftAuth's JWT parsing works unpatched. Nothing to port. |
-| `core/access/MixinChunkTracker.java` | `net.raphimc.viabedrock.protocol.storage.ChunkTracker (ViaBedrock-0.0.29-SNAPSHOT.jar)` | P3 | 3 | REAL gap and a live crash, not just a missing readout: VFPDebugHudEntry was copied verbatim and still does `(IChunkTracker) chunkTracker` at line 79, but ChunkTracker cannot implement that interface without a mixin, so this throws ClassCastException. The entry is registered (net/minecraft/client/gui/components/debug/DebugScreenEntries.java:129), so the F3 overlay will blow up on any Bedrock connection once a ChunkTra |
-| `core/access/MixinExtensionProtocolMetadataStorage.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.storage.ExtensionProtocolMetadat` | P3 | 1 | REAL gap and a live ClassCastException: ListExtensionsCommand.java:49 still casts the storage to IExtensionProtocolMetadataStorage, and the command is registered (ViaFabricPlusCommandHandler.java:43), so `listextensions` on a ClassiCube/CPE server throws instead of listing. COULD be reimplemented through the public API: iterate ClassicProtocolExtension.values() and probe the public hasServerExtension(extension, versi |
-| `core/access/MixinRakSessionCodec.java` | `org.cloudburstmc.netty.handler.codec.raknet.common.RakSessionCodec (netty-transport-raknet` | P3 | 2 | REAL gap and a live crash: VFPDebugHudEntry.java:88 does `(IRakSessionCodec) rakSessionCodec` unchanged, which cannot succeed without a mixin, so the registered F3 entry (DebugScreenEntries.java:129) throws ClassCastException as soon as the channel is a RakClientChannel. Note the pipeline lookup and the getRTT()/getPing() parts of that line are fine - only TQ/RTQ need the accessors. No public API route (both fields p |
-| `core/integration/MixinViaBedrockConfig.java` | `net.raphimc.viabedrock.ViaBedrockConfig` | P3 | 1 | COULD be reimplemented through public API: ViaBedrock.init(ViaBedrockPlatform, ViaBedrockConfig) / ViaBedrockPlatform#init(ViaBedrockConfig) both accept a caller-supplied config, so subclass net.raphimc.viabedrock.ViaBedrockConfig, override shouldEnableExperimentalFeatures() to return BedrockSettings.INSTANCE.experimentalFeatures.getValue(), and pass it in from a ViaBedrockPlatformImpl subclass at ProtocolTranslator. |
-| `core/integration/MixinViaLegacyConfig.java` | `net.raphimc.vialegacy.ViaLegacyConfig` | P3 | 1 | hookTotal counted as 1 (a single @Inject annotation) but it expands to two override sites, isLegacySkullLoading and isLegacySkinLoading, both forced to the same setting. COULD be reimplemented through public API: subclass net.raphimc.vialegacy.ViaLegacyConfig overriding both getters to return GeneralSettings.INSTANCE.loadSkinsAndSkullsInLegacyVersions.getValue(), and override init(File) in the existing ViaFabricPlusV |
+| `compat/fabricapi/MixinClientRegistrySyncHandler.java` | `net.fabricmc.fabric.impl.client.registry.sync.ClientRegistrySyncHandler` | P3 | 1 | The @Mixin target is absent from this tree and cannot exist, proven by enumeration rather than assertion. find over src/main/java/net/fabricmc returns 15 files: api/client/command/v2 (2), api/client/event/lifecycle/v1, api/client/particle/v1, api/event (2), api/networking/v1/PayloadTypeRegistry, api/particle/v1, and loader/api (7). There is no net/fabricmc/fabric/impl package at all, so neither net.fabricmc.fabric.im |
+| `compat/ipnext/MixinAutoRefillHandler_ItemSlotMonitor.java` | `org.anti_ad.mc.ipnext.event.AutoRefillHandler$ItemSlotMonitor (@Pseudo, Inventory Profiles` | P3 | 3 | Proof, not plausibility, on two independent grounds. (1) The @Pseudo target cannot be loaded: I scanned the central directory of all 140 jars in target/dependency with unzip -Z1 for 'anti_ad' and got zero hits, and there is no mod-loading mechanism in this tree, so org.anti_ad.mc.ipnext.event.AutoRefillHandler$ItemSlotMonitor does not exist on any classpath - checkHandle/checkShouldHandle/updateCurrent have no bodies |
+| `compat/mcstructs/MixinTextComponentSerializer.java` | `com.viaversion.viaversion.libs.mcstructs.text.serializer.TextComponentSerializer (shaded i` | P3 | 1 | Bytecode proof, not a plausibility argument. The @Overwrite replaces deserialize(String) with `if (legacyGson) { LegacyGson.checkStartingType(json, true); json = LegacyGson.fixInvalidEscapes(json); } return getGson().fromJson(json, TextComponent.class)`. javap of the shipped class shows deserialize(String) is already exactly that: 0 getfield legacyGson / 4 ifeq 17 / 8 iconst_1 (the boolean is true, matching upstream) |
+| `compat/minecraftauth/MixinClasses.java` | `io.jsonwebtoken.lang.Classes (jjwt-api-0.13.0.jar, via MinecraftAuth)` | P3 | 1 | Target io.jsonwebtoken.lang.Classes is a jar class (jjwt-api-0.13.0.jar) and I have a real proof, not a plausibility argument, that there is no behaviour gap here. javap -c of Classes.forName shows the three-step heuristic THREAD_CL_ACCESSOR -> CLASS_CL_ACCESSOR -> SYSTEM_CL_ACCESSOR, throwing UnknownClassException only if all three miss; the @Overwrite exists purely because those three are not the same loader under  |
+| `compat/minecraftauth/MixinDefaultJwtParserBuilder.java` | `io.jsonwebtoken.impl.DefaultJwtParserBuilder (jjwt-impl-0.13.0.jar, via MinecraftAuth)` | P3 | 1 | Real proof, not a plausibility argument, and it is bytecode plus a jar entry. The mixin @Redirects Services.get(Class) inside DefaultJwtParserBuilder.build() and returns new GsonDeserializer<>(), purely to survive a classloader that cannot see service files. javap of jjwt-impl-0.13.0.jar shows build() at offsets 0-20: `if (this.deserializer == null) json((Deserializer) Services.get(Deserializer.class))` - one call, o |
 | `features/bedrock/allow_new_line/MixinFont.java` | `net.minecraft.client.gui.Font` | P3 | 0 | Feature is disabled upstream on ver/26.2 (VFP itself has not re-mapped it to the new Font.PreparedText API). If it is ever wanted, the landing sites are Font#prepareText(String,float,float,int,boolean,int) and Font#prepareText(FormattedCharSequence,...) at HEAD, plus Font#width(FormattedText); the commented code is also self-inconsistent (references ci/str/drawInBatch), so it would have to be rewritten, not transcrib |
-| `features/classic/cpe_extension/MixinClassicProtocolExtension.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.data.ClassicProtocolExtension (V` | P3 | 3 | COULD be reimplemented at bootstrap with public API only: getSupportedVersions() hands back the live mutable IntSet, so ClassicProtocolExtension.ENV_WEATHER_TYPE.getSupportedVersions().add(1) makes supportsVersion(1)/isSupported()/getHighestSupportedVersion() behave as the mixin forces (the mixin additionally returns true for ANY version argument, the set only for 1). Currently the gap is inert rather than broken: Si |
-| `features/classic/cpe_extension/MixinClientboundPacketsc0_30cpe.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.packet.ClientboundPacketsc0_30cp` | P3 | 1 | NO public API can do this - REGISTRY has no setter and no public accessor. Loaderless route is reflection: after CPEAdditions.createNewPacket, write the new constant into REGISTRY[packetId] with net.lenni0451.reflect (already a dependency and already used in that same method for Enums.newInstance/addEnumInstance). Currently moot because CPEAdditions.CUSTOM_PACKETS is never populated (createNewPacket call commented ou |
-| `features/classic/cpe_extension/MixinProtocolc0_30cpeToc0_28_30.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.Protocolc0_30cpeToc0_28_30 (ViaL` | P3 | 2 | The packet registration CAN be done through public API from ViaFabricPlusProtocolPatches.apply(): Via.getManager().getProtocolManager().getProtocol(Protocolc0_30cpeToc0_28_30.class).registerClientbound(CPEAdditions.EXT_WEATHER_TYPE, null, handlers) - Protocol#registerClientbound(CU, CM, PacketHandler) is public and verified present in the 5.12.0 jar. The per-connection reset has no API hook (Protocol#init) but is equ |
-| `features/item/tooltip/MixinComponentRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.ComponentRewriter1_21_5` | P3 | 1 | Real behaviour gap: the write side is missing, so for items inside show_item hover components the ported read side (src/main/java/net/minecraft/world/item/ItemStack.java:1019 vfpShowAdditionalTooltip, reading ItemUtil.vvNbtName(Protocol1_21_4To1_21_5.class, "backup"), used at :937) can never fire and chat-hover items on <=1.21.4 targets show additional tooltip lines the server hid. Real inventory items are unaffected |
-| `features/scoreboard/MixinComponentUtil.java` | `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJsonString(` | P3 | 1 | Real behaviour gap. The single @Redirect covers two target methods; both 3-arg and 4-arg StringFormat#fromString overloads are confirmed present in the shaded mcstructs, and the 3-arg one skips empty (formatting-only) sections, so trailing style-only runs in legacy §-strings are dropped for every pre-1.13 target - the scoreboard team prefix/suffix case this feature exists for, plus every other legacy->JSON conversion |
-| `features/world/footstep_particle/MixinMappingDataBase.java` | `com.viaversion.viaversion.api.data.MappingDataBase (viaversion-common JAR, 5.12.0-20260819` | P3 | 1 | Real behaviour gap, recorded below. In the JAR getNewParticleId is `return checkValidity(id, particleMappings.getNewId(id), "particles")`, so without the HEAD pass-through the synthetic viafabricplus:footstep raw id is rejected (and logged) at every step of the 1.12.2->26.2 protocol chain. COULD be reimplemented, but only at packet level: the ParticleMappings instance cannot be substituted (MappingDataBase.particleMa |
-| `features/world/footstep_particle/MixinParticleIdMappings1_13.java` | `com.viaversion.viaversion.protocols.v1_12_2to1_13.data.ParticleIdMappings1_13 (viaversion-` | P3 | 2 | hookTotal=2: the static-init @Inject("<clinit>", RETURN) overlap assertion and the @ModifyArg on add(I)V. The @Shadow @Final `particles` field is a shadow, not a hook. Real behaviour gap: FootStepParticle1_12_2 is still registered in Sigma (FeaturesLoading.java:48 -> FootStepParticle1_12_2.init(), with the registry temporarily unfrozen at FootStepParticle1_12_2.java:59-62) but vanilla Via maps 1.12.2 particle 28 to - |
-| `features/world/footstep_particle/MixinParticleMappings.java` | `com.viaversion.viaversion.api.data.ParticleMappings (viaversion-common JAR; mixin declares` | P3 | 2 | hookTotal=2: two overwrite-style method overrides merged into the target (getNewId(int) and mappedIdentifier(int)); the mixin's constructor is scaffolding for the `extends FullMappingsBase` declaration, not a target constructor hook. Same real gap as rows 3 and 4 - the footstep feature is inert in Sigma. NOT reimplementable as-is: the ParticleMappings instance lives in MappingDataBase.particleMappings (protected, con |
-| `features/world/footstep_particle/MixinRegistrySyncManager.java` | `net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager (Fabric API impl class)` | P3 | 1 | The only genuinely empty gap in this unit: the @WrapOperation exists solely to hide the runtime-registered viafabricplus:footstep entry from Fabric's registry-sync map (Registry#getKey returning null for it), and Sigma has no Fabric loader and no registry sync, so there is nothing to skip and nothing to reimplement through any API. The analogous Sigma-side concern - inserting a custom entry into an already frozen van |
+| `features/world/footstep_particle/MixinMappingDataBase.java` | `com.viaversion.viaversion.api.data.MappingDataBase (viaversion-common JAR, 5.12.0-20260819` | P3 | 1 | Jar target (MappingDataBase in viaversion-common) plus a real proof that the guarded condition cannot arise: the footstep feature was rebuilt so RAW_ID never enters a ViaVersion mapping at all. MixinParticleIdMappings1_13#replaceFootStepId was deliberately not ported, so the table still reads add(-1); // (28->-1) footstep -> REMOVED at ParticleIdMappings1_13.java:65, and Via's own LEVEL_PARTICLES handler cancels the  |
+| `features/world/footstep_particle/MixinParticleMappings.java` | `com.viaversion.viaversion.api.data.ParticleMappings (viaversion-common JAR; mixin declares` | P3 | 2 | Real proof: the guarded value can never reach either method in this tree. Both overrides only fire for FootStepParticle1_12_2.RAW_ID, and RAW_ID is never handed to a ViaVersion mapping - grep across the whole tree shows its only two uses are BuiltInRegistries.PARTICLE_TYPE.byId(RAW_ID) at Protocol1_12_2To1_13Patches.java:206 and a log line at :163. The upstream design that put RAW_ID into Via's id space (MixinParticl |
+| `features/world/footstep_particle/MixinRegistrySyncManager.java` | `net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager (Fabric API impl class)` | P3 | 1 | The hook's whole job is to hide the synthetic viafabricplus:footstep particle from the map Fabric API's RegistrySyncManager#createAndPopulateRegistryMap builds and ships to the server. The host of that behaviour does not exist here, proven by absence rather than by argument: net.fabricmc in this tree is 15 hand-written stub files (net/fabricmc/fabric/api/{client/command/v2, client/event/lifecycle/v1, client/particle/ |
 
 ## 全量账本 / full ledger (368)
 
 `Sigma 位置` 为空表示行为不落在源码树里（REPLACED 落在 `ViaFabricPlusProtocolPatches`，NOT_APPLICABLE 无落点）。
 
-### `compat/classic4j` — 4/5 hook, COMPLETE 1, NOT_APPLICABLE 1
+### `compat/classic4j` — 5/5 hook, COMPLETE 1, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinCCAuthenticationResponse.java` | `de.florianreuth.classic4j.model.classicube.CCAuthenticationResponse (classic4j-2` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinCCAuthenticationResponse.java` | `de.florianreuth.classic4j.model.classicube.CCAuthenticationResponse (classic4j-2` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/screen/impl/classic4j/ClassiCubeErrorTranslations.java:68` |
 | `MixinEditBox.java` | `net.minecraft.client.gui.components.EditBox` | 4 | 4 | COMPLETE | P3 | `net/minecraft/client/gui/components/EditBox.java` |
 
 ### `compat/fabricapi` — 0/1 hook, NOT_APPLICABLE 1
@@ -191,7 +188,7 @@
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinTextComponentSerializer.java` | `com.viaversion.viaversion.libs.mcstructs.text.serializer.TextComponentSerializer` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinTextComponentSerializer.java` | `com.viaversion.viaversion.libs.mcstructs.text.serializer.TextComponentSerializer` | 1 | 0 | NOT_APPLICABLE | P3 | `target/dependency/viaversion-common-5.12.0-SNAPSHOT.jar!com/viaversion/viaversion/libs/mcstructs/text/serializer/TextComponentSerializer.class#deserialize(String)` |
 
 ### `compat/minecraftauth` — 0/2 hook, NOT_APPLICABLE 2
 
@@ -207,14 +204,14 @@
 | `MixinMain.java` | `net.minecraft.client.main.Main` | 1 | 1 | COMPLETE | P0 | `net/minecraft/client/main/Main.java` |
 | `MixinMinecraft.java` | `net.minecraft.client.Minecraft` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/Minecraft.java` |
 
-### `core/access` — 3/9 hook, COMPLETE 1, NOT_APPLICABLE 3
+### `core/access` — 9/9 hook, COMPLETE 1, REPLACED 3
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinChunkTracker.java` | `net.raphimc.viabedrock.protocol.storage.ChunkTracker (ViaBedrock-0.0.29-SNAPSHOT` | 3 | 0 | NOT_APPLICABLE | P3 | — |
-| `MixinExtensionProtocolMetadataStorage.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.storage.ExtensionProto` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinChunkTracker.java` | `net.raphimc.viabedrock.protocol.storage.ChunkTracker (ViaBedrock-0.0.29-SNAPSHOT` | 3 | 3 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LibraryFieldAccessPatches.java:127` |
+| `MixinExtensionProtocolMetadataStorage.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.storage.ExtensionProto` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LibraryFieldAccessPatches.java:168` |
 | `MixinLocalSampleLogger.java` | `net.minecraft.util.debugchart.LocalSampleLogger` | 3 | 3 | COMPLETE | P0 | `net/minecraft/util/debugchart/LocalSampleLogger.java` |
-| `MixinRakSessionCodec.java` | `org.cloudburstmc.netty.handler.codec.raknet.common.RakSessionCodec (netty-transp` | 2 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinRakSessionCodec.java` | `org.cloudburstmc.netty.handler.codec.raknet.common.RakSessionCodec (netty-transp` | 2 | 2 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LibraryFieldAccessPatches.java:147 and :154, consumed at VFPDebugHudEntry.java:97-98` |
 
 ### `core/connection` — 13/13 hook, COMPLETE 5
 
@@ -246,20 +243,20 @@
 | `MixinManageServerScreen.java` | `net.minecraft.client.gui.screens.ManageServerScreen` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/gui/screens/ManageServerScreen.java` |
 | `MixinServerSelectionList_OnlineServerEntry.java` | `net.minecraft.client.gui.screens.multiplayer.ServerSelectionList$OnlineServerEnt` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/gui/screens/multiplayer/ServerSelectionList.java` |
 
-### `core/integration` — 15/19 hook, COMPLETE 6, NOT_APPLICABLE 3, PARTIAL 1
+### `core/integration` — 19/19 hook, COMPLETE 7, REPLACED 3
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
 | `MixinClientPacketListener.java` | `net.minecraft.client.multiplayer.ClientPacketListener` | 1 | 1 | COMPLETE | P0 | `net/minecraft/client/multiplayer/ClientPacketListener.java` |
 | `MixinConnectScreen_1.java` | `net.minecraft.client.gui.screens.ConnectScreen$1 (the anonymous Thread created i` | 4 | 4 | COMPLETE | P0 | `net/minecraft/client/gui/screens/ConnectScreen.java` |
-| `MixinConnection.java` | `net.minecraft.network.Connection` | 2 | 1 | PARTIAL | P3 | `net/minecraft/network/Connection.java` |
+| `MixinConnection.java` | `net.minecraft.network.Connection` | 2 | 2 | COMPLETE | P3 | `net/minecraft/network/Connection.java:161-170 (printNetworkingErrors only)` |
 | `MixinDebugScreenEntries.java` | `net.minecraft.client.gui.components.debug.DebugScreenEntries` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/gui/components/debug/DebugScreenEntries.java` |
 | `MixinJoinMultiplayerScreen.java` | `net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen` | 2 | 2 | COMPLETE | P0 | `net/minecraft/client/gui/screens/multiplayer/JoinMultiplayerScreen.java` |
 | `MixinServerData.java` | `net.minecraft.client.multiplayer.ServerData` | 4 | 4 | COMPLETE | P0 | `net/minecraft/client/multiplayer/ServerData.java` |
 | `MixinServerStatusPinger_1.java` | `net.minecraft.client.multiplayer.ServerStatusPinger$1 (the anonymous ClientStatu` | 2 | 2 | COMPLETE | P0 | `net/minecraft/client/multiplayer/ServerStatusPinger.java` |
-| `MixinUserConnectionImpl.java` | `com.viaversion.viaversion.connection.UserConnectionImpl` | 1 | 0 | NOT_APPLICABLE | P1 | — |
-| `MixinViaBedrockConfig.java` | `net.raphimc.viabedrock.ViaBedrockConfig` | 1 | 0 | NOT_APPLICABLE | P3 | — |
-| `MixinViaLegacyConfig.java` | `net.raphimc.vialegacy.ViaLegacyConfig` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinUserConnectionImpl.java` | `com.viaversion.viaversion.connection.UserConnectionImpl` | 1 | 1 | REPLACED | P1 | `com/viaversion/viafabricplus/protocoltranslator/util/NoPacketSendUserConnection.java:50 and :59, installed at ProtocolTranslator.java:246` |
+| `MixinViaBedrockConfig.java` | `net.raphimc.viabedrock.ViaBedrockConfig` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/platform/ViaFabricPlusViaBedrockConfig.java:46, carried in by ViaFabricPlusViaBedrockPlatform.java:37 (installed at ProtocolTranslator.java:318)` |
+| `MixinViaLegacyConfig.java` | `net.raphimc.vialegacy.ViaLegacyConfig` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/platform/ViaFabricPlusViaLegacyConfig.java:48 and :53, wired at ViaFabricPlusViaLegacyPlatform.java:42` |
 
 ### `core/integration/bedrock` — 3/3 hook, COMPLETE 3
 
@@ -374,7 +371,7 @@
 | `MixinBlockBehaviour_BlockStateBase.java` | `net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/level/block/state/BlockBehaviour.java` |
 | `MixinPlayer.java` | `net.minecraft.world.entity.player.Player` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/entity/player/Player.java` |
 
-### `features/block/shape` — 61/69 hook, COMPLETE 29, PARTIAL 1
+### `features/block/shape` — 61/69 hook, COMPLETE 30
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
@@ -395,7 +392,7 @@
 | `MixinFenceGateBlock.java` | `net.minecraft.world.level.block.FenceGateBlock` | 2 | 2 | COMPLETE | P2 | `net/minecraft/world/level/block/FenceGateBlock.java` |
 | `MixinFireBlock.java` | `net.minecraft.world.level.block.FireBlock` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/level/block/FireBlock.java` |
 | `MixinFlowerBedBlock.java` | `net.minecraft.world.level.block.FlowerBedBlock` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/level/block/FlowerBedBlock.java` |
-| `MixinHopperBlock.java` | `net.minecraft.world.level.block.HopperBlock` | 4 | 2 | PARTIAL | P3 | `net/minecraft/world/level/block/HopperBlock.java` |
+| `MixinHopperBlock.java` | `net.minecraft.world.level.block.HopperBlock` | 4 | 2 | COMPLETE | P3 | `net/minecraft/world/level/block/HopperBlock.java:80` |
 | `MixinIronBarsBlock.java` | `net.minecraft.world.level.block.IronBarsBlock` | 5 | 5 | COMPLETE | P2 | `net/minecraft/world/level/block/IronBarsBlock.java` |
 | `MixinLadderBlock.java` | `net.minecraft.world.level.block.LadderBlock` | 2 | 2 | COMPLETE | P2 | `net/minecraft/world/level/block/LadderBlock.java` |
 | `MixinLeavesBlock.java` | `net.minecraft.world.level.block.LeavesBlock` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/level/block/LeavesBlock.java` |
@@ -409,14 +406,14 @@
 | `MixinTransparentBlock.java` | `net.minecraft.world.level.block.TransparentBlock` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/level/block/TransparentBlock.java` |
 | `MixinWallBlock.java` | `net.minecraft.world.level.block.WallBlock` | 10 | 10 | COMPLETE | P2 | `net/minecraft/world/level/block/WallBlock.java` |
 
-### `features/classic/cpe_extension` — 1/7 hook, COMPLETE 1, NOT_APPLICABLE 3
+### `features/classic/cpe_extension` — 7/7 hook, COMPLETE 1, REPLACED 3
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinClassicProtocolExtension.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.data.ClassicProtocolEx` | 3 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinClassicProtocolExtension.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.data.ClassicProtocolEx` | 3 | 3 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ClassicCpeExtensionPatches.java:164` |
 | `MixinClientLevel.java` | `net.minecraft.client.multiplayer.ClientLevel` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/multiplayer/ClientLevel.java` |
-| `MixinClientboundPacketsc0_30cpe.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.packet.ClientboundPack` | 1 | 0 | NOT_APPLICABLE | P3 | — |
-| `MixinProtocolc0_30cpeToc0_28_30.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.Protocolc0_30cpeToc0_2` | 2 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinClientboundPacketsc0_30cpe.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.packet.ClientboundPack` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ClassicCpeExtensionPatches.java:171 (registerPreNettyPacketId), called at :115` |
+| `MixinProtocolc0_30cpeToc0_28_30.java` | `net.raphimc.vialegacy.protocol.classic.c0_30cpetoc0_28_30.Protocolc0_30cpeToc0_2` | 2 | 2 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ClassicCpeExtensionPatches.java:106-165` |
 
 ### `features/classic/world_height` — 3/3 hook, REPLACED 3
 
@@ -432,11 +429,11 @@
 |---|---|---|---|---|---|---|
 | `MixinEntityLookup.java` | `net.minecraft.world.level.entity.EntityLookup` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/level/entity/EntityLookup.java` |
 
-### `features/entity/attribute` — 1/2 hook, COMPLETE 1, NOT_APPLICABLE 1
+### `features/entity/attribute` — 2/2 hook, COMPLETE 1, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinEntityPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.EntityPacketRewrite` | 1 | 0 | NOT_APPLICABLE | P1 | — |
+| `MixinEntityPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.EntityPacketRewrite` | 1 | 1 | REPLACED | P1 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/EntityAttributePatches.java:82-140` |
 | `MixinLivingEntity.java` | `net.minecraft.world.entity.LivingEntity` | 1 | 1 | COMPLETE | P1 | `net/minecraft/world/entity/LivingEntity.java` |
 
 ### `features/entity/dimensions` — 52/52 hook, COMPLETE 39
@@ -513,14 +510,14 @@
 | `MixinEntityRenderDispatcher.java` | `net.minecraft.client.renderer.entity.EntityRenderDispatcher` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/renderer/entity/EntityRenderDispatcher.java` |
 | `MixinLayerDefinitions.java` | `net.minecraft.client.model.geom.LayerDefinitions` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/model/geom/LayerDefinitions.java` |
 
-### `features/entity/metadata` — 1/7 hook, COMPLETE 1, NOT_APPLICABLE 4
+### `features/entity/metadata` — 2/7 hook, COMPLETE 1, MISSING 3, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinCommonBoss.java` | `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)` | 1 | 0 | NOT_APPLICABLE | P2 | — |
-| `MixinEntityPacketRewriter1_15.java` | `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1` | 1 | 0 | NOT_APPLICABLE | P2 | — |
-| `MixinEntityPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.EntityPacketRewriter1_9 (` | 1 | 0 | NOT_APPLICABLE | P1 | — |
-| `MixinEntityTracker1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersi` | 3 | 0 | NOT_APPLICABLE | P2 | — |
+| `MixinCommonBoss.java` | `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)` | 1 | 0 | MISSING | P2 | — |
+| `MixinEntityPacketRewriter1_15.java` | `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1` | 1 | 0 | MISSING | P2 | — |
+| `MixinEntityPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.EntityPacketRewriter1_9 (` | 1 | 1 | REPLACED | P1 | `net/minecraft/client/multiplayer/ClientPacketListener.java:703-713 (helper at src/main/java/net/minecraft/world/entity/LivingEntity.java:193)` |
+| `MixinEntityTracker1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersi` | 3 | 0 | MISSING | P2 | — |
 | `MixinWolf.java` | `net.minecraft.world.entity.animal.wolf.Wolf` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/entity/animal/wolf/Wolf.java` |
 
 ### `features/entity/pose` — 2/2 hook, COMPLETE 2
@@ -551,17 +548,17 @@
 | `MixinLivingEntity.java` | `net.minecraft.world.entity.LivingEntity` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/entity/LivingEntity.java` |
 | `MixinPlayer.java` | `net.minecraft.world.entity.player.Player` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/entity/player/Player.java` |
 
-### `features/interaction/container_clicking` — 18/21 hook, COMPLETE 6, NOT_APPLICABLE 3
+### `features/interaction/container_clicking` — 21/21 hook, COMPLETE 6, REPLACED 3
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
 | `MixinAbstractContainerMenu.java` | `net.minecraft.world.inventory.AbstractContainerMenu` | 4 | 4 | COMPLETE | P0 | `net/minecraft/world/inventory/AbstractContainerMenu.java` |
 | `MixinAbstractContainerScreen.java` | `net.minecraft.client.gui.screens.inventory.AbstractContainerScreen` | 4 | 4 | COMPLETE | P1 | `net/minecraft/client/gui/screens/inventory/AbstractContainerScreen.java` |
 | `MixinAbstractFurnaceMenu.java` | `net.minecraft.world.inventory.AbstractFurnaceMenu` | 2 | 2 | COMPLETE | P2 | `net/minecraft/world/inventory/AbstractFurnaceMenu.java` |
-| `MixinBlockItemPacketRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.BlockItemPacketRewr` | 1 | 0 | NOT_APPLICABLE | P0 | — |
+| `MixinBlockItemPacketRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.BlockItemPacketRewr` | 1 | 1 | REPLACED | P0 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ContainerAndLevelLoadingPatches.java:136` |
 | `MixinCraftingMenu.java` | `net.minecraft.world.inventory.CraftingMenu` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/inventory/CraftingMenu.java` |
-| `MixinEntityTrackerBase.java` | `com.viaversion.viaversion.data.entity.EntityTrackerBase` | 1 | 0 | NOT_APPLICABLE | P0 | — |
-| `MixinItemPacketRewriter1_17.java` | `com.viaversion.viaversion.protocols.v1_16_4to1_17.rewriter.ItemPacketRewriter1_1` | 1 | 0 | NOT_APPLICABLE | P0 | — |
+| `MixinEntityTrackerBase.java` | `com.viaversion.viaversion.data.entity.EntityTrackerBase` | 1 | 1 | REPLACED | P0 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ContainerAndLevelLoadingPatches.java:176` |
+| `MixinItemPacketRewriter1_17.java` | `com.viaversion.viaversion.protocols.v1_16_4to1_17.rewriter.ItemPacketRewriter1_1` | 1 | 1 | REPLACED | P0 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ContainerAndLevelLoadingPatches.java:148-157` |
 | `MixinMerchantMenu.java` | `net.minecraft.world.inventory.MerchantMenu` | 2 | 2 | COMPLETE | P1 | `net/minecraft/world/inventory/MerchantMenu.java` |
 | `MixinMultiPlayerGameMode.java` | `net.minecraft.client.multiplayer.MultiPlayerGameMode` | 5 | 5 | COMPLETE | P0 | `net/minecraft/client/multiplayer/MultiPlayerGameMode.java` |
 
@@ -600,19 +597,19 @@
 | `MixinMinecraft.java` | `net.minecraft.client.Minecraft` | 2 | 2 | COMPLETE | P1 | `net/minecraft/client/Minecraft.java` |
 | `MixinMultiPlayerGameMode.java` | `net.minecraft.client.multiplayer.MultiPlayerGameMode` | 16 | 16 | COMPLETE | P0 | `net/minecraft/client/multiplayer/MultiPlayerGameMode.java` |
 
-### `features/item/attack_damage` — 4/9 hook, COMPLETE 2, NOT_APPLICABLE 1
+### `features/item/attack_damage` — 9/9 hook, COMPLETE 2, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
 | `MixinItemAttributeModifiers_Display_Default.java` | `net.minecraft.world.item.component.ItemAttributeModifiers$Display$Default` | 3 | 3 | COMPLETE | P3 | `net/minecraft/world/item/component/ItemAttributeModifiers.java` |
-| `MixinItemPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.ItemPacketRewriter1_9 (re` | 5 | 0 | NOT_APPLICABLE | P2 | — |
+| `MixinItemPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.ItemPacketRewriter1_9 (re` | 5 | 5 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ItemAttackDamagePatches.java:84-277` |
 | `MixinItemStack.java` | `net.minecraft.world.item.ItemStack` | 1 | 1 | COMPLETE | P3 | `net/minecraft/world/item/ItemStack.java` |
 
-### `features/item/data_fix` — 0/5 hook, NOT_APPLICABLE 1
+### `features/item/data_fix` — 5/5 hook, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinBlockItemPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.BlockItemPacketRewr` | 5 | 0 | NOT_APPLICABLE | P2 | — |
+| `MixinBlockItemPacketRewriter1_20_5.java` | `com.viaversion.viaversion.protocols.v1_20_3to1_20_5.rewriter.BlockItemPacketRewr` | 5 | 5 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyItemAndRecipePatches.java:86-397 (tables :86-112, loadItemMappings :309, blockJsonArrayToIds :373, fixItem :246, appended handlers :190-196)` |
 
 ### `features/item/filter_creative_tabs` — 4/4 hook, COMPLETE 2
 
@@ -650,24 +647,24 @@
 |---|---|---|---|---|---|---|
 | `MixinGuiGraphicsExtractor.java` | `net.minecraft.client.gui.GuiGraphicsExtractor` | 2 | 2 | COMPLETE | P3 | `net/minecraft/client/gui/GuiGraphicsExtractor.java` |
 
-### `features/item/sword_blocking` — 0/1 hook, NOT_APPLICABLE 1
+### `features/item/sword_blocking` — 1/1 hook, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinBlockItemPacketRewriter1_21_X.java` | `com.viaversion.viaversion.protocols.v1_21_2to1_21_4.rewriter.BlockItemPacketRewr` | 1 | 0 | NOT_APPLICABLE | P1 | — |
+| `MixinBlockItemPacketRewriter1_21_X.java` | `com.viaversion.viaversion.protocols.v1_21_2to1_21_4.rewriter.BlockItemPacketRewr` | 1 | 1 | REPLACED | P1 | `net/minecraft/world/item/Item.java:202 (use) and :315 (getUseAnimation)` |
 
-### `features/item/tooltip` — 2/3 hook, COMPLETE 1, NOT_APPLICABLE 1
+### `features/item/tooltip` — 3/3 hook, COMPLETE 1, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinComponentRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.ComponentRewriter1_` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinComponentRewriter1_21_5.java` | `com.viaversion.viaversion.protocols.v1_21_4to1_21_5.rewriter.ComponentRewriter1_` | 1 | 1 | REPLACED | P3 | `net/minecraft/world/item/ItemStack.java:1042-1075 (consumed at ItemStack.java:936-939)` |
 | `MixinItemStack.java` | `net.minecraft.world.item.ItemStack` | 2 | 2 | COMPLETE | P3 | `net/minecraft/world/item/ItemStack.java` |
 
-### `features/large_container` — 1/2 hook, PARTIAL 1
+### `features/large_container` — 2/2 hook, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinItemPacketRewriter1_14.java` | `com.viaversion.viaversion.protocols.v1_13_2to1_14.rewriter.ItemPacketRewriter1_1` | 2 | 1 | PARTIAL | P0 | — |
+| `MixinItemPacketRewriter1_14.java` | `com.viaversion.viaversion.protocols.v1_13_2to1_14.rewriter.ItemPacketRewriter1_1` | 2 | 2 | REPLACED | P0 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ViaFabricPlusProtocolPatches.java:221 and E:/.sigma/Sigma-Modern/src/main/java/com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ContainerAndLevelLoadingPatches.java:207` |
 
 ### `features/legacy_tab_completion` — 8/8 hook, COMPLETE 3
 
@@ -831,12 +828,12 @@
 | `MixinProfilePublicKey_Data.java` | `net.minecraft.world.entity.player.ProfilePublicKey$Data` | 2 | 2 | COMPLETE | P0 | `net/minecraft/world/entity/player/ProfilePublicKey.java` |
 | `MixinYggdrasilUserApiService.java` | `com.mojang.authlib.yggdrasil.YggdrasilUserApiService (AuthLib JAR — no source fi` | 1 | 1 | REPLACED | P0 | `net/minecraft/client/multiplayer/AccountProfileKeyPairManager.java` |
 
-### `features/networking/level_loading` — 9/10 hook, COMPLETE 2, NOT_APPLICABLE 1
+### `features/networking/level_loading` — 10/10 hook, COMPLETE 2, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
 | `MixinClientPacketListener.java` | `net.minecraft.client.multiplayer.ClientPacketListener` | 2 | 2 | COMPLETE | P3 | `net/minecraft/client/multiplayer/ClientPacketListener.java` |
-| `MixinEntityPacketRewriter1_20_3.java` | `com.viaversion.viaversion.protocols.v1_20_2to1_20_3.rewriter.EntityPacketRewrite` | 1 | 0 | NOT_APPLICABLE | P0 | — |
+| `MixinEntityPacketRewriter1_20_3.java` | `com.viaversion.viaversion.protocols.v1_20_2to1_20_3.rewriter.EntityPacketRewrite` | 1 | 1 | REPLACED | P0 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/ContainerAndLevelLoadingPatches.java:301` |
 | `MixinLevelLoadingScreen.java` | `net.minecraft.client.gui.screens.LevelLoadingScreen` | 7 | 7 | COMPLETE | P0 | `net/minecraft/client/gui/screens/LevelLoadingScreen.java` |
 
 ### `features/networking/limitation` — 1/1 hook, COMPLETE 1
@@ -845,12 +842,12 @@
 |---|---|---|---|---|---|---|
 | `MixinClientHandshakePacketListenerImpl.java` | `net.minecraft.client.multiplayer.ClientHandshakePacketListenerImpl` | 1 | 1 | COMPLETE | P0 | `net/minecraft/client/multiplayer/ClientHandshakePacketListenerImpl.java` |
 
-### `features/networking/limitation/nbt` — 0/2 hook, NOT_APPLICABLE 2
+### `features/networking/limitation/nbt` — 0/2 hook, MISSING 2
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinNamedCompoundTagType.java` | `com.viaversion.viaversion.api.type.types.misc.NamedCompoundTagType (viaversion-c` | 1 | 0 | NOT_APPLICABLE | P0 | — |
-| `MixinTagType.java` | `com.viaversion.viaversion.api.type.types.misc.TagType (viaversion-common JAR — n` | 1 | 0 | NOT_APPLICABLE | P0 | — |
+| `MixinNamedCompoundTagType.java` | `com.viaversion.viaversion.api.type.types.misc.NamedCompoundTagType (viaversion-c` | 1 | 0 | MISSING | P0 | — |
+| `MixinTagType.java` | `com.viaversion.viaversion.api.type.types.misc.TagType (viaversion-common JAR — n` | 1 | 0 | MISSING | P0 | — |
 
 ### `features/networking/open_inventory_packet` — 1/1 hook, COMPLETE 1
 
@@ -926,19 +923,19 @@
 | `MixinServerNameResolver.java` | `net.minecraft.client.multiplayer.resolver.ServerNameResolver` | 1 | 1 | COMPLETE | P0 | `net/minecraft/client/multiplayer/resolver/ServerNameResolver.java` |
 | `MixinServerRedirectHandler.java` | `net.minecraft.client.multiplayer.resolver.ServerRedirectHandler (the lambda retu` | 1 | 1 | COMPLETE | P0 | `net/minecraft/client/multiplayer/resolver/ServerRedirectHandler.java` |
 
-### `features/recipe` — 2/3 hook, COMPLETE 2, NOT_APPLICABLE 1
+### `features/recipe` — 3/3 hook, COMPLETE 2, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
 | `MixinCraftingMenu.java` | `net.minecraft.world.inventory.CraftingMenu` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/inventory/CraftingMenu.java` |
-| `MixinEntityPacketRewriter1_12.java` | `com.viaversion.viaversion.protocols.v1_11_1to1_12.rewriter.EntityPacketRewriter1` | 1 | 0 | NOT_APPLICABLE | P2 | — |
+| `MixinEntityPacketRewriter1_12.java` | `com.viaversion.viaversion.protocols.v1_11_1to1_12.rewriter.EntityPacketRewriter1` | 1 | 1 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyItemAndRecipePatches.java:408` |
 | `MixinInventoryMenu.java` | `net.minecraft.world.inventory.InventoryMenu` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/inventory/InventoryMenu.java` |
 
-### `features/scoreboard` — 1/2 hook, COMPLETE 1, NOT_APPLICABLE 1
+### `features/scoreboard` — 2/2 hook, COMPLETE 1, PARTIAL 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinComponentUtil.java` | `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJ` | 1 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinComponentUtil.java` | `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJ` | 1 | 1 | PARTIAL | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/Protocol1_12_2To1_13Patches.java:242 (handlers) and :304 (skipEmpty=false helper)` |
 | `MixinPlayerTeam.java` | `net.minecraft.world.scores.PlayerTeam` | 1 | 1 | COMPLETE | P3 | `net/minecraft/world/scores/PlayerTeam.java` |
 
 ### `features/screen_changes` — 8/8 hook, COMPLETE 5
@@ -999,12 +996,12 @@
 | `MixinLevelExtractor.java` | `net.minecraft.client.renderer.extract.LevelExtractor` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/renderer/extract/LevelExtractor.java` |
 | `MixinRemotePlayer.java` | `net.minecraft.client.player.RemotePlayer` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/player/RemotePlayer.java` |
 
-### `features/world/footstep_particle` — 0/6 hook, NOT_APPLICABLE 4
+### `features/world/footstep_particle` — 2/6 hook, NOT_APPLICABLE 3, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinMappingDataBase.java` | `com.viaversion.viaversion.api.data.MappingDataBase (viaversion-common JAR, 5.12.` | 1 | 0 | NOT_APPLICABLE | P3 | — |
-| `MixinParticleIdMappings1_13.java` | `com.viaversion.viaversion.protocols.v1_12_2to1_13.data.ParticleIdMappings1_13 (v` | 2 | 0 | NOT_APPLICABLE | P3 | — |
+| `MixinMappingDataBase.java` | `com.viaversion.viaversion.api.data.MappingDataBase (viaversion-common JAR, 5.12.` | 1 | 0 | NOT_APPLICABLE | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/Protocol1_12_2To1_13Patches.java:168 (the route that makes the hook unnecessary; the hook itself is implemented nowhere)` |
+| `MixinParticleIdMappings1_13.java` | `com.viaversion.viaversion.protocols.v1_12_2to1_13.data.ParticleIdMappings1_13 (v` | 2 | 2 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/Protocol1_12_2To1_13Patches.java:151` |
 | `MixinParticleMappings.java` | `com.viaversion.viaversion.api.data.ParticleMappings (viaversion-common JAR; mixi` | 2 | 0 | NOT_APPLICABLE | P3 | — |
 | `MixinRegistrySyncManager.java` | `net.fabricmc.fabric.impl.registry.sync.RegistrySyncManager (Fabric API impl clas` | 1 | 0 | NOT_APPLICABLE | P3 | — |
 
