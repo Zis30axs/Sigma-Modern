@@ -16,6 +16,8 @@ import com.mojang.datafixers.util.Pair;
 import com.mojang.logging.LogUtils;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -1997,7 +1999,14 @@ public class Options implements net.caffeinemc.mods.sodium.mixin.features.gui.Op
             .collect(Collectors.joining(System.lineSeparator()));
     }
 
-    public void setServerRenderDistance(final int serverRenderDistance) {
+    public void setServerRenderDistance(int serverRenderDistance) {
+        // MODIFIED for porting: was VFP world/remove_server_view_distance MixinOptions#changeServerViewDistance
+        // (@ModifyVariable HEAD, argsOnly = true) - servers on <= 1.17.1 never sent a view distance, so the radius Via
+        // synthesizes is discarded and getEffectiveRenderDistance falls back to the client's own render distance option.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17_1)) {
+            serverRenderDistance = 0;
+        }
+
         this.serverRenderDistance = serverRenderDistance;
     }
 

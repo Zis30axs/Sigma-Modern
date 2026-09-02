@@ -1,9 +1,11 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.injection.access.core.bedrock.IConfirmScreen;
 import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineTextWidget;
 import net.minecraft.client.gui.components.StringWidget;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.layouts.FrameLayout;
 import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.layouts.LinearLayout;
@@ -14,8 +16,9 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
+// MODIFIED for porting: was VFP core/integration/bedrock MixinConfirmScreen (implements IConfirmScreen)
 @OnlyIn(Dist.CLIENT)
-public class ConfirmScreen extends Screen {
+public class ConfirmScreen extends Screen implements IConfirmScreen {
     protected final Component message;
     protected final LinearLayout layout = LinearLayout.vertical().spacing(8);
     protected Component yesButtonComponent;
@@ -62,6 +65,18 @@ public class ConfirmScreen extends Screen {
     protected void repositionElements() {
         this.layout.arrangeElements();
         FrameLayout.centerInRectangle(this.layout, this.getRectangle());
+    }
+
+    // MODIFIED for porting: was VFP core/integration/bedrock MixinConfirmScreen#viaFabricPlus$updateMessage
+    // (accessor interface method). Used by BedrockSettings to live-update the device-code login status text.
+    @Override
+    public void viaFabricPlus$updateMessage(final Component message) {
+        for (final GuiEventListener element : this.children()) {
+            if (element instanceof final MultiLineTextWidget textWidget) {
+                textWidget.setMessage(message);
+                this.repositionElements();
+            }
+        }
     }
 
     protected void addAdditionalText() {

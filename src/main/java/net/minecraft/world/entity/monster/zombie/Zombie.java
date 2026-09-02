@@ -92,6 +92,11 @@ public class Zombie extends Monster {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F)
         .withEyeHeight(0.775F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombie#viaFabricPlus$baby_dimensions_r26_1 / _r1_21_11 (@Unique constants)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F)
+        .withEyeHeight(0.775F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    private static final EntityDimensions vfpBabyDimensionsR1_21_11 = EntityTypes.ZOMBIE.getDimensions().scale(0.5F).withEyeHeight(0.93F);
     private static final float BREAK_DOOR_CHANCE = 0.1F;
     private static final Predicate<Difficulty> DOOR_BREAKING_PREDICATE = d -> d == Difficulty.HARD;
     private static final boolean DEFAULT_BABY = false;
@@ -440,7 +445,20 @@ public class Zombie extends Monster {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinZombie#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombie#changeBabyDimensions (@Redirect body)
+    // Targets <=1.21.11 scaled the adult box by 0.5F with eye height 0.93F; <=26.1 used a 0.99F tall box instead of 0.98F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return vfpBabyDimensionsR1_21_11;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     @Override

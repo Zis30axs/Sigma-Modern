@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -20,6 +22,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 public class LilyPadBlock extends VegetationBlock {
     public static final MapCodec<LilyPadBlock> CODEC = simpleCodec(LilyPadBlock::new);
     private static final VoxelShape SHAPE = Block.column(14.0, 0.0, 1.5);
+    // MODIFIED for porting: was VFP block/shape MixinLilyPadBlock#viaFabricPlus$shape_r1_8_x (@Unique constant)
+    private static final VoxelShape vfpShapeR1_8X = Block.box(0.0, 0.0, 0.0, 16.0, 0.25, 16.0);
 
     @Override
     public MapCodec<LilyPadBlock> codec() {
@@ -47,6 +51,13 @@ public class LilyPadBlock extends VegetationBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinLilyPadBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.8 drew a lily pad as a paper-thin full 16x16 plate rather than the modern 14-wide 1.5px pad. This also
+        // moves collision, since LilyPadBlock inherits BlockBehaviour#getCollisionShape which delegates to getShape.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return vfpShapeR1_8X;
+        }
+
         return SHAPE;
     }
 

@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.function.Function;
 import net.minecraft.core.BlockPos;
@@ -24,6 +26,8 @@ public class FlowerBedBlock extends VegetationBlock implements BonemealableBlock
     public static final MapCodec<FlowerBedBlock> CODEC = simpleCodec(FlowerBedBlock::new);
     public static final EnumProperty<Direction> FACING = BlockStateProperties.HORIZONTAL_FACING;
     public static final IntegerProperty AMOUNT = BlockStateProperties.FLOWER_AMOUNT;
+    // MODIFIED for porting: was VFP block/shape MixinFlowerBedBlock#viaFabricPlus$shape_r1_20_1 (@Unique constant)
+    private static final VoxelShape vfpShapeR1_20_1 = Block.box(0.0, 0.0, 0.0, 16.0, 3.0, 16.0);
     private final Function<BlockState, VoxelShape> shapes;
 
     @Override
@@ -58,6 +62,12 @@ public class FlowerBedBlock extends VegetationBlock implements BonemealableBlock
 
     @Override
     public VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinFlowerBedBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.20 drew a pink petal bed as one full-width 3px slab, regardless of FACING and AMOUNT.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20)) {
+            return vfpShapeR1_20_1;
+        }
+
         return this.shapes.apply(state);
     }
 

@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -35,6 +37,10 @@ public class AnvilBlock extends FallingBlock {
     private static final Map<Direction.Axis, VoxelShape> SHAPES = Shapes.rotateHorizontalAxis(
         Shapes.or(Block.column(12.0, 0.0, 4.0), Block.column(8.0, 10.0, 4.0, 5.0), Block.column(4.0, 8.0, 5.0, 10.0), Block.column(10.0, 16.0, 10.0, 16.0))
     );
+    // MODIFIED for porting: was VFP block/shape MixinAnvilBlock#viaFabricPlus$x_axis_shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpXAxisShapeR1_12_2 = Block.box(0.0, 0.0, 2.0, 16.0, 16.0, 14.0);
+    // MODIFIED for porting: was VFP block/shape MixinAnvilBlock#viaFabricPlus$z_axis_shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpZAxisShapeR1_12_2 = Block.box(2.0, 0.0, 0.0, 14.0, 16.0, 16.0);
     private static final Component CONTAINER_TITLE = Component.translatable("container.repair");
     private static final float FALL_DAMAGE_PER_DISTANCE = 2.0F;
     private static final int FALL_DAMAGE_MAX = 40;
@@ -75,6 +81,14 @@ public class AnvilBlock extends FallingBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinAnvilBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 drew the anvil as a single full-height box spanning the facing axis, without the 1.13+ split
+        // into base, pillar and top. Upstream's MoreCulling-only getOcclusionShape workaround is not ported: that
+        // mod does not exist in this tree.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return state.getValue(FACING).getAxis() == Direction.Axis.X ? vfpXAxisShapeR1_12_2 : vfpZAxisShapeR1_12_2;
+        }
+
         return SHAPES.get(state.getValue(FACING).getAxis());
     }
 

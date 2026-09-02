@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
@@ -27,6 +29,11 @@ public class LanternBlock extends Block implements SimpleWaterloggedBlock {
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
     private static final VoxelShape SHAPE_STANDING = Shapes.or(Block.column(4.0, 7.0, 9.0), Block.column(6.0, 0.0, 7.0));
     private static final VoxelShape SHAPE_HANGING = SHAPE_STANDING.move(0.0, 0.0625, 0.0).optimize();
+    // MODIFIED for porting: was VFP bedrock/block MixinLanternBlock @Unique constants
+    // (viaFabricPlus$shape_bedrock, viaFabricPlus$shape_hanging_bedrock)
+    // Bedrock lanterns are a single 6/16 half-height box instead of vanilla's chain + body union.
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0.3125, 0.0, 0.3125, 0.6875, 0.5, 0.6875);
+    private static final VoxelShape vfpShapeHangingBedrock = Shapes.box(0.3125, 0.125, 0.3125, 0.6875, 0.625, 0.6875);
 
     @Override
     public MapCodec<? extends LanternBlock> codec() {
@@ -56,7 +63,24 @@ public class LanternBlock extends Block implements SimpleWaterloggedBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinLanternBlock#modifyCollisionShape (@Inject RETURN, cancellable)
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return state.getValue(HANGING) ? vfpShapeHangingBedrock : vfpShapeBedrock;
+        }
+
         return state.getValue(HANGING) ? SHAPE_HANGING : SHAPE_STANDING;
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinLanternBlock#getOcclusionShape (@Override, added method)
+    // The inherited occlusion shape is derived from getShape, so keep the vanilla silhouette here while the
+    // Bedrock box above only affects outline and collision.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return state.getValue(HANGING) ? SHAPE_HANGING : SHAPE_STANDING;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

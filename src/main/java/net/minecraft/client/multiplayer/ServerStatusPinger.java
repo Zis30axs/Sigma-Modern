@@ -3,6 +3,10 @@ package net.minecraft.client.multiplayer;
 import com.google.common.collect.Lists;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
+import com.viaversion.viafabricplus.injection.access.core.IConnection; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.BedrockSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.DebugSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion; // MODIFIED for porting: ViaFabricPlus
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelException;
@@ -17,6 +21,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.ChatFormatting;
+import net.minecraft.SharedConstants; // MODIFIED for porting: ViaFabricPlus core/integration MixinServerStatusPinger_1
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.multiplayer.resolver.ResolvedServerAddress;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
@@ -57,7 +62,11 @@ public class ServerStatusPinger {
     public void pingServer(
         final ServerData data, final Runnable onPersistentDataChange, final Runnable onPongResponse, final EventLoopGroupHolder eventLoopGroupHolder
     ) throws UnknownHostException {
-        final ServerAddress rawAddress = ServerAddress.parseString(data.ip);
+        // MODIFIED for porting: was VFP core/integration/bedrock MixinServerStatusPinger#replaceDefaultPort
+        // (@WrapOperation around ServerAddress#parseString). An entry forced to Bedrock and given no explicit port
+        // has to be pinged on 19132; unlike the join path this reads the forced version directly, with no
+        // passedDirectConnectScreen branch.
+        final ServerAddress rawAddress = ServerAddress.parseString(BedrockSettings.replaceDefaultPort(data.ip, data.viaFabricPlus$forcedVersion()));
         Optional<InetSocketAddress> resolvedAddress = ServerNameResolver.DEFAULT.resolveAddress(rawAddress).map(ResolvedServerAddress::asInetSocketAddress);
         if (resolvedAddress.isEmpty()) {
             this.onPingFailed(ConnectScreen.UNKNOWN_HOST_MESSAGE, data);
@@ -82,12 +91,26 @@ public class ServerStatusPinger {
 
                 @Override
                 public void handleStatusResponse(final ClientboundStatusResponsePacket packet) {
+                    // MODIFIED for porting: was VFP core/integration MixinServerStatusPinger_1#trackTranslatingState
+                    // (@Inject handleStatusResponse HEAD). Remembers which version this entry is being translated to,
+                    // so the server list can show it when hovering the ping bar. All versions.
+                    if (connection instanceof final IConnection viaFabricPlus$connection) {
+                        data.viaFabricPlus$setTranslatingVersion(viaFabricPlus$connection.viaFabricPlus$getTargetVersion());
+                    }
+
                     if (this.receivedPing) {
                         connection.disconnect(Component.translatable("multiplayer.status.unrequested"));
                     } else {
                         this.receivedPing = true;
                         ServerStatus status = packet.status();
-                        data.motd = sanitizeDescription(status.description());
+                        // MODIFIED for porting: was VFP features/networking/server_pinging
+                        // MixinServerStatusPinger_1#removeSanitizeDescription (@Redirect on sanitizeDescription).
+                        // <= 1.21.11 MOTDs get stripped or emptied by the modern sanitizer, so they are taken raw.
+                        // The gate is keyed on this entry's translating version, not on the global target version.
+                        final Component description = status.description();
+                        data.motd = DebugSettings.INSTANCE.removeServerDescriptionSanitize.isEnabled(data.viaFabricPlus$translatingVersion())
+                            ? description
+                            : sanitizeDescription(description);
                         status.version().ifPresentOrElse(version -> {
                             data.version = Component.literal(version.name());
                             data.protocol = version.protocol();
@@ -129,6 +152,15 @@ public class ServerStatusPinger {
                         });
                         this.pingStart = Util.getMillis();
                         connection.send(new ServerboundPingRequestPacket(this.pingStart));
+                        // MODIFIED for porting: was VFP core/integration MixinServerStatusPinger_1#fixVersionComparison
+                        // (@Inject on Connection#send in handleStatusResponse, shift AFTER). A translated server
+                        // advertises its own protocol, which would render the entry as incompatible, so the client
+                        // protocol is reported instead. All versions.
+                        final ProtocolVersion viaFabricPlus$version = ((IConnection) connection).viaFabricPlus$getTargetVersion();
+                        if (viaFabricPlus$version != null && viaFabricPlus$version.getVersion() == data.protocol) {
+                            data.protocol = SharedConstants.getProtocolVersion();
+                        }
+
                         this.success = true;
                     }
                 }

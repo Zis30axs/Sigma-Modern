@@ -1,8 +1,12 @@
 package net.minecraft.world.item;
 
 import java.util.Map;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
@@ -18,11 +22,14 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -84,7 +91,16 @@ public class BlockItem extends Item {
         }
 
         SoundType soundType = placedState.getSoundType();
-        level.playSound(player, pos, this.getPlaceSound(placedState), SoundSource.BLOCKS, (soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F);
+        // MODIFIED for porting: was VFP world/duplicated_sounds MixinBlockItem#disableBlockPlaceSounds
+        // (@WrapWithCondition INVOKE Level#playSound)
+        // Servers 1.8 and older send the place sound themselves (DebugSettings.serversidePlaceSounds), so the
+        // client copy would double it.
+        if (!DebugSettings.INSTANCE.serversidePlaceSounds.isEnabled()) {
+            level.playSound(
+                player, pos, this.getPlaceSound(placedState), SoundSource.BLOCKS, (soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F
+            );
+        }
+
         level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(player, placedState));
         itemStack.consume(1, player);
         return InteractionResult.SUCCESS;
@@ -132,6 +148,33 @@ public class BlockItem extends Item {
     }
 
     protected boolean canPlace(final BlockPlaceContext context, final BlockState stateForPlacement) {
+        // MODIFIED for porting: was VFP item/interaction MixinBlockItem#checkChestPlacement
+        // (@Inject HEAD, cancellable)
+        // 1.12.2 and older refused to place a chest that would form a triple chest or attach to an already
+        // double chest.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            final Block block = stateForPlacement.getBlock();
+            if (block == Blocks.CHEST || block == Blocks.TRAPPED_CHEST) {
+                final Level chestLevel = context.getLevel();
+                final BlockPos chestPos = context.getClickedPos();
+                boolean foundAdjChest = false;
+
+                for (final Direction dir : Direction.Plane.HORIZONTAL) {
+                    final BlockState otherState = chestLevel.getBlockState(chestPos.relative(dir));
+                    if (otherState.getBlock() == block) {
+                        if (foundAdjChest) {
+                            return false;
+                        }
+
+                        foundAdjChest = true;
+                        if (otherState.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
         Player player = context.getPlayer();
         return (!this.mustSurvive() || stateForPlacement.canSurvive(context.getLevel(), context.getClickedPos()))
             && context.getLevel().isUnobstructed(stateForPlacement, context.getClickedPos(), CollisionContext.placementContext(player));

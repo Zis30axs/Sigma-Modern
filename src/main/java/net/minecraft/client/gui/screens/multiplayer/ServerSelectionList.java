@@ -30,7 +30,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.DebugSettings; // MODIFIED for porting: ViaFabricPlus
 import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion; // MODIFIED for porting: ViaFabricPlus
 import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Util;
@@ -264,6 +267,10 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
         private @Nullable List<Component> onlinePlayersTooltip;
         private @Nullable Identifier statusIcon;
         private @Nullable Component statusIconTooltip;
+        // MODIFIED for porting: was VFP features/networking/server_pinging
+        // MixinServerSelectionList_OnlineServerEntry#viaFabricPlus$disableServerPinging (@Unique). Set on the single
+        // extractContent pass that would have started the ping and read by the eight render hooks below.
+        private boolean vfpDisableServerPinging = false;
 
         protected OnlineServerEntry(final JoinMultiplayerScreen screen, final ServerData serverData) {
             this.screen = screen;
@@ -279,47 +286,70 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 this.serverData.setState(ServerData.State.PINGING);
                 this.serverData.motd = CommonComponents.EMPTY;
                 this.serverData.status = CommonComponents.EMPTY;
-                ServerSelectionList.THREAD_POOL
-                    .submit(
-                        () -> {
-                            try {
-                                this.screen
-                                    .getPinger()
-                                    .pingServer(
-                                        this.serverData,
-                                        () -> this.minecraft.execute(this::updateServerList),
-                                        () -> {
-                                            this.serverData
-                                                .setState(
-                                                    this.serverData.protocol == SharedConstants.getCurrentVersion().protocolVersion()
-                                                        ? ServerData.State.SUCCESSFUL
-                                                        : ServerData.State.INCOMPATIBLE
-                                                );
-                                            this.minecraft.execute(this::refreshStatus);
-                                        },
-                                        EventLoopGroupHolder.remote(this.minecraft.options.useNativeTransport())
-                                    );
-                            } catch (UnknownHostException ignored) {
-                                this.serverData.setState(ServerData.State.UNREACHABLE);
-                                this.serverData.motd = ServerSelectionList.CANT_RESOLVE_TEXT;
-                                this.minecraft.execute(this::refreshStatus);
-                            } catch (Exception ignored) {
-                                this.serverData.setState(ServerData.State.UNREACHABLE);
-                                this.serverData.motd = ServerSelectionList.CANT_CONNECT_TEXT;
-                                this.minecraft.execute(this::refreshStatus);
+                // MODIFIED for porting: was VFP features/networking/server_pinging
+                // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapOperation around
+                // ThreadPoolExecutor#submit). b1.7.3 and older cannot answer a status ping at all, so the entry is
+                // never pinged and shows the forced or target version instead. Upstream returns null instead of a
+                // Future and leaves the entry in PINGING, which is what the state redirect further down relies on.
+                ProtocolVersion viaFabricPlus$version = this.serverData.viaFabricPlus$forcedVersion();
+                if (viaFabricPlus$version == null) {
+                    viaFabricPlus$version = ProtocolTranslator.getTargetVersion();
+                }
+
+                this.vfpDisableServerPinging = DebugSettings.INSTANCE.disableServerPinging.isEnabled(viaFabricPlus$version);
+                if (this.vfpDisableServerPinging) {
+                    this.serverData.version = Component.nullToEmpty(viaFabricPlus$version.getName()); // Show target version
+                } else {
+                    ServerSelectionList.THREAD_POOL
+                        .submit(
+                            () -> {
+                                try {
+                                    this.screen
+                                        .getPinger()
+                                        .pingServer(
+                                            this.serverData,
+                                            () -> this.minecraft.execute(this::updateServerList),
+                                            () -> {
+                                                this.serverData
+                                                    .setState(
+                                                        this.serverData.protocol == SharedConstants.getCurrentVersion().protocolVersion()
+                                                            ? ServerData.State.SUCCESSFUL
+                                                            : ServerData.State.INCOMPATIBLE
+                                                    );
+                                                this.minecraft.execute(this::refreshStatus);
+                                            },
+                                            EventLoopGroupHolder.remote(this.minecraft.options.useNativeTransport())
+                                        );
+                                } catch (UnknownHostException ignored) {
+                                    this.serverData.setState(ServerData.State.UNREACHABLE);
+                                    this.serverData.motd = ServerSelectionList.CANT_RESOLVE_TEXT;
+                                    this.minecraft.execute(this::refreshStatus);
+                                } catch (Exception ignored) {
+                                    this.serverData.setState(ServerData.State.UNREACHABLE);
+                                    this.serverData.motd = ServerSelectionList.CANT_CONNECT_TEXT;
+                                    this.minecraft.execute(this::refreshStatus);
+                                }
                             }
-                        }
-                    );
+                        );
+                }
             }
 
             graphics.text(this.minecraft.font, this.serverData.name, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
-            List<FormattedCharSequence> lines = this.minecraft.font.split(this.serverData.motd, this.getContentWidth() - 32 - 2);
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on Font#split). Without a
+            // ping there is no MOTD, so the MOTD area shows the server address instead.
+            final Component viaFabricPlus$motd = this.vfpDisableServerPinging ? Component.nullToEmpty(this.serverData.ip) : this.serverData.motd;
+            List<FormattedCharSequence> lines = this.minecraft.font.split(viaFabricPlus$motd, this.getContentWidth() - 32 - 2);
 
             for (int i = 0; i < Math.min(lines.size(), 2); i++) {
                 graphics.text(this.minecraft.font, lines.get(i), this.getContentX() + 32 + 3, this.getContentY() + 12 + 9 * i, -8355712);
             }
 
-            this.extractIcon(graphics, this.getContentX(), this.getContentY(), this.icon.textureLocation());
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on
+            // FaviconTexture#textureLocation). Without a ping there is no server icon either.
+            final Identifier viaFabricPlus$icon = this.vfpDisableServerPinging ? FaviconTexture.MISSING_LOCATION : this.icon.textureLocation();
+            this.extractIcon(graphics, this.getContentX(), this.getContentY(), viaFabricPlus$icon);
             int index = ServerSelectionList.this.children().indexOf(this);
             if (this.serverData.state() == ServerData.State.PINGING) {
                 int iconIndex = (int)(Util.getMillis() / 100L + index * 2 & 7L);
@@ -336,7 +366,10 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
             }
 
             int statusIconX = this.getContentRight() - 10 - 5;
-            if (this.statusIcon != null) {
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on the first
+            // GuiGraphicsExtractor#blitSprite). Removes the ping bar.
+            if (this.statusIcon != null && !this.vfpDisableServerPinging) {
                 graphics.blitSprite(RenderPipelines.GUI_TEXTURED, this.statusIcon, statusIconX, this.getContentY(), 10, 8);
             }
 
@@ -350,12 +383,23 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 }
             }
 
-            Component status = this.serverData.state() == ServerData.State.INCOMPATIBLE
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on the GETSTATIC of
+            // ServerData$State.INCOMPATIBLE). With pinging disabled the entry stays in PINGING, and upstream
+            // redirects the constant to serverData.state() so this comparison always holds and the status column
+            // shows the forced or target version in red instead of a player count.
+            Component status = this.vfpDisableServerPinging || this.serverData.state() == ServerData.State.INCOMPATIBLE
                 ? this.serverData.version.copy().withStyle(ChatFormatting.RED)
                 : this.serverData.status;
             int statusWidth = this.minecraft.font.width(status);
             int statusX = statusIconX - statusWidth - 5;
-            graphics.text(this.minecraft.font, status, statusX, this.getContentY() + 1, -8355712);
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@ModifyArg on
+            // GuiGraphicsExtractor#text(Font, Component, int, int, int), index 2). Shifts the status label right by
+            // the removed ping bar's 15px width minus a 3px offset; statusX itself is left alone, so the hover box
+            // below keeps its vanilla position.
+            final int viaFabricPlus$statusX = this.vfpDisableServerPinging ? statusX + 15 - 3 : statusX;
+            graphics.text(this.minecraft.font, status, viaFabricPlus$statusX, this.getContentY() + 1, -8355712);
             if (this.statusIconTooltip != null
                 && mouseX >= statusIconX
                 && mouseX <= statusIconX + 10
@@ -369,8 +413,16 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                     viaFabricPlus$tooltips.add(
                         Component.translatable("base.viafabricplus.server_version", this.serverData.version.getString() + " (" + this.serverData.protocol + ")")
                     );
-                    graphics.setTooltipForNextFrame(Lists.transform(viaFabricPlus$tooltips, Component::getVisualOrderText), mouseX, mouseY);
-                } else {
+                    // MODIFIED for porting: was VFP features/networking/server_pinging
+                    // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
+                    // GuiGraphicsExtractor#setTooltipForNextFrame(Component, int, int)). Removes the ping-bar
+                    // tooltip: upstream applies that condition on top of the core/gui @WrapOperation above (same
+                    // call site, and server_pinging is the later mixin in the config), so it suppresses the whole
+                    // handler - both the version tooltip here and the plain one in the else branch.
+                    if (!this.vfpDisableServerPinging) {
+                        graphics.setTooltipForNextFrame(Lists.transform(viaFabricPlus$tooltips, Component::getVisualOrderText), mouseX, mouseY);
+                    }
+                } else if (!this.vfpDisableServerPinging) {
                     graphics.setTooltipForNextFrame(this.statusIconTooltip, mouseX, mouseY);
                 }
             } else if (this.onlinePlayersTooltip != null
@@ -378,7 +430,12 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 && mouseX <= statusX + statusWidth
                 && mouseY >= this.getContentY()
                 && mouseY <= this.getContentY() - 1 + 9) {
-                graphics.setTooltipForNextFrame(Lists.transform(this.onlinePlayersTooltip, Component::getVisualOrderText), mouseX, mouseY);
+                // MODIFIED for porting: was VFP features/networking/server_pinging
+                // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
+                // GuiGraphicsExtractor#setTooltipForNextFrame(List, int, int)). Removes the player-list tooltip.
+                if (!this.vfpDisableServerPinging) {
+                    graphics.setTooltipForNextFrame(Lists.transform(this.onlinePlayersTooltip, Component::getVisualOrderText), mouseX, mouseY);
+                }
             }
 
             if (hovered) {

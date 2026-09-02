@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -43,6 +45,14 @@ public class BoneMealItem extends Item {
                 level.levelEvent(1505, pos, 15);
                 return InteractionResult.SUCCESS_SERVER;
             } else {
+                // MODIFIED for porting: was VFP item/interaction MixinBoneMealItem#dontSwingHand (@Inject RETURN
+                // ordinal 1, cancellable) - the client-side exit of the growCrop-succeeded branch. Ordinal 0 is the
+                // SUCCESS_SERVER above and ordinal 2 is the water-plant SUCCESS below, neither of which is touched.
+                // Exactly 26.1 does not swing the hand for a successful bone meal use.
+                if (ProtocolTranslator.getTargetVersion().equalTo(ProtocolVersion.v26_1)) {
+                    return InteractionResult.PASS;
+                }
+
                 return InteractionResult.SUCCESS;
             }
         } else {

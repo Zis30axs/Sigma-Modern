@@ -2,6 +2,8 @@ package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
@@ -102,8 +104,22 @@ public class DecoratedPotBlock extends BaseEntityBlock implements SimpleWaterlog
         final InteractionHand hand,
         final BlockHitResult hitResult
     ) {
+        // MODIFIED for porting: was VFP block/interaction MixinDecoratedPotBlock#alwaysPass (@Inject HEAD, cancellable)
+        // <= 1.20.2 knew nothing about inserting items into decorated pots, so the whole interaction falls through.
+        // Must be tested before the <= 1.21 hand-swing hook below, which upstream gates on a wider range.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2)) {
+            return InteractionResult.PASS;
+        }
+
         if (level.getBlockEntity(pos) instanceof DecoratedPotBlockEntity decoratedPot) {
             if (level.isClientSide()) {
+                // MODIFIED for porting: was VFP block/interaction MixinDecoratedPotBlock#dontSwingHand (@Redirect on
+                // the ordinal-0 GETSTATIC of InteractionResult.SUCCESS) - CONSUME is the same Success value with
+                // SwingSource.NONE, so <= 1.21 plays no client-side hand swing for the insert.
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+                    return InteractionResult.CONSUME;
+                }
+
                 return InteractionResult.SUCCESS;
             }
 

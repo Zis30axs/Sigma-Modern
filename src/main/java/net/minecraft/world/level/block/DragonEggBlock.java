@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.util.Mth;
@@ -15,6 +17,7 @@ import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class DragonEggBlock extends FallingBlock {
@@ -32,7 +35,25 @@ public class DragonEggBlock extends FallingBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinDragonEggBlock#changeOutlineShape (@Inject RETURN, cancellable)
+        // Bedrock dragon eggs are a full cube rather than vanilla's 14/16-wide column.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return Shapes.block();
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinDragonEggBlock#getOcclusionShape (@Override, added method)
+    // Load-bearing: the inherited occlusion shape comes from getShape, so the full cube above would make the egg
+    // occlude light. Keep the vanilla column.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPE;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

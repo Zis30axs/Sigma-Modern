@@ -1,5 +1,7 @@
 package net.minecraft.client.gui.screens.inventory;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.stream.IntStream;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -77,6 +79,13 @@ public abstract class AbstractSignEditScreen extends Screen {
     }
 
     private boolean isValid() {
+        // MODIFIED for porting: was VFP sign_editor_reach MixinAbstractSignEditScreen#dontCloseTooFarAwaySigns
+        // (@Inject HEAD, cancellable). <= 1.19.4 servers do no reach check on sign edits, so walking away must not
+        // close the editor and throw the typed text away; only the block still being a sign matters.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+            return this.sign.getType().isValid(this.sign.getBlockState());
+        }
+
         return this.minecraft.player != null && !this.sign.isRemoved() && !this.sign.playerIsTooFarAwayToEdit(this.minecraft.player.getUUID());
     }
 

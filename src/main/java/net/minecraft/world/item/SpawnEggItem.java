@@ -2,6 +2,8 @@ package net.minecraft.world.item;
 
 import java.util.Objects;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
@@ -40,6 +42,13 @@ public class SpawnEggItem extends Item {
 
     @Override
     public InteractionResult useOn(final UseOnContext context) {
+        // MODIFIED for porting: was VFP item/interaction MixinSpawnEggItem#swingHand (@Inject HEAD, cancellable)
+        // Up to and including 26.1 the client did not validate the egg's entity type itself, it just swung the
+        // hand and let the server decide.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return InteractionResult.SUCCESS;
+        }
+
         Level level = context.getLevel();
         ItemStack itemStack = context.getItemInHand();
         EntityType<?> type = getType(itemStack);
@@ -104,6 +113,13 @@ public class SpawnEggItem extends Item {
         BlockHitResult hitResult = getPlayerPOVHitResult(level, player, ClipContext.Fluid.SOURCE_ONLY);
         if (hitResult.getType() != HitResult.Type.BLOCK) {
             return InteractionResult.PASS;
+        }
+
+        // MODIFIED for porting: was VFP item/interaction MixinSpawnEggItem#swingHand
+        // (@Inject INVOKE SpawnEggItem#getType, i.e. after the POV hit-result BLOCK check)
+        // Up to and including 26.1 the client did not validate the egg's entity type itself.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return InteractionResult.SUCCESS;
         }
 
         EntityType<?> type = getType(itemStack);

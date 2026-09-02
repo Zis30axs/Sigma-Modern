@@ -1,6 +1,9 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.features.block.interaction.Block1_14;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
@@ -45,6 +48,15 @@ public abstract class BaseTorchBlock extends Block {
 
     @Override
     protected boolean canSurvive(final BlockState state, final LevelReader level, final BlockPos pos) {
-        return canSupportCenter(level, pos.below(), Direction.UP);
+        final boolean canSurvive = canSupportCenter(level, pos.below(), Direction.UP);
+        // MODIFIED for porting: was VFP block/interaction MixinCanPlaceAt1_14#canPlaceAt1_14 (@Inject RETURN, cancellable)
+        // <= 1.14 blocks which the piston attachment rules treat as exceptions could not be attached to at all, so the
+        // vanilla result is vetoed. Upstream deliberately queries the block AT pos, not the support block below.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14)
+            && Block1_14.isExceptBlockForAttachWithPiston(level.getBlockState(pos).getBlock())) {
+            return false;
+        }
+
+        return canSurvive;
     }
 }

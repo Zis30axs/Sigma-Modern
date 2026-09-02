@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.Arrays;
 import java.util.UUID;
@@ -15,7 +17,10 @@ import net.minecraft.util.Util;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.DyeItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.SignApplicator;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -97,6 +102,25 @@ public abstract class SignBlock extends BaseEntityBlock implements SimpleWaterlo
         final InteractionHand hand,
         final BlockHitResult hitResult
     ) {
+        // MODIFIED for porting: was VFP block/interaction MixinSignBlock#changeInteractionCalculation (@Inject HEAD,
+        // cancellable). Client side only - upstream returns straight away on the server, and Sigma runs an integrated
+        // server in the same JVM, so that early-out has to be kept. Both branches pre-empt the client return below.
+        if (level.isClientSide()) {
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+                // <= 1.14.4 doesn't have any sign interactions.
+                return InteractionResult.SUCCESS;
+            } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+                // Removes the isWaxed() condition and reverts the interaction changes from 1.19.4 -> 1.20 when signs
+                // got a front and back side.
+                final ItemStack itemInHand = player.getItemInHand(hand);
+                final Item item = itemInHand.getItem();
+                final boolean isSuccess = (item instanceof DyeItem || itemInHand.is(Items.GLOW_INK_SAC) || itemInHand.is(Items.INK_SAC))
+                    && player.mayBuild();
+
+                return isSuccess ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
+            }
+        }
+
         if (level.getBlockEntity(pos) instanceof SignBlockEntity sign) {
             SignApplicator signApplicator = itemStack.getItem() instanceof SignApplicator applicator ? applicator : null;
             boolean hasApplicatorToUse = signApplicator != null && player.mayBuild();

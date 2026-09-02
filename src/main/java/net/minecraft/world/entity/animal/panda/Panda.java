@@ -87,6 +87,11 @@ public class Panda extends Animal {
         .scale(0.5F)
         .withEyeHeight(0.28125F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.5625F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinPanda#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityTypes.PANDA
+        .getDimensions()
+        .scale(0.5F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.40625F, 0.0F));
     private static final int FLAG_SNEEZE = 2;
     private static final int FLAG_ROLL = 4;
     private static final int FLAG_SIT = 8;
@@ -696,7 +701,18 @@ public class Panda extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinPanda#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinPanda#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 had no explicit eye height on the cub and attached the rider at 0.40625F instead of 0.5625F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     private static boolean canPickUpAndEat(final ItemEntity entity) {

@@ -1,5 +1,6 @@
 package net.minecraft.client.gui.components.debug;
 
+import com.viaversion.viafabricplus.features.hud.VFPDebugHudEntry;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.resources.Identifier;
@@ -122,6 +123,22 @@ public class DebugScreenEntries {
             DebugScreenEntryStatus.IN_OVERLAY
         );
         PROFILES = Map.of(DebugScreenProfile.DEFAULT, defaultProfile, DebugScreenProfile.PERFORMANCE, performance);
+        // MODIFIED for porting: was VFP core/integration MixinDebugScreenEntries#addViaFabricPlusEntry
+        // (@Inject into <clinit> at RETURN). All versions - the entry itself decides what to show. PROFILES is
+        // an immutable Map.of above, so it has to be rebuilt as a mutable copy like upstream does.
+        final Identifier viaFabricPlusId = register(VFPDebugHudEntry.ID, new VFPDebugHudEntry());
+        final Map<DebugScreenProfile, Map<Identifier, DebugScreenEntryStatus>> viaFabricPlusProfiles = new HashMap<>();
+
+        for (Map.Entry<DebugScreenProfile, Map<Identifier, DebugScreenEntryStatus>> entry : PROFILES.entrySet()) {
+            final Map<Identifier, DebugScreenEntryStatus> entries = new HashMap<>(entry.getValue());
+            if (entry.getKey() == DebugScreenProfile.DEFAULT) {
+                entries.put(viaFabricPlusId, DebugScreenEntryStatus.IN_OVERLAY);
+            }
+
+            viaFabricPlusProfiles.put(entry.getKey(), entries);
+        }
+
+        PROFILES = viaFabricPlusProfiles;
         // MODIFIED for porting: was iris's MixinDebugEntries#onInit (@Inject into <clinit> at RETURN)
         if (net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()) {
             register(Identifier.fromNamespaceAndPath("iris", "iris"), new net.irisshaders.iris.gui.debug.IrisDebugEntry());

@@ -14,6 +14,8 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Supplier;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
@@ -35,7 +37,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
-public abstract class AbstractContainerMenu {
+// MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerMenu
+// (IAbstractContainerMenu implementation). The <= 1.16.5 Window Click packet VFP hand-builds carries an
+// action number (transaction id) which the server acknowledges; it is supplied from here.
+public abstract class AbstractContainerMenu
+    implements com.viaversion.viafabricplus.injection.access.interaction.container_clicking.IAbstractContainerMenu {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final int SLOT_CLICKED_OUTSIDE = -999;
     public static final int QUICKCRAFT_TYPE_CHARITABLE = 0;
@@ -63,6 +69,9 @@ public abstract class AbstractContainerMenu {
     private final List<ContainerListener> containerListeners = Lists.newArrayList();
     private @Nullable ContainerSynchronizer synchronizer;
     private boolean suppressRemoteUpdates;
+    // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerMenu @Unique
+    // viaFabricPlus$actionId - the legacy Window Click action number, counted per menu instance.
+    private short vfpActionId = 0;
 
     protected AbstractContainerMenu(final @Nullable MenuType<?> menuType, final int containerId) {
         this.menuType = menuType;
@@ -625,7 +634,12 @@ public abstract class AbstractContainerMenu {
             this.getSlot(i).set(items.get(i));
         }
 
-        this.carried = carried;
+        // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerMenu#preventUpdate
+        // (@Redirect on the PUTFIELD of carried). Window Items carries no cursor item before 1.17.1, so writing
+        // the (empty) value from the packet would wipe the client's own cursor stack.
+        if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_17_1)) {
+            this.carried = carried;
+        }
         this.stateId = stateId;
     }
 
@@ -829,5 +843,18 @@ public abstract class AbstractContainerMenu {
     public int incrementStateId() {
         this.stateId = this.stateId + 1 & 32767;
         return this.stateId;
+    }
+
+    // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerMenu
+    // IAbstractContainerMenu implementation. MultiPlayerGameMode's hand-built <= 1.16.5 CONTAINER_CLICK writes
+    // the pre-incremented action number returned here as the packet's transaction id.
+    @Override
+    public short viaFabricPlus$getActionId() {
+        return this.vfpActionId;
+    }
+
+    @Override
+    public short viaFabricPlus$incrementAndGetActionId() {
+        return ++this.vfpActionId;
     }
 }

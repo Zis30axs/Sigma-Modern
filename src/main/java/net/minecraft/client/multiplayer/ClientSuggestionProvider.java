@@ -4,6 +4,8 @@ import com.google.common.collect.Lists;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -49,6 +51,13 @@ public class ClientSuggestionProvider implements SharedSuggestionProvider {
 
     @Override
     public Collection<String> getOnlinePlayerNames() {
+        // MODIFIED for porting: was VFP bedrock/chat MixinClientSuggestionProvider#returnChatSuggestions
+        // (@Inject HEAD cancellable). Bedrock has no client-side player list, so the server-pushed custom
+        // completion set is the only suggestion source.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return this.customCompletionSuggestions;
+        }
+
         List<String> result = Lists.newArrayList();
 
         for (PlayerInfo info : this.connection.getOnlinePlayers()) {
@@ -60,6 +69,12 @@ public class ClientSuggestionProvider implements SharedSuggestionProvider {
 
     @Override
     public Collection<String> getCustomTabSuggestions() {
+        // MODIFIED for porting: was VFP bedrock/chat MixinClientSuggestionProvider#returnChatSuggestions
+        // (@Inject HEAD cancellable, second target method).
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return this.customCompletionSuggestions;
+        }
+
         if (this.customCompletionSuggestions.isEmpty()) {
             return this.getOnlinePlayerNames();
         }

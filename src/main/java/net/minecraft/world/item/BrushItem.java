@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.BlockParticleOption;
@@ -100,7 +102,12 @@ public class BrushItem extends Item {
     }
 
     private HitResult calculateHitResult(final Player player) {
-        return ProjectileUtil.getHitResultOnViewVector(player, EntitySelector.CAN_BE_PICKED, player.blockInteractionRange());
+        // MODIFIED for porting: was VFP item/interaction MixinBrushItem#modifyReachDistance (@Redirect on the
+        // Player#blockInteractionRange call). <= 1.20.2 has no attribute-based reach, so the brush uses a fixed 5.0.
+        final double reach = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2)
+            ? 5.0
+            : player.blockInteractionRange();
+        return ProjectileUtil.getHitResultOnViewVector(player, EntitySelector.CAN_BE_PICKED, reach);
     }
 
     private void spawnDustParticles(

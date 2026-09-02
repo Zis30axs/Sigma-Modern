@@ -6,6 +6,7 @@ import com.mojang.blaze3d.platform.cursor.CursorType;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.viaversion.viafabricplus.features.item.negative_item_count.NegativeItemUtil;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import net.minecraft.ChatFormatting;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
@@ -955,9 +957,22 @@ public class GuiGraphicsExtractor {
     }
 
     private void itemCount(final Font font, final ItemStack itemStack, final int x, final int y, final @Nullable String countText) {
-        if (itemStack.getCount() != 1 || countText != null) {
-            String amount = countText == null ? String.valueOf(itemStack.getCount()) : countText;
+        // MODIFIED for porting: was VFP item/negative_item_count MixinGuiGraphicsExtractor#handleNegativeItemCount
+        // (@Redirect on ItemStack#getCount with no ordinal, so both call sites) and #makeTextRed (@Redirect on
+        // String#valueOf(I)). No version gate upstream: NegativeItemUtil falls back to the real count, and only
+        // <= 1.10 stacks carry the negative amount in custom_data.
+        if (NegativeItemUtil.getCount(itemStack) != 1 || countText != null) {
+            String amount = countText == null ? vfpItemCountText(NegativeItemUtil.getCount(itemStack)) : countText;
             this.text(font, amount, x + 19 - 2 - font.width(amount), y + 6 + 3, -1, true);
+        }
+    }
+
+    // MODIFIED for porting: was VFP item/negative_item_count MixinGuiGraphicsExtractor#makeTextRed (@Redirect body)
+    private static String vfpItemCountText(final int count) {
+        if (count <= 0) {
+            return ChatFormatting.RED.toString() + count;
+        } else {
+            return String.valueOf(count);
         }
     }
 

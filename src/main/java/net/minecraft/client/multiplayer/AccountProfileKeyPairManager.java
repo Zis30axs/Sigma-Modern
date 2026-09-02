@@ -4,12 +4,18 @@ import com.google.common.base.Strings;
 import com.mojang.authlib.exceptions.MinecraftClientException;
 import com.mojang.authlib.minecraft.UserApiService;
 import com.mojang.authlib.minecraft.InsecurePublicKeyException.MissingException;
+import com.mojang.authlib.minecraft.client.MinecraftClient;
+import com.mojang.authlib.yggdrasil.YggdrasilUserApiService;
 import com.mojang.authlib.yggdrasil.response.KeyPairResponse;
 import com.mojang.authlib.yggdrasil.response.KeyPairResponse.KeyPair;
 import com.mojang.logging.LogUtils;
 import com.mojang.serialization.JsonOps;
+import com.viaversion.viafabricplus.ViaFabricPlusImpl;
+import com.viaversion.viafabricplus.features.networking.legacy_chat_signature.KeyPairResponse1_19_0;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +47,11 @@ public class AccountProfileKeyPairManager implements ProfileKeyPairManager {
     private final Path profileKeyPairPath;
     private CompletableFuture<Optional<ProfileKeyPair>> keyPair = CompletableFuture.completedFuture(Optional.empty());
     private Instant nextProfileKeyRefreshTime = Instant.EPOCH;
+    // MODIFIED for porting: was VFP legacy_chat_signature MixinYggdrasilUserApiService @Shadow minecraftClient /
+    // routeKeyPair. Without a mixin runtime the two fields the overwrite needs are read reflectively; if AuthLib ever
+    // renames them both stay null and fetchProfileKeyPair falls back to the plain vanilla request.
+    private static final @Nullable Field VFP_MINECRAFT_CLIENT_FIELD = vfpFindYggdrasilField("minecraftClient");
+    private static final @Nullable Field VFP_ROUTE_KEY_PAIR_FIELD = vfpFindYggdrasilField("routeKeyPair");
 
     public AccountProfileKeyPairManager(final UserApiService userApiService, final UUID profileId, final Path gameDirectory) {
         this.userApiService = userApiService;
@@ -118,13 +129,72 @@ public class AccountProfileKeyPairManager implements ProfileKeyPairManager {
     }
 
     private @Nullable ProfileKeyPair fetchProfileKeyPair(final UserApiService userApiService) throws CryptException, IOException {
-        KeyPairResponse keyPair = userApiService.getKeyPair();
+        // MODIFIED for porting: was VFP legacy_chat_signature MixinYggdrasilUserApiService#getKeyPair (@Overwrite) plus
+        // MixinKeyPairResponse (@Unique viaFabricPlus$legacyKeySignature). AuthLib's KeyPairResponse is a final record in a
+        // library jar, so it can neither deserialise the pre-1.20-rc1 'publicKeySignature' nor carry the extra field: the
+        // certificates route is posted with the superset record here and the legacy signature is handed on by hand.
+        final MinecraftClient vfpMinecraftClient = (MinecraftClient)vfpReadYggdrasilField(VFP_MINECRAFT_CLIENT_FIELD, userApiService);
+        final URL vfpRouteKeyPair = (URL)vfpReadYggdrasilField(VFP_ROUTE_KEY_PAIR_FIELD, userApiService);
+        KeyPairResponse keyPair;
+        byte @Nullable [] vfpLegacyKeySignature = null;
+        if (vfpMinecraftClient != null && vfpRouteKeyPair != null) {
+            final KeyPairResponse1_19_0 legacyKeyPair = vfpMinecraftClient.post(vfpRouteKeyPair, KeyPairResponse1_19_0.class);
+            if (legacyKeyPair == null) {
+                return null;
+            }
+
+            keyPair = new KeyPairResponse(
+                legacyKeyPair.keyPair(), legacyKeyPair.publicKeySignatureV2(), legacyKeyPair.expiresAt(), legacyKeyPair.refreshedAfter()
+            );
+            final ByteBuffer legacySignature = legacyKeyPair.publicKeySignature();
+            if (legacySignature != null && legacySignature.array().length != 0) {
+                vfpLegacyKeySignature = legacySignature.array();
+            } else {
+                ViaFabricPlusImpl.INSTANCE
+                    .getLogger()
+                    .error("Could not get legacy public key signature. 1.19.0 with secure-profiles enabled will not work!");
+            }
+        } else {
+            keyPair = userApiService.getKeyPair();
+        }
+
         if (keyPair != null) {
             ProfilePublicKey.Data publicKeyData = parsePublicKey(keyPair);
+            // MODIFIED for porting: was VFP legacy_chat_signature MixinAccountProfileKeyPairManager#trackLegacyKey
+            // (@Inject parsePublicKey RETURN) - the Data is not observed between its only return and this call.
+            // ConnectScreen reads it back for a target of exactly 1.19.0 to install the ChatSession1_19_0.
+            publicKeyData.viafabricplus$setLegacyPublicKeySignature(vfpLegacyKeySignature);
             return new ProfileKeyPair(
                 Crypt.stringToPemRsaPrivateKey(keyPair.keyPair().privateKey()), new ProfilePublicKey(publicKeyData), Instant.parse(keyPair.refreshedAfter())
             );
         } else {
+            return null;
+        }
+    }
+
+    // MODIFIED for porting: mixin-free stand-in for MixinYggdrasilUserApiService's @Shadow @Final field access. Returns
+    // null for anything that is not a YggdrasilUserApiService (the offline service, for instance), which is exactly where
+    // upstream's overwrite does not apply either.
+    private static @Nullable Field vfpFindYggdrasilField(final String name) {
+        try {
+            final Field field = YggdrasilUserApiService.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LOGGER.error("Failed to access YggdrasilUserApiService.{}, the legacy public key signature will be missing", name, e);
+            return null;
+        }
+    }
+
+    private static @Nullable Object vfpReadYggdrasilField(final @Nullable Field field, final UserApiService userApiService) {
+        if (field == null || !(userApiService instanceof YggdrasilUserApiService)) {
+            return null;
+        }
+
+        try {
+            return field.get(userApiService);
+        } catch (IllegalAccessException | RuntimeException e) {
+            LOGGER.error("Failed to read YggdrasilUserApiService.{}, the legacy public key signature will be missing", field.getName(), e);
             return null;
         }
     }

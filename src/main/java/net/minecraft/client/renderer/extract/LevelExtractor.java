@@ -1,6 +1,8 @@
 package net.minecraft.client.renderer.extract;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap.Entry;
 import java.util.Iterator;
@@ -240,9 +242,13 @@ public class LevelExtractor implements ResourceManagerReloadListener {
         double camY = cameraPos.y();
         double camZ = cameraPos.z();
         TickRateManager tickRateManager = this.minecraft.level.tickRateManager();
-        Entity.setViewScale(
-            Mth.clamp(this.minecraft.options.getEffectiveRenderDistance() / 8.0, 1.0, 2.5) * this.minecraft.options.entityDistanceScaling().get()
-        );
+        // MODIFIED for porting: was VFP world/entity_distance MixinLevelExtractor#removeDistanceScaling (@Redirect on
+        // OptionInstance#get). 1.15.2 and older had no entity distance scaling option, so the client's slider must not
+        // change the entity view scale on those targets.
+        final double entityDistanceScaling = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)
+            ? 1.0
+            : this.minecraft.options.entityDistanceScaling().get();
+        Entity.setViewScale(Mth.clamp(this.minecraft.options.getEffectiveRenderDistance() / 8.0, 1.0, 2.5) * entityDistanceScaling);
         EntityRenderDispatcher entityRenderDispatcher = this.levelRenderer.entityRenderDispatcher();
 
         // MODIFIED for porting: was iris's MixinLevelRenderer_SkipRendering#skipRenderEntities (@WrapOperation around

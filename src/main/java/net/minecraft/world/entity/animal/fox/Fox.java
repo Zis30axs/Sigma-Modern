@@ -137,6 +137,9 @@ public class Fox extends Animal {
         .scale(0.6F)
         .withEyeHeight(0.34375F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.375F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinFox#viaFabricPlus$baby_dimensions_r26_1 / _r1_21_11 (@Unique constants)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityTypes.FOX.getDimensions().scale(0.6F).withEyeHeight(0.2975F);
+    private static final EntityDimensions vfpBabyDimensionsR1_21_11 = EntityTypes.FOX.getDimensions().scale(0.5F).withEyeHeight(0.2975F);
     private static final Codec<List<EntityReference<LivingEntity>>> TRUSTED_LIST_CODEC = EntityReference.<LivingEntity>codec().listOf();
     private static final boolean DEFAULT_SLEEPING = false;
     private static final boolean DEFAULT_SITTING = false;
@@ -387,7 +390,20 @@ public class Fox extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinFox#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinFox#changeBabyDimensions (@Redirect body)
+    // Targets <=1.21.11 scaled the baby fox by 0.5F, <=26.1 by 0.6F; both use eye height 0.2975F and no PASSENGER attachment.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return vfpBabyDimensionsR1_21_11;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     public Fox.Variant getVariant() {

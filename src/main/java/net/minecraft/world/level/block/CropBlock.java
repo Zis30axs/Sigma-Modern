@@ -1,6 +1,7 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
@@ -29,6 +30,9 @@ public class CropBlock extends VegetationBlock implements BonemealableBlock {
     public static final int MAX_AGE = 7;
     public static final IntegerProperty AGE = BlockStateProperties.AGE_7;
     private static final VoxelShape[] SHAPES = Block.boxes(7, age -> Block.column(16.0, 0.0, 2 + age * 2));
+    // MODIFIED for porting: was VFP block/shape MixinCropBlocks#viaFabricPlus$shape_r1_8_x (@Unique constant).
+    // The mixin targets CropBlock, CarrotBlock and PotatoBlock, so each of the three carries its own copy.
+    private static final VoxelShape vfpShapeR1_8_x = Block.box(0.0, 0.0, 0.0, 16.0, 4.0, 16.0);
 
     @Override
     public MapCodec<? extends CropBlock> codec() {
@@ -42,6 +46,12 @@ public class CropBlock extends VegetationBlock implements BonemealableBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinCropBlocks#changeOutlineShape (@Inject HEAD, cancellable).
+        // 1.8 and older drew every crop age as one flat 4/16 slab. Setting gated, not version gated.
+        if (DebugSettings.INSTANCE.legacyCropOutlines.isEnabled()) {
+            return vfpShapeR1_8_x;
+        }
+
         return SHAPES[this.getAge(state)];
     }
 

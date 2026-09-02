@@ -1,11 +1,16 @@
 package net.minecraft.world.item.context;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.protocoltranslator.impl.ViaFabricPlusMappingDataLoader;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
@@ -53,7 +58,17 @@ public class BlockPlaceContext extends UseOnContext {
     }
 
     public boolean canPlace() {
-        return this.replaceClicked || this.getLevel().getBlockState(this.getClickedPos()).canBeReplaced(this);
+        final boolean canPlace = this.replaceClicked || this.getLevel().getBlockState(this.getClickedPos()).canBeReplaced(this);
+        // MODIFIED for porting: was VFP interaction/replace_block_item_use_logic
+        // MixinBlockPlaceContext#canPlace1_12_2 (@Inject RETURN, cancellable)
+        // <=1.12.2 allowed an anvil to be placed into a "decoration" material block, which modern canBeReplaced
+        // rejects. Only reached when vanilla already said no, exactly as upstream.
+        if (!canPlace && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return ViaFabricPlusMappingDataLoader.getBlockMaterial(this.getLevel().getBlockState(this.getClickedPos()).getBlock()).equals("decoration")
+                && Block.byItem(this.getItemInHand().getItem()).equals(Blocks.ANVIL);
+        }
+
+        return canPlace;
     }
 
     public boolean replacingClickedOnBlock() {
@@ -61,6 +76,31 @@ public class BlockPlaceContext extends UseOnContext {
     }
 
     public Direction getNearestLookingDirection() {
+        // MODIFIED for porting: was VFP interaction/replace_block_item_use_logic
+        // MixinBlockPlaceContext#getPlayerLookDirection1_12_2 (@Inject HEAD, cancellable)
+        // <=1.12.2 picked the placement facing from the player's own position/eye height rather than from the
+        // look vector; the 0.5 block-centre offset only exists from 1.11 on.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            final Player player = this.getPlayer();
+            final BlockPos placementPos = this.getClickedPos();
+            final double blockPosCenterFactor = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_10) ? 0.5 : 0;
+
+            if (Math.abs(player.getX() - (placementPos.getX() + blockPosCenterFactor)) < 2
+                && Math.abs(player.getZ() - (placementPos.getZ() + blockPosCenterFactor)) < 2) {
+                final double eyeY = player.getY() + player.getEyeHeight(player.getPose());
+
+                if (eyeY - placementPos.getY() > 2) {
+                    return Direction.DOWN;
+                }
+
+                if (placementPos.getY() - eyeY > 0) {
+                    return Direction.UP;
+                }
+            }
+
+            return player.getDirection();
+        }
+
         return Direction.orderedByNearest(this.getPlayer())[0];
     }
 

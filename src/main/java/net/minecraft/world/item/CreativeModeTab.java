@@ -1,9 +1,13 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.features.item.filter_creative_tabs.VersionedRegistries;
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings;
 import java.util.Collection;
 import java.util.Set;
 import java.util.function.Supplier;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.flag.FeatureFlagSet;
@@ -221,7 +225,7 @@ public class CreativeModeTab {
                 );
             }
 
-            if (stack.getItem().isEnabled(this.featureFlagSet)) {
+            if (this.vfpKeepItem(stack, stack.getItem().isEnabled(this.featureFlagSet))) {
                 switch (tabVisibility) {
                     case PARENT_AND_SEARCH_TABS:
                         this.tabContents.add(stack);
@@ -233,6 +237,21 @@ public class CreativeModeTab {
                     case SEARCH_TAB_ONLY:
                         this.searchTabContents.add(stack);
                 }
+            }
+        }
+
+        // MODIFIED for porting: was VFP item/filter_creative_tabs
+        // MixinCreativeModeTab_ItemDisplayBuilder#removeUnknownItems (@WrapOperation on Item#isEnabled). Hides stacks
+        // the target version does not know: mode 0 filters every tab, 1 only tabs in the vanilla namespace, 2 is off,
+        // and a local server is never filtered. originalValue is the wrapped Item#isEnabled result.
+        private boolean vfpKeepItem(final ItemStack stack, final boolean originalValue) {
+            final int index = GeneralSettings.INSTANCE.removeNotAvailableItemsFromCreativeTab.getIndex();
+            if (index == 2 || Minecraft.getInstance().isLocalServer()) {
+                return originalValue;
+            } else if (index == 1 && !BuiltInRegistries.CREATIVE_MODE_TAB.getKey(this.tab).getNamespace().equals(Identifier.DEFAULT_NAMESPACE)) {
+                return originalValue;
+            } else {
+                return VersionedRegistries.keepItem(stack) && originalValue;
             }
         }
     }

@@ -61,6 +61,8 @@ public class Chicken extends Animal {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.3F, 0.4F)
         .withEyeHeight(0.28125F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.375F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinChicken#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.3F, 0.4F).withEyeHeight(0.28F);
     private static final EntityDataAccessor<Holder<ChickenVariant>> DATA_VARIANT_ID = SynchedEntityData.defineId(
         Chicken.class, EntityDataSerializers.CHICKEN_VARIANT
     );
@@ -109,7 +111,18 @@ public class Chicken extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinChicken#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinChicken#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 sized the baby chicken with eye height 0.28F and without the PASSENGER attachment.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     public static AttributeSupplier.Builder createAttributes() {

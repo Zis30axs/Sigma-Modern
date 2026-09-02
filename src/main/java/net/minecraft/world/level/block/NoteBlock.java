@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -115,6 +117,13 @@ public class NoteBlock extends Block {
         final InteractionHand hand,
         final BlockHitResult hitResult
     ) {
+        // MODIFIED for porting: was VFP block/interaction MixinNoteBlock#cancelMobHeadUsage (@Inject HEAD, cancellable)
+        // The instrument-on-top interaction only arrived in 1.20, so <= 1.19.4 swallows the click as SUCCESS before
+        // the ItemTags.NOTE_BLOCK_TOP_INSTRUMENTS test can pass it on.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+            return InteractionResult.SUCCESS;
+        }
+
         return itemStack.is(ItemTags.NOTE_BLOCK_TOP_INSTRUMENTS) && hitResult.getDirection() == Direction.UP
             ? InteractionResult.PASS
             : super.useItemOn(itemStack, state, level, pos, player, hand, hitResult);

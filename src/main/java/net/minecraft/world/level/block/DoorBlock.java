@@ -4,6 +4,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -50,6 +52,14 @@ public class DoorBlock extends Block {
     public static final BooleanProperty OPEN = BlockStateProperties.OPEN;
     public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
     private static final Map<Direction, VoxelShape> SHAPES = Shapes.rotateHorizontal(Block.boxZ(16.0, 13.0, 16.0));
+    // MODIFIED for porting: was VFP bedrock/block MixinDoorBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    // Bedrock doors are a thin slab on the far face of the block instead of vanilla's 13/16-offset boxZ.
+    private static final Map<Direction, VoxelShape> vfpShapesBedrock = Map.of(
+        Direction.NORTH, Shapes.box(0.0, 0.0, 0.8175, 1.0, 1.0, 1.0),
+        Direction.SOUTH, Shapes.box(0.0, 0.0, 0.0, 1.0, 1.0, 0.1825),
+        Direction.WEST, Shapes.box(0.8175, 0.0, 0.0, 1.0, 1.0, 1.0),
+        Direction.EAST, Shapes.box(0.0, 0.0, 0.0, 0.1825, 1.0, 1.0)
+    );
     private final BlockSetType type;
 
     @Override
@@ -81,7 +91,25 @@ public class DoorBlock extends Block {
         Direction doorDirection = state.getValue(OPEN)
             ? (state.getValue(HINGE) == DoorHingeSide.RIGHT ? direction.getCounterClockWise() : direction.getClockWise())
             : direction;
+        // MODIFIED for porting: was VFP bedrock/block MixinDoorBlock#changeOutlineShape (@Redirect on the GETSTATIC
+        // of DoorBlock.SHAPES) - only the map is swapped, the doorDirection key stays exactly as computed above.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapesBedrock.get(doorDirection);
+        }
+
         return SHAPES.get(doorDirection);
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinDoorBlock#getOcclusionShape (@Override, added method)
+    // Without this the Bedrock outline above would leak into light occlusion, which is derived from getShape.
+    // Note upstream deliberately keys the vanilla map on raw FACING, skipping the OPEN/HINGE correction.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPES.get(state.getValue(FACING));
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

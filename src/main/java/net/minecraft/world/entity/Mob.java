@@ -11,6 +11,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -1170,7 +1172,12 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
         if (!this.isAlive()) {
             return InteractionResult.PASS;
         } else {
-            InteractionResult interactionResult = this.checkAndHandleImportantInteractions(player, hand);
+            // MODIFIED for porting: was VFP entity.interaction MixinMob#moveItemInteractionsAfterLeashing
+            // (@Redirect checkAndHandleImportantInteractions). Targets <=1.20.5 ran the name-tag/spawn-egg pass
+            // after leashing instead of before it, so it yields FAIL here and is repeated further down.
+            InteractionResult interactionResult = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)
+                ? InteractionResult.FAIL
+                : this.checkAndHandleImportantInteractions(player, hand);
             if (interactionResult.consumesAction()) {
                 this.gameEvent(GameEvent.ENTITY_INTERACT, player);
                 return interactionResult;
@@ -1179,6 +1186,15 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
                 if (superReaction != InteractionResult.PASS) {
                     return superReaction;
                 } else {
+                    // MODIFIED for porting: was VFP entity.interaction MixinMob#moveItemInteractionsAfterLeashing
+                    // (@Inject INVOKE mobInteract, cancellable) - the relocated item-interaction pass for <=1.20.5.
+                    if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+                        final InteractionResult importantResult = this.checkAndHandleImportantInteractions(player, hand);
+                        if (importantResult.consumesAction()) {
+                            return importantResult;
+                        }
+                    }
+
                     interactionResult = this.mobInteract(player, hand);
                     if (interactionResult.consumesAction()) {
                         this.gameEvent(GameEvent.ENTITY_INTERACT, player);

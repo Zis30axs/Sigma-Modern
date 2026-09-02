@@ -1,5 +1,6 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -31,7 +32,16 @@ public class FlintAndSteelItem extends Item {
         if (!CampfireBlock.canLight(state) && !CandleBlock.canLight(state) && !CandleCakeBlock.canLight(state)) {
             BlockPos relativePos = pos.relative(context.getClickedFace());
             if (BaseFireBlock.canBePlacedAt(level, relativePos, context.getHorizontalDirection())) {
-                level.playSound(player, relativePos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.4F + 0.8F);
+                // MODIFIED for porting: was VFP world/duplicated_sounds MixinItems#disableItemPlaceSounds
+                // (@WrapWithCondition on Level#playSound). 1.8 and older send the use sound from the server, so
+                // playing it client-side too would double it. The @At carries no ordinal, so both playSound calls in
+                // this method are wrapped. The pitch is still rolled when the sound is skipped, because
+                // @WrapWithCondition evaluates the wrapped call's arguments before testing the condition.
+                final float pitch = level.getRandom().nextFloat() * 0.4F + 0.8F;
+                if (!DebugSettings.INSTANCE.serversidePlaceSounds.isEnabled()) {
+                    level.playSound(player, relativePos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, pitch);
+                }
+
                 BlockState fireState = BaseFireBlock.getState(level, relativePos);
                 level.setBlock(relativePos, fireState, 11);
                 level.gameEvent(player, GameEvent.BLOCK_PLACE, pos);
@@ -46,7 +56,14 @@ public class FlintAndSteelItem extends Item {
                 return InteractionResult.FAIL;
             }
         } else {
-            level.playSound(player, pos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, level.getRandom().nextFloat() * 0.4F + 0.8F);
+            // MODIFIED for porting: was VFP world/duplicated_sounds MixinItems#disableItemPlaceSounds
+            // (@WrapWithCondition on Level#playSound) - the second wrapped call site of this method, lighting a
+            // campfire, candle or candle cake.
+            final float pitch = level.getRandom().nextFloat() * 0.4F + 0.8F;
+            if (!DebugSettings.INSTANCE.serversidePlaceSounds.isEnabled()) {
+                level.playSound(player, pos, SoundEvents.FLINTANDSTEEL_USE, SoundSource.BLOCKS, 1.0F, pitch);
+            }
+
             level.setBlock(pos, state.setValue(BlockStateProperties.LIT, true), 11);
             level.gameEvent(player, GameEvent.BLOCK_CHANGE, pos);
             if (player != null) {

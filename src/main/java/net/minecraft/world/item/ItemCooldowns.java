@@ -4,6 +4,8 @@ import com.google.common.collect.Maps;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
@@ -56,6 +58,12 @@ public class ItemCooldowns {
     }
 
     public void addCooldown(final Identifier cooldownGroup, final int time) {
+        // MODIFIED for porting: was VFP interaction.cooldown MixinItemCooldowns#dontSetCooldown (@Inject HEAD cancellable)
+        // 1.8 and older have no item-use cooldown at all, so no cooldown may ever be registered.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return;
+        }
+
         this.cooldowns.put(cooldownGroup, new ItemCooldowns.CooldownInstance(this.tickCount, this.tickCount + time));
         this.onCooldownStarted(cooldownGroup, time);
     }

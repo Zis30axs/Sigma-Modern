@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -21,6 +23,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
@@ -33,6 +36,8 @@ public class SeaPickleBlock extends VegetationBlock implements SimpleWaterlogged
     private static final VoxelShape SHAPE_TWO = Block.column(10.0, 0.0, 6.0);
     private static final VoxelShape SHAPE_THREE = Block.column(12.0, 0.0, 6.0);
     private static final VoxelShape SHAPE_FOUR = Block.column(12.0, 0.0, 7.0);
+    // MODIFIED for porting: was VFP bedrock/block MixinSeaPickleBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    private static final VoxelShape vfpShapeBedrock = Block.column(16.0, 0.0, 6.0);
 
     @Override
     public MapCodec<SeaPickleBlock> codec() {
@@ -102,12 +107,46 @@ public class SeaPickleBlock extends VegetationBlock implements SimpleWaterlogged
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinSeaPickleBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // Bedrock outlines every pickle count as one full-width 6/16 high box.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return switch (state.getValue(PICKLES)) {
             case 2 -> SHAPE_TWO;
             case 3 -> SHAPE_THREE;
             case 4 -> SHAPE_FOUR;
             default -> SHAPE_ONE;
         };
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinSeaPickleBlock#getCollisionShape (@Override, added method)
+    // Sea pickles are walk-through on Bedrock; BlockBehaviour's default would take collision from the widened
+    // outline above instead.
+    @Override
+    protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return Shapes.empty();
+        }
+
+        return super.getCollisionShape(state, level, pos, context);
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinSeaPickleBlock#getOcclusionShape (@Override, added method)
+    // Occlusion keeps the vanilla per-count shape on Bedrock rather than following the widened outline above.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return switch (state.getValue(PICKLES)) {
+                case 2 -> SHAPE_TWO;
+                case 3 -> SHAPE_THREE;
+                case 4 -> SHAPE_FOUR;
+                default -> SHAPE_ONE;
+            };
+        }
+
+        return super.getOcclusionShape(state);
     }
 
     @Override

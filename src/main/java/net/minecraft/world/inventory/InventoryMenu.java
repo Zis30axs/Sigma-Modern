@@ -2,6 +2,9 @@ package net.minecraft.world.inventory;
 
 import java.util.List;
 import java.util.Map;
+import com.viaversion.viafabricplus.features.recipe.Recipes1_11_2;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -59,18 +62,24 @@ public class InventoryMenu extends AbstractCraftingMenu {
         }
 
         this.addStandardInventorySlots(inventory, 8, 84);
-        this.addSlot(new Slot(inventory, 40, 77, 62) {
-            @Override
-            public void setByPlayer(final ItemStack itemStack, final ItemStack previous) {
-                owner.onEquipItem(EquipmentSlot.OFFHAND, previous, itemStack);
-                super.setByPlayer(itemStack, previous);
-            }
+        // MODIFIED for porting: was VFP interaction/remove_offhand_slot MixinInventoryMenu#removeOffhandSlot
+        // (@Redirect INVOKE addSlot, ordinal 0 after the InventoryMenu$1 constructor)
+        // <=1.8 has no offhand, so slot index 45 must not exist at all. Upstream returns null from the redirect,
+        // i.e. addSlot is simply never called; the Slot constructor itself has no side effects.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_8)) {
+            this.addSlot(new Slot(inventory, 40, 77, 62) {
+                @Override
+                public void setByPlayer(final ItemStack itemStack, final ItemStack previous) {
+                    owner.onEquipItem(EquipmentSlot.OFFHAND, previous, itemStack);
+                    super.setByPlayer(itemStack, previous);
+                }
 
-            @Override
-            public Identifier getNoItemIcon() {
-                return InventoryMenu.EMPTY_ARMOR_SLOT_SHIELD;
-            }
-        });
+                @Override
+                public Identifier getNoItemIcon() {
+                    return InventoryMenu.EMPTY_ARMOR_SLOT_SHIELD;
+                }
+            });
+        }
     }
 
     public static boolean isHotbarSlot(final int slot) {
@@ -79,6 +88,13 @@ public class InventoryMenu extends AbstractCraftingMenu {
 
     @Override
     public void slotsChanged(final Container container) {
+        // MODIFIED for porting: was VFP recipe MixinInventoryMenu#clientSideCrafting (@Inject HEAD)
+        // <=1.11.1 servers never send the crafting result slot, so the 2x2 survival grid result is computed
+        // client-side here.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+            Recipes1_11_2.setCraftingResultSlot(this.containerId, this, this.craftSlots);
+        }
+
         if (this.owner.level() instanceof ServerLevel level) {
             CraftingMenu.slotChangedCraftingGrid(this, level, this.owner, this.craftSlots, this.resultSlots, null);
         }

@@ -1,7 +1,11 @@
 package net.minecraft.client.multiplayer;
 
+import com.viaversion.viafabricplus.features.classic.cpe_extension.CPEAdditions;
 import com.viaversion.viafabricplus.features.world.disable_sequencing.PendingUpdateManager1_18_2;
+import com.viaversion.viafabricplus.injection.access.world.always_tick_entities.IEntity;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.world.Weather;
 import com.google.common.collect.ImmutableMap;
@@ -450,6 +454,13 @@ public class ClientLevel extends Level
     }
 
     public Biome.Precipitation getPrecipitationAt(final BlockPos pos) {
+        // MODIFIED for porting: was VFP classic/cpe_extension MixinClientLevel#forceSnow (@Inject HEAD,
+        // cancellable). On c0.30 CPE the server can send EnvWeatherType=2, which renders weather as snow
+        // everywhere instead of following the biome's own precipitation.
+        if (CPEAdditions.isSnowing()) {
+            return Biome.Precipitation.SNOW;
+        }
+
         if (!this.chunkSource.hasChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))) {
             return Biome.Precipitation.NONE;
         }
@@ -556,18 +567,61 @@ public class ClientLevel extends Level
     }
 
     public void tickNonPassenger(final Entity entity) {
+        // MODIFIED for porting: was VFP world/always_tick_entities MixinClientLevel#alwaysTickEntities
+        // (@Inject HEAD, cancellable). Older servers tick entities the client does not have a loaded chunk
+        // for yet, so an entity that is not flagged only saves its old pos/rot and re-checks its chunk, and
+        // its real tick is skipped for this pass.
+        final IEntity vfpEntity = (IEntity)entity;
+        if (!vfpEntity.viaFabricPlus$isInLoadedChunkAndShouldTick() && !entity.isSpectator()) {
+            entity.setOldPosAndRot();
+            this.vfpCheckChunk(entity);
+            if (vfpEntity.viaFabricPlus$isInLoadedChunkAndShouldTick()) {
+                for (Entity passenger : entity.getPassengers()) {
+                    this.tickPassenger(entity, passenger);
+                }
+            }
+
+            return;
+        }
+
         entity.setOldPosAndRot();
         entity.tickCount++;
         Profiler.get().push(entity.typeHolder()::getRegisteredName);
         entity.tick();
         Profiler.get().pop();
 
-        for (Entity passenger : entity.getPassengers()) {
+        // MODIFIED for porting: was VFP world/always_tick_entities MixinClientLevel#alwaysTickEntities
+        // (@WrapOperation on the Entity#getPassengers call in the loop below). The chunk flag is re-checked
+        // right before the passenger list is read, and an entity that is still unflagged yields no passengers.
+        this.vfpCheckChunk(entity);
+        final List<Entity> vfpPassengers = vfpEntity.viaFabricPlus$isInLoadedChunkAndShouldTick() ? entity.getPassengers() : List.<Entity>of();
+
+        for (Entity passenger : vfpPassengers) {
             this.tickPassenger(entity, passenger);
         }
     }
 
     private void tickPassenger(final Entity vehicle, final Entity entity) {
+        // MODIFIED for porting: was VFP world/always_tick_entities MixinClientLevel#alwaysTickEntities
+        // (@Inject HEAD, cancellable). Same idea for passengers: an unflagged passenger is either dismounted
+        // or only saves its old pos/rot and re-checks its chunk, and never reaches rideTick on this pass.
+        final IEntity vfpPassenger = (IEntity)entity;
+        if (!vfpPassenger.viaFabricPlus$isInLoadedChunkAndShouldTick()) {
+            if (entity.isRemoved() || entity.getVehicle() != vehicle) {
+                entity.stopRiding();
+            } else if (entity instanceof Player || this.tickingEntities.contains(entity)) {
+                entity.setOldPosAndRot();
+                this.vfpCheckChunk(entity);
+                if (vfpPassenger.viaFabricPlus$isInLoadedChunkAndShouldTick()) {
+                    for (Entity passenger : entity.getPassengers()) {
+                        this.tickPassenger(entity, passenger);
+                    }
+                }
+            }
+
+            return;
+        }
+
         if (entity.isRemoved() || entity.getVehicle() != vehicle) {
             entity.stopRiding();
         } else if (entity instanceof Player || this.tickingEntities.contains(entity)) {
@@ -577,6 +631,21 @@ public class ClientLevel extends Level
 
             for (Entity passenger : entity.getPassengers()) {
                 this.tickPassenger(entity, passenger);
+            }
+        }
+    }
+
+    // MODIFIED for porting: was VFP world/always_tick_entities MixinClientLevel#viaFabricPlus$checkChunk
+    // (@Unique helper). Flags the entity as tickable once the chunk it is actually standing in is loaded.
+    private void vfpCheckChunk(final Entity entity) {
+        final IEntity vfpEntity = (IEntity)entity;
+        final int chunkX = Mth.floor(entity.getX() / 16.0);
+        final int chunkZ = Mth.floor(entity.getZ() / 16.0);
+        if (!vfpEntity.viaFabricPlus$isInLoadedChunkAndShouldTick()
+            || entity.chunkPosition().x() != chunkX
+            || entity.chunkPosition().z() != chunkZ) {
+            if (!this.getChunk(chunkX, chunkZ).isEmpty()) {
+                vfpEntity.viaFabricPlus$setInLoadedChunkAndShouldTick(true);
             }
         }
     }
@@ -1043,9 +1112,13 @@ public class ClientLevel extends Level
         try {
             Camera camera = this.minecraft.gameRenderer.mainCamera();
             ParticleStatus particleLevel = this.calculateParticleLevel(alwaysShowParticles);
+            // MODIFIED for porting: was VFP world/entity_distance MixinClientLevel#lowerParticleRenderDistance
+            // (@ModifyConstant on the 1024.0 in the cull test below). 1.8 clients culled particles at 16
+            // blocks, not 32.
+            final double vfpMaxParticleDistanceSqr = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8) ? 256.0 : 1024.0;
             if (overrideLimiter) {
                 this.minecraft.particleEngine.createParticle(particle, x, y, z, xd, yd, zd);
-            } else if (!(camera.position().distanceToSqr(x, y, z) > 1024.0)) {
+            } else if (!(camera.position().distanceToSqr(x, y, z) > vfpMaxParticleDistanceSqr)) {
                 if (particleLevel != ParticleStatus.MINIMAL) {
                     this.minecraft.particleEngine.createParticle(particle, x, y, z, xd, yd, zd);
                 }

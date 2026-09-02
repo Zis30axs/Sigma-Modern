@@ -2,6 +2,7 @@ package net.minecraft.client.model.geom;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMap.Builder;
+import com.viaversion.viafabricplus.features.entity.legacy_boat_model.BoatModel1_8;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.client.model.HumanoidModel;
@@ -172,6 +173,12 @@ public class LayerDefinitions {
 
     public static Map<ModelLayerLocation, LayerDefinition> createRoots() {
         Builder<ModelLayerLocation, LayerDefinition> result = ImmutableMap.builder();
+        // MODIFIED for porting: was VFP entity/legacy_boat_model MixinLayerDefinitions#addBoatModel
+        // (@ModifyVariable STORE ordinal 0 of 'result'). Bakes the <= 1.8 boat model unconditionally; the version
+        // gate lives in the renderer selection. The trailing completeness check below only fails on missing
+        // ModelLayers entries, so an extra layer is harmless.
+        result.put(BoatModel1_8.MODEL_LAYER, BoatModel1_8.getTexturedModelData());
+
         LayerDefinition humanoidBodyLayer = LayerDefinition.create(HumanoidModel.createMesh(CubeDeformation.NONE, 0.0F), 64, 64);
         ArmorModelSet<LayerDefinition> humanoidArmor = HumanoidModel.createArmorMeshSet(INNER_ARMOR_DEFORMATION, OUTER_ARMOR_DEFORMATION)
             .map(mesh -> LayerDefinition.create(mesh, 64, 32));

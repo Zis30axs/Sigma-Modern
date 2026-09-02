@@ -1,5 +1,6 @@
 package net.minecraft.client.gui.screens;
 
+import com.viaversion.viafabricplus.features.limitation.max_chat_length.MaxChatLength;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.ActiveTextCollector;
@@ -83,6 +84,15 @@ public class ChatScreen extends Screen {
         this.displayMode = chatAbilities.hasAnyRestrictions() ? ChatComponent.DisplayMode.FOREGROUND_RESTRICTED : ChatComponent.DisplayMode.FOREGROUND;
         this.commandSuggestions.setRestrictions(chatAbilities.canSendMessages(), chatAbilities.canSendCommands());
         this.commandSuggestions.updateCommandInfo();
+        // MODIFIED for porting: was VFP max_chat_length MixinChatScreen#changeChatLength (@Inject init RETURN)
+        // Only a still-vanilla 256 limit is replaced, so a limit set by anything else is left alone: classic without
+        // LONGER_MESSAGES 64 - (name + 2), classic with it 65534, Bedrock 512, <= 1.9.3 100, everything newer 256.
+        // Upstream gives this mixin priority = 1, so it is applied first and its RETURN callback runs before the
+        // legacy tab completion one below, whose deferred setValue is then truncated to the target's limit.
+        if (this.input.getMaxLength() == MaxChatLength.MAX_CHAT_LENGTH_LATEST) {
+            this.input.setMaxLength(MaxChatLength.getChatLength());
+        }
+
         // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#moveSetTextDown
         // (@Inject init RETURN) - the other half of the hook above.
         if (DebugSettings.INSTANCE.legacyTabCompletions.isEnabled()) {

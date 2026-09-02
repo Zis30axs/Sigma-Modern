@@ -413,7 +413,9 @@ public abstract class AbstractHorse extends Animal implements PlayerRideableJump
     }
 
     public InteractionResult fedFood(final Player player, final ItemStack itemStack) {
-        boolean ateFood = this.handleEating(player, itemStack);
+        // MODIFIED for porting: was VFP entity.interaction MixinAbstractHorse#decrementFoodItemClientside (@Redirect INVOKE handleEating)
+        // Targets <=1.20.2 do not resync the fed stack, so the item is always decremented client-side (handleEating is skipped).
+        boolean ateFood = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2) || this.handleEating(player, itemStack);
         if (ateFood) {
             itemStack.consume(1, player);
         }

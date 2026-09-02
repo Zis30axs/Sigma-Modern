@@ -2,6 +2,9 @@ package net.minecraft.client.renderer.entity;
 
 import com.google.common.collect.ImmutableMap;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.viaversion.viafabricplus.features.entity.legacy_boat_model.BoatRenderer1_8;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Map;
 import java.util.function.Supplier;
 import net.minecraft.CrashReport;
@@ -23,6 +26,7 @@ import net.minecraft.client.renderer.block.BlockModelResolver;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
+import net.minecraft.client.renderer.entity.state.BoatRenderState;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.item.ItemModelResolver;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -127,6 +131,9 @@ public class EntityRenderDispatcher implements ResourceManagerReloadListener {
     private final Supplier<EntityModelSet> entityModels;
     private final EquipmentAssetManager equipmentAssets;
     private final PlayerSkinRenderCache playerSkinRenderCache;
+    // MODIFIED for porting: was VFP entity/legacy_boat_model MixinEntityRenderDispatcher
+    // @Unique viaFabricPlus$boatRenderer - the 1.8 boat renderer, rebuilt on every resource reload.
+    private @Nullable BoatRenderer1_8 vfpBoatRenderer;
 
     public <E extends Entity> int getPackedLightCoords(final E entity, final float partialTickTime) {
         return this.getRenderer(entity).getPackedLightCoords(entity, partialTickTime);
@@ -177,6 +184,12 @@ public class EntityRenderDispatcher implements ResourceManagerReloadListener {
     }
 
     public <S extends EntityRenderState> EntityRenderer<?, ? super S> getRenderer(final S entityRenderState) {
+        // MODIFIED for porting: was VFP entity/legacy_boat_model MixinEntityRenderDispatcher#useBoatRenderer1_8
+        // (@Inject HEAD cancellable). <= 1.8 boats are drawn with the legacy model instead of the registry renderer.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8) && entityRenderState instanceof BoatRenderState) {
+            return (EntityRenderer<?, ? super S>)(EntityRenderer)this.vfpBoatRenderer;
+        }
+
         if (entityRenderState instanceof AvatarRenderState player) {
             PlayerModelType model = player.skin.model();
             EntityRenderer<? extends Avatar, ?> playerRenderer = (EntityRenderer<? extends Avatar, ?>)this.playerRenderers.get(model);
@@ -309,5 +322,9 @@ public class EntityRenderDispatcher implements ResourceManagerReloadListener {
         this.renderers = EntityRenderers.createEntityRenderers(context);
         this.playerRenderers = EntityRenderers.createAvatarRenderers(context);
         this.mannequinRenderers = EntityRenderers.createAvatarRenderers(context);
+        // MODIFIED for porting: was VFP entity/legacy_boat_model MixinEntityRenderDispatcher#createBoatRenderer1_8
+        // (@Inject TAIL, @Local context). Built unconditionally, exactly as upstream does; the version gate lives
+        // in getRenderer.
+        this.vfpBoatRenderer = new BoatRenderer1_8(context);
     }
 }

@@ -1,6 +1,8 @@
 package net.minecraft.client.gui.screens.inventory;
 
 import com.google.common.collect.ImmutableList;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.Locale;
@@ -177,6 +179,12 @@ public class StructureBlockEditScreen extends Screen {
         this.nameEdit = new EditBox(this.font, this.width / 2 - 152, 40, 300, 20, Component.translatable("structure_block.structure_name")) {
             @Override
             public boolean charTyped(final CharacterEvent event) {
+                // MODIFIED for porting: was VFP screen_changes MixinStructureBlockEditScreen_1#removeValidation
+                // (@Inject HEAD cancellable). 1.12.2 and older accepted any character in the structure name field.
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+                    return super.charTyped(event);
+                }
+
                 return !StructureBlockEditScreen.this.isValidCharacterForName(this.getValue(), event.codepoint(), this.getCursorPosition())
                     ? false
                     : super.charTyped(event);
@@ -225,6 +233,11 @@ public class StructureBlockEditScreen extends Screen {
         this.addWidget(this.dataEdit);
         this.updateDirectionButtons();
         this.updateMode(this.initialMode);
+        // MODIFIED for porting: was VFP screen_changes MixinStructureBlockEditScreen#changeInputNameMaxLength
+        // (@Inject TAIL). <= 1.18.2 caps the structure name the packet can carry at 64 characters.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18_2)) {
+            this.nameEdit.setMaxLength(64);
+        }
     }
 
     @Override
@@ -339,6 +352,13 @@ public class StructureBlockEditScreen extends Screen {
             case DATA:
                 this.dataEdit.setVisible(true);
         }
+
+        // MODIFIED for porting: was VFP screen_changes MixinStructureBlockEditScreen#hideStrictButton
+        // (@Inject RETURN). The strict flag only exists from 1.21.5 on, so the LOAD branch above must be
+        // overridden after the switch.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            this.strictButton.visible = false;
+        }
     }
 
     private boolean sendToServer(final StructureBlockEntity.UpdateType updateType) {
@@ -446,7 +466,13 @@ public class StructureBlockEditScreen extends Screen {
             graphics.text(this.font, INTEGRITY_LABEL, this.width / 2 - 153, 110, -6250336);
             this.integrityEdit.extractRenderState(graphics, mouseX, mouseY, a);
             this.seedEdit.extractRenderState(graphics, mouseX, mouseY, a);
-            graphics.text(this.font, STRICT_LABEL, this.width / 2 + 154 - this.font.width(STRICT_LABEL), 110, -6250336);
+            // MODIFIED for porting: was VFP screen_changes MixinStructureBlockEditScreen#hideStrictText
+            // (@WrapWithCondition on GuiGraphicsExtractor#text). Only the STRICT_LABEL call is suppressed, and
+            // only for targets that are not newer than 1.21.4.
+            if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_4)) {
+                graphics.text(this.font, STRICT_LABEL, this.width / 2 + 154 - this.font.width(STRICT_LABEL), 110, -6250336);
+            }
+
             graphics.text(this.font, SHOW_BOUNDING_BOX_LABEL, this.width / 2 + 154 - this.font.width(SHOW_BOUNDING_BOX_LABEL), 70, -6250336);
         }
 

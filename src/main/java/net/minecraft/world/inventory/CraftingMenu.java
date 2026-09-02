@@ -2,6 +2,9 @@ package net.minecraft.world.inventory;
 
 import java.util.List;
 import java.util.Optional;
+import com.viaversion.viafabricplus.features.recipe.Recipes1_11_2;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -74,6 +77,12 @@ public class CraftingMenu extends AbstractCraftingMenu {
 
     @Override
     public void slotsChanged(final Container container) {
+        // MODIFIED for porting: was VFP recipe MixinCraftingMenu#clientSideCrafting (@Inject HEAD)
+        // <=1.11.1 servers never send the crafting result slot, so it has to be computed client-side.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+            Recipes1_11_2.setCraftingResultSlot(this.containerId, this, this.craftSlots);
+        }
+
         if (!this.placingRecipe) {
             this.access.execute((level, pos) -> {
                 if (level instanceof ServerLevel serverLevel) {
@@ -120,7 +129,11 @@ public class CraftingMenu extends AbstractCraftingMenu {
 
                 slot.onQuickCraft(stack, clicked);
             } else if (slotIndex >= 10 && slotIndex < 46) {
-                if (!this.moveItemStackTo(stack, 1, 10, false)) {
+                // MODIFIED for porting: was VFP interaction/container_clicking
+                // MixinCraftingMenu#noShiftClickMoveIntoCraftingTable (@Redirect INVOKE moveItemStackTo, ordinal 1)
+                // <=1.14.4 servers do not quick-move from the inventory into the crafting grid; the version check
+                // comes first upstream, so the move is never attempted there.
+                if (!(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_14_4) && this.moveItemStackTo(stack, 1, 10, false))) {
                     if (slotIndex < 37) {
                         if (!this.moveItemStackTo(stack, 37, 46, false)) {
                             return ItemStack.EMPTY;

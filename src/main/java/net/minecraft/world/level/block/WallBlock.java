@@ -3,9 +3,14 @@ package net.minecraft.world.level.block;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.mojang.serialization.MapCodec;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Function;
+import com.viaversion.viafabricplus.features.block.interaction.Block1_14;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
@@ -45,6 +50,13 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
     private final Function<BlockState, VoxelShape> collisionShapes;
     private static final VoxelShape TEST_SHAPE_POST = Block.column(2.0, 0.0, 16.0);
     private static final Map<Direction, VoxelShape> TEST_SHAPES_WALL = Shapes.rotateHorizontal(Block.boxZ(2.0, 16.0, 0.0, 9.0));
+    // MODIFIED for porting: was VFP block/shape MixinWallBlock @Unique state
+    // (viaFabricPlus$collision_shape_r1_12_2, viaFabricPlus$outline_shape_r1_12_2, viaFabricPlus$shapeIndexCache_r1_12_2)
+    // 1.12.2 and older walls are a fixed 16-entry table indexed by the 4-bit N/E/S/W side mask, not a per-state
+    // function, and the mask of each state is memoised.
+    private final VoxelShape[] vfpCollisionShapeR1_12_2;
+    private final VoxelShape[] vfpOutlineShapeR1_12_2;
+    private final Object2IntMap<BlockState> vfpShapeIndexCacheR1_12_2 = new Object2IntOpenHashMap<>();
 
     @Override
     public MapCodec<WallBlock> codec() {
@@ -65,6 +77,9 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
         );
         this.shapes = this.makeShapes(16.0F, 14.0F);
         this.collisionShapes = this.makeShapes(24.0F, 24.0F);
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#initShapes1_12_2 (@Inject <init> RETURN)
+        this.vfpCollisionShapeR1_12_2 = this.vfpCreateShapes1_12_2(24.0F, 24.0F);
+        this.vfpOutlineShapeR1_12_2 = this.vfpCreateShapes1_12_2(16.0F, 14.0F);
     }
 
     private Function<BlockState, VoxelShape> makeShapes(final float postHeight, final float wallTop) {
@@ -87,14 +102,106 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
         }, WATERLOGGED);
     }
 
+    // MODIFIED for porting: was VFP block/shape MixinWallBlock#viaFabricPlus$createShapes1_12_2 (@Unique helper)
+    // The 1.12.2 wall lattice: a 4..12 post of height1 OR-ed with one of 16 per-side-mask boxes of height2.
+    private VoxelShape[] vfpCreateShapes1_12_2(final float height1, final float height2) {
+        final float f = 4.0F;
+        final float g = 12.0F;
+        final float h = 5.0F;
+        final float i = 11.0F;
+
+        final VoxelShape baseShape = Block.box(f, 0.0, f, g, height1, g);
+        final VoxelShape northShape = Block.box(h, 0.0, 0.0, i, height2, i);
+        final VoxelShape southShape = Block.box(h, 0.0, h, i, height2, 16.0);
+        final VoxelShape westShape = Block.box(0.0, 0.0, h, i, height2, i);
+        final VoxelShape eastShape = Block.box(h, 0.0, h, 16.0, height2, i);
+        final VoxelShape[] voxelShapes = new VoxelShape[]{
+            Shapes.empty(),
+            Block.box(f, 0.0, h, g, height1, 16.0),
+            Block.box(0.0, 0.0, f, i, height1, g),
+            Block.box(f - 4, 0.0, h - 1, g, height1, 16.0),
+            Block.box(f, 0.0, 0.0, g, height1, i),
+            Shapes.or(southShape, northShape),
+            Block.box(f - 4, 0.0, 0.0, g, height1, i + 1),
+            Block.box(f - 4, 0.0, h - 5, g, height1, 16.0),
+            Block.box(h, 0.0, f, 16.0, height1, g),
+            Block.box(h - 1, 0.0, f, 16.0, height1, g + 4),
+            Shapes.or(westShape, eastShape),
+            Block.box(h - 5, 0.0, f, 16.0, height1, g + 4),
+            Block.box(f, 0.0, 0.0, g + 4, height1, i + 1),
+            Block.box(f, 0.0, 0.0, g + 4, height1, i + 5),
+            Block.box(h - 5, 0.0, f - 4, 16.0, height1, g),
+            Block.box(0.0, 0.0, 0.0, 16.0, height1, 16.0)
+        };
+
+        for (int j = 0; j < 16; ++j) {
+            voxelShapes[j] = Shapes.or(baseShape, voxelShapes[j]);
+        }
+
+        return voxelShapes;
+    }
+
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 walls with the post up are outlined by the fixed 16/14-high table instead of the per-state shape.
+        if (state.getValue(UP) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return this.vfpOutlineShapeR1_12_2[this.vfpGetShapeIndex(state)];
+        }
+
         return this.shapes.apply(state);
     }
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#changeCollisionShape (@Inject HEAD, cancellable)
+        // Same table as above, built 24 high, so walking into a <= 1.12.2 wall collides with the legacy boxes.
+        if (state.getValue(UP) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return this.vfpCollisionShapeR1_12_2[this.vfpGetShapeIndex(state)];
+        }
+
         return this.collisionShapes.apply(state);
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinWallBlock#getOcclusionShape (@Override, added method)
+    // On <= 1.12.2 this deliberately hands back the vanilla outline function, so light occlusion keeps vanilla
+    // geometry instead of inheriting the legacy table getShape hands out above.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (state.getValue(UP) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return this.shapes.apply(state);
+        } else {
+            return super.getOcclusionShape(state);
+        }
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinWallBlock#viaFabricPlus$getShapeIndex and
+    // viaFabricPlus$getDirectionMask (@Unique helpers) - the memoised 4-bit side mask both legacy tables are indexed by.
+    private int vfpGetShapeIndex(final BlockState state) {
+        return this.vfpShapeIndexCacheR1_12_2.computeIntIfAbsent(state, statex -> {
+            int i = 0;
+            if (!WallSide.NONE.equals(statex.getValue(NORTH))) {
+                i |= vfpGetDirectionMask(Direction.NORTH);
+            }
+
+            if (!WallSide.NONE.equals(statex.getValue(EAST))) {
+                i |= vfpGetDirectionMask(Direction.EAST);
+            }
+
+            if (!WallSide.NONE.equals(statex.getValue(SOUTH))) {
+                i |= vfpGetDirectionMask(Direction.SOUTH);
+            }
+
+            if (!WallSide.NONE.equals(statex.getValue(WEST))) {
+                i |= vfpGetDirectionMask(Direction.WEST);
+            }
+
+            return i;
+        });
+    }
+
+    private static int vfpGetDirectionMask(final Direction dir) {
+        return 1 << dir.get2DDataValue();
     }
 
     @Override
@@ -105,6 +212,13 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
     private boolean connectsTo(final BlockState state, final boolean faceSolid, final Direction direction) {
         Block block = state.getBlock();
         boolean connectedFenceGate = block instanceof FenceGateBlock && FenceGateBlock.connectsToDirection(state, direction);
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#shouldConnectTo1_14 (@Inject RETURN, cancellable)
+        // <= 1.14 a wall only ever attached to the blocks the piston attachment rules treat as exceptions, so every
+        // other neighbour stays disconnected no matter what the vanilla rule says.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14) && !Block1_14.isExceptBlockForAttachWithPiston(block)) {
+            return false;
+        }
+
         return state.is(BlockTags.WALLS) || !isExceptionForConnection(state) && faceSolid || block instanceof IronBarsBlock || connectedFenceGate;
     }
 
@@ -128,7 +242,14 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
         boolean south = this.connectsTo(southState, southState.isFaceSturdy(level, southPos, Direction.NORTH), Direction.NORTH);
         boolean west = this.connectsTo(westState, westState.isFaceSturdy(level, westPos, Direction.EAST), Direction.EAST);
         BlockState state = this.defaultBlockState().setValue(WATERLOGGED, replacedFluidState.is(Fluids.WATER));
-        return this.updateShape(level, state, topPos, topState, north, east, south, west);
+        final BlockState placementState = this.updateShape(level, state, topPos, topState, north, east, south, west);
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#modifyPlacementState (@Inject RETURN, cancellable)
+        // <= 1.15.2 had no TALL wall sides at all, see vfpOldWallPlacementLogic below.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+            return vfpOldWallPlacementLogic(placementState);
+        }
+
+        return placementState;
     }
 
     @Override
@@ -146,13 +267,55 @@ public class WallBlock extends Block implements SimpleWaterloggedBlock {
             ticks.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
         }
 
+        final BlockState updatedState;
         if (directionToNeighbour == Direction.DOWN) {
-            return super.updateShape(state, level, ticks, pos, directionToNeighbour, neighbourPos, neighbourState, random);
+            updatedState = super.updateShape(state, level, ticks, pos, directionToNeighbour, neighbourPos, neighbourState, random);
         } else {
-            return directionToNeighbour == Direction.UP
+            updatedState = directionToNeighbour == Direction.UP
                 ? this.topUpdate(level, state, neighbourPos, neighbourState)
                 : this.sideUpdate(level, pos, state, neighbourPos, neighbourState, directionToNeighbour);
         }
+
+        // MODIFIED for porting: was VFP block/shape MixinWallBlock#modifyBlockState (@Inject RETURN, cancellable)
+        // The vanilla result of every exit path goes through the same <= 1.15.2 demotion as the placement state, so
+        // neighbour updates cannot reintroduce a TALL side. The branches above are only bound to a local for that.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+            return vfpOldWallPlacementLogic(updatedState);
+        }
+
+        return updatedState;
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinWallBlock#viaFabricPlus$oldWallPlacementLogic (@Unique helper)
+    // <= 1.15.2 walls had no TALL side: every TALL side is demoted to LOW, and if any side was TALL the post is
+    // forced up, which is how the pre-1.16 wall shapes were reconstructed.
+    private static BlockState vfpOldWallPlacementLogic(BlockState state) {
+        boolean addUp = false;
+        if (state.getValue(NORTH) == WallSide.TALL) {
+            state = state.setValue(NORTH, WallSide.LOW);
+            addUp = true;
+        }
+
+        if (state.getValue(EAST) == WallSide.TALL) {
+            state = state.setValue(EAST, WallSide.LOW);
+            addUp = true;
+        }
+
+        if (state.getValue(SOUTH) == WallSide.TALL) {
+            state = state.setValue(SOUTH, WallSide.LOW);
+            addUp = true;
+        }
+
+        if (state.getValue(WEST) == WallSide.TALL) {
+            state = state.setValue(WEST, WallSide.LOW);
+            addUp = true;
+        }
+
+        if (addUp) {
+            state = state.setValue(UP, true);
+        }
+
+        return state;
     }
 
     private static boolean isConnected(final BlockState state, final Property<WallSide> northWall) {

@@ -1,6 +1,9 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
@@ -36,6 +39,7 @@ import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
@@ -44,6 +48,9 @@ public class EnderChestBlock extends AbstractChestBlock<EnderChestBlockEntity> i
     public static final EnumProperty<Direction> FACING = HorizontalDirectionalBlock.FACING;
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
     private static final VoxelShape SHAPE = Block.column(14.0, 0.0, 14.0);
+    // MODIFIED for porting: was VFP block/shape MixinEnderChestBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    // Bedrock ender chests are inset 0.025 on every side and 0.95 high.
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0.025, 0.0, 0.025, 0.975, 0.95, 0.975);
     private static final Component CONTAINER_TITLE = Component.translatable("container.enderchest");
 
     @Override
@@ -65,7 +72,28 @@ public class EnderChestBlock extends AbstractChestBlock<EnderChestBlockEntity> i
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinEnderChestBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // 1.4.2 and older outlined an ender chest as a plain full block; Bedrock uses its own slightly inset box.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_2)) {
+            return Shapes.block();
+        } else if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinEnderChestBlock#getOcclusionShape (@Override, added method)
+    // The inherited occlusion shape is derived from getShape, so the forced full block / Bedrock outline above would
+    // otherwise change light occlusion; keep the vanilla 14/16 column.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_2)
+            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPE;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

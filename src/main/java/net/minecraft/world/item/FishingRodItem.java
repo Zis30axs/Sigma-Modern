@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -57,6 +59,12 @@ public class FishingRodItem extends Item {
 
             player.awardStat(Stats.ITEM_USED.get(this));
             itemStack.causeUseVibration(player, GameEvent.ITEM_INTERACT_START);
+        }
+
+        // MODIFIED for porting: was VFP item/interaction MixinFishingRodItem#swingHand (@Inject RETURN, not cancelling)
+        // Pre-1.15 the rod swing was client driven, so <= 1.14.4 has to swing here explicitly.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            player.swing(hand);
         }
 
         return InteractionResult.SUCCESS;

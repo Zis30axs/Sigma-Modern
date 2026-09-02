@@ -1,5 +1,8 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.google.common.base.Predicates;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
@@ -29,6 +32,13 @@ public class EndPortalFrameBlock extends Block {
     public static final BooleanProperty HAS_EYE = BlockStateProperties.EYE;
     private static final VoxelShape SHAPE_EMPTY = Block.column(16.0, 0.0, 13.0);
     private static final VoxelShape SHAPE_FULL = Shapes.or(SHAPE_EMPTY, Block.column(8.0, 13.0, 16.0));
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#viaFabricPlus$eye_shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpEyeShapeR1_12_2 = Block.box(5.0, 13.0, 5.0, 11.0, 16.0, 11.0);
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#viaFabricPlus$frame_with_eye_shape_r1_12_2
+    // (@Unique constant)
+    private static final VoxelShape vfpFrameWithEyeShapeR1_12_2 = Shapes.or(SHAPE_EMPTY, vfpEyeShapeR1_12_2);
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#viaFabricPlus$shape_frame_bedrock (@Unique constant)
+    private static final VoxelShape vfpShapeFrameBedrock = Shapes.box(0.0, 0.0, 0.0, 1.0, 0.8125, 1.0);
     private static @Nullable BlockPattern portalShape;
 
     @Override
@@ -48,7 +58,40 @@ public class EndPortalFrameBlock extends Block {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#changeOutlineShape
+        // (@Inject HEAD, cancellable) - <= 1.12.2 never raised the outline for the eye, and Bedrock outlines the
+        // frame as one 13/16 high box for both eye states.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return SHAPE_EMPTY;
+        } else if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            // The eye doesn't have a different shape on bedrock
+            return vfpShapeFrameBedrock;
+        }
+
         return state.getValue(HAS_EYE) ? SHAPE_FULL : SHAPE_EMPTY;
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#getCollisionShape (@Override, added method)
+    // <= 1.12.2 keeps the eye in the collision box even though the outline above has lost it; BlockBehaviour's
+    // default would otherwise take collision straight from that eye-less outline.
+    @Override
+    protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return state.getValue(HAS_EYE) ? vfpFrameWithEyeShapeR1_12_2 : SHAPE_EMPTY;
+        }
+
+        return super.getCollisionShape(state, level, pos, context);
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalFrameBlock#getOcclusionShape (@Override, added method)
+    // On Bedrock the light occlusion shape stays the vanilla frame instead of following the widened outline above.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPE_EMPTY;
+        }
+
+        return super.getOcclusionShape(state);
     }
 
     @Override

@@ -3,6 +3,8 @@ package net.minecraft.world.item;
 import com.google.common.collect.ImmutableMap.Builder;
 import java.util.Map;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
@@ -58,10 +60,20 @@ public class AxeItem extends Item {
 
     @Override
     public InteractionResult useOn(final UseOnContext context) {
+        // MODIFIED for porting: was VFP item/interaction MixinAxeItem#disableUse (@Inject HEAD, cancellable)
+        // Stripping did not exist on or before 1.12.2, so an axe right-click does nothing there.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return InteractionResult.PASS;
+        }
+
         Level level = context.getLevel();
         BlockPos pos = context.getClickedPos();
         Player player = context.getPlayer();
-        if (playerHasBlockingItemUseIntent(context)) {
+        // MODIFIED for porting: was VFP item/interaction MixinAxeItem#neverCancelStripAttempt
+        // (@Redirect INVOKE playerHasBlockingItemUseIntent)
+        // <=1.20.5 did not let an offhand blocking item suppress stripping/scraping/wax-off. The version check
+        // comes first upstream, so the vanilla helper is not even called there.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_5) && playerHasBlockingItemUseIntent(context)) {
             return InteractionResult.PASS;
         }
 

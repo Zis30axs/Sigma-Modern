@@ -5,6 +5,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.List;
 import java.util.Map;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -36,6 +38,9 @@ public class CandleCakeBlock extends AbstractCandleBlock {
     );
     public static final BooleanProperty LIT = AbstractCandleBlock.LIT;
     private static final VoxelShape SHAPE = Shapes.or(Block.column(2.0, 8.0, 14.0), Block.column(14.0, 0.0, 8.0));
+    // MODIFIED for porting: was VFP bedrock/block MixinCandleCakeBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    // Bedrock outlines only the cake slab; the candle stalk is not part of the selection box.
+    private static final VoxelShape vfpShapeBedrock = Block.column(14.0, 0.0, 8.0);
     private static final Map<CandleBlock, CandleCakeBlock> BY_CANDLE = Maps.newHashMap();
     private static final Iterable<Vec3> PARTICLE_OFFSETS = List.of(new Vec3(8.0, 16.0, 8.0).scale(0.0625));
     private final CandleBlock candleBlock;
@@ -63,7 +68,24 @@ public class CandleCakeBlock extends AbstractCandleBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinCandleCakeBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinCandleCakeBlock#getOcclusionShape (@Override, added method)
+    // The inherited occlusion shape is derived from getShape, so the narrowed Bedrock outline above would drop the
+    // candle stalk out of light occlusion too; keep the vanilla cake+candle union here.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPE;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

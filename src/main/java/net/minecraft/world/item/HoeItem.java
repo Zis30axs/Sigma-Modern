@@ -3,6 +3,7 @@ package net.minecraft.world.item;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.mojang.datafixers.util.Pair;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -53,7 +54,13 @@ public class HoeItem extends Item {
         Consumer<UseOnContext> action = logicPair.getSecond();
         if (predicate.test(context)) {
             Player player = context.getPlayer();
-            level.playSound(player, pos, SoundEvents.HOE_TILL, SoundSource.BLOCKS, 1.0F, 1.0F);
+            // MODIFIED for porting: was VFP world/duplicated_sounds MixinItems#disableItemPlaceSounds
+            // (@WrapWithCondition on Level#playSound). 1.8 and older send the till sound from the server, so playing
+            // it client-side too would double it.
+            if (!DebugSettings.INSTANCE.serversidePlaceSounds.isEnabled()) {
+                level.playSound(player, pos, SoundEvents.HOE_TILL, SoundSource.BLOCKS, 1.0F, 1.0F);
+            }
+
             if (!level.isClientSide()) {
                 action.accept(context);
                 if (player != null) {

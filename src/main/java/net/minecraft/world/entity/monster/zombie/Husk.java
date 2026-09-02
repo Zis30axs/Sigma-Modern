@@ -34,6 +34,10 @@ public class Husk extends Zombie {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F)
         .withEyeHeight(0.825F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinHusk#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F)
+        .withEyeHeight(0.825F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
 
     public Husk(final EntityType<? extends Husk> type, final Level level) {
         super(type, level);
@@ -133,7 +137,20 @@ public class Husk extends Zombie {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
+        // MODIFIED for porting: was VFP entity.dimensions MixinHusk#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) // MODIFIED for porting
+            ? vfpChangeBabyDimensions()
+            : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinHusk#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 gave the baby husk a 0.99F tall box instead of the 26.2 value 0.98F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     public static class HuskGroupData extends Zombie.ZombieGroupData {

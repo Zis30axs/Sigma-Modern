@@ -29,8 +29,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import com.viaversion.viafabricplus.features.entity.dimensions.EntityRidingOffsetsPre1_20_2;
+import com.viaversion.viafabricplus.injection.access.world.always_tick_entities.IEntity;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.viabedrock.protocol.data.enums.bedrock.generated.PlayerAuthInputPacket_InputData;
+import net.raphimc.viabedrock.protocol.storage.EntityTracker;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
@@ -172,7 +179,8 @@ public abstract class Entity
     TypedInstance<EntityType<?>>,
     net.caffeinemc.mods.lithium.common.world.in_world_tracking.MaybeInLevelObject, // MODIFIED for porting: lithium util.in_world_tracking.entity
     net.caffeinemc.mods.lithium.mixin.block.hopper.EntityAccessor, // MODIFIED for porting: lithium block.hopper EntityAccessor
-    net.caffeinemc.mods.lithium.common.entity.pushable.FeetBlockCachingEntity { // MODIFIED for porting: lithium entity.collisions.unpushable_cramming
+    net.caffeinemc.mods.lithium.common.entity.pushable.FeetBlockCachingEntity, // MODIFIED for porting: lithium entity.collisions.unpushable_cramming
+    IEntity { // MODIFIED for porting: was VFP world/always_tick_entities MixinEntity (implements IEntity)
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final String TAG_ID = "id";
     public static final String TAG_UUID = "UUID";
@@ -302,6 +310,23 @@ public abstract class Entity
     private Vec3 lastKnownSpeed = Vec3.ZERO;
     private @Nullable Vec3 lastKnownPosition;
     private @Nullable BlockState inBlockState = null;
+
+    // MODIFIED for porting: was VFP world/always_tick_entities MixinEntity#viaFabricPlus$isInLoadedChunkAndShouldTick
+    // (@Unique). ClientLevel maintains this flag itself so that entities which vanilla would skip can still be ticked.
+    private boolean vfpIsInLoadedChunkAndShouldTick;
+
+    // MODIFIED for porting: was VFP world/always_tick_entities MixinEntity#viaFabricPlus$isInLoadedChunkAndShouldTick
+    // The debug setting is active for <= 1.8 and >= 1.17, where every entity has to be treated as tickable.
+    @Override
+    public boolean viaFabricPlus$isInLoadedChunkAndShouldTick() {
+        return this.vfpIsInLoadedChunkAndShouldTick || DebugSettings.INSTANCE.alwaysTickClientPlayer.isEnabled();
+    }
+
+    // MODIFIED for porting: was VFP world/always_tick_entities MixinEntity#viaFabricPlus$setInLoadedChunkAndShouldTick
+    @Override
+    public void viaFabricPlus$setInLoadedChunkAndShouldTick(final boolean inLoadedChunkAndShouldTick) {
+        this.vfpIsInLoadedChunkAndShouldTick = inLoadedChunkAndShouldTick;
+    }
 
     // MODIFIED for porting: was lithium's entity.collisions.unpushable_cramming EntityMixin
     @Override
@@ -795,7 +820,13 @@ public abstract class Entity
             delta = this.maybeBackOffFromEdge(delta, moverType);
             Vec3 movement = this.collide(delta);
             double movementLength = movement.lengthSqr();
-            if (movementLength > 1.0E-7 || delta.lengthSqr() - movementLength < 1.0E-7) {
+            // MODIFIED for porting: was VFP movement/collision MixinEntity#allowSmallValues (@Redirect on the second
+            // Vec3#lengthSqr after collide()). <= 1.21 only moved when the resolved movement itself was above the
+            // 1e-7 threshold, so the second alternative can never fire.
+            if (movementLength > 1.0E-7
+                || (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21) ? Double.MAX_VALUE : delta.lengthSqr())
+                    - movementLength
+                    < 1.0E-7) {
                 if (this.fallDistance != 0.0 && movementLength >= 1.0) {
                     double checkDistance = Math.min(movement.length(), 8.0);
                     Vec3 checkTo = this.position().add(movement.normalize().scale(checkDistance));
@@ -808,14 +839,23 @@ public abstract class Entity
 
                 Vec3 pos = this.position();
                 Vec3 newPosition = pos.add(movement);
-                this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
+                // MODIFIED for porting: was VFP movement/collision MixinEntity#removeExtraCollisionChecks
+                // (@WrapWithCondition on addMovementThisTick). Before 1.21.5 there was no extra inside-block effect
+                // collection for the movement of this tick.
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                    this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
+                }
+
                 this.setPos(newPosition);
             }
 
             profiler.pop();
             profiler.push("rest");
-            boolean xCollision = !Mth.equal(delta.x, movement.x);
-            boolean zCollision = !Mth.equal(delta.z, movement.z);
+            // MODIFIED for porting: was VFP movement/collision MixinEntity#horizontalExactCollisionEqualness
+            // (@Redirect on both Mth#equal(DD) calls). <= 1.13.2 compared exactly instead of with a 1e-5 epsilon.
+            final boolean vfpExactCollisionEqualness = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2);
+            boolean xCollision = vfpExactCollisionEqualness ? delta.x != movement.x : !Mth.equal(delta.x, movement.x);
+            boolean zCollision = vfpExactCollisionEqualness ? delta.z != movement.z : !Mth.equal(delta.z, movement.z);
             this.horizontalCollision = xCollision || zCollision;
             boolean movedVertically = Math.abs(delta.y) > 0.0;
             if (movedVertically || this.isLocalInstanceAuthoritative()) {
@@ -839,7 +879,13 @@ public abstract class Entity
             if (this.isRemoved()) {
                 profiler.pop();
             } else {
-                if (this.canSimulateMovement() && (movedVertically && this.verticalCollision || this.horizontalCollision)) {
+                // MODIFIED for porting: was VFP movement/collision MixinEntity#removeVerticalCheck (@Redirect on the
+                // third GETFIELD of horizontalCollision). <= 26.1 also ran the restitution pass on a pure vertical
+                // collision.
+                if (this.canSimulateMovement()
+                    && (movedVertically && this.verticalCollision
+                        || this.horizontalCollision
+                        || ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1) && this.verticalCollision)) {
                     this.restituteMovementAfterCollisions(effectState, xCollision, zCollision, movement);
                 }
 
@@ -871,8 +917,18 @@ public abstract class Entity
 
         boolean bounced = restitution > 0.0 && (xCollision || zCollision);
         if (this.verticalCollision) {
-            if (this.verticalCollisionBelow) {
-                restitution = !(-currentMovement.y < this.getEffectiveGravity()) && !this.isSuppressingBounce() && !effectState.is(BlockTags.SUPPRESSES_BOUNCE)
+            // MODIFIED for porting: was VFP movement/collision MixinEntity#fixBelowCollisionCheck (@Redirect on the
+            // GETFIELD of verticalCollisionBelow). <= 26.1 always took the below-collision branch.
+            if (this.verticalCollisionBelow || ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+                // MODIFIED for porting: was VFP movement/collision MixinEntity#fixGravityCheck
+                // (@ModifyExpressionValue on the '-currentMovement.y < ?' sub-expression). <= 26.1 only looked at the
+                // sign of the vertical movement instead of comparing it against the effective gravity.
+                boolean fallingSlowerThanGravity = -currentMovement.y < this.getEffectiveGravity();
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+                    fallingSlowerThanGravity = !(currentMovement.y < 0.0);
+                }
+
+                restitution = !fallingSlowerThanGravity && !this.isSuppressingBounce() && !effectState.is(BlockTags.SUPPRESSES_BOUNCE)
                     ? Math.max(restitution, this.getBlockBounciness(effectState.getBlock()))
                     : 0.0;
             }
@@ -889,7 +945,14 @@ public abstract class Entity
                 effectiveDrag = 1.0;
             }
 
-            movementAfterBounce = movementAfterBounce.with(Direction.Axis.Y, (gravityCompensation - currentMovement.y) * effectiveDrag * restitution);
+            // MODIFIED for porting: was VFP movement/collision MixinEntity#fixRestitution (@Redirect on the third
+            // Vec3#with call). <= 26.1 restituted from the raw delta movement instead of the gravity-compensated one.
+            movementAfterBounce = movementAfterBounce.with(
+                Direction.Axis.Y,
+                ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)
+                    ? -this.getDeltaMovement().y * restitution
+                    : (gravityCompensation - currentMovement.y) * effectiveDrag * restitution
+            );
         }
 
         if (bounced) {
@@ -1106,6 +1169,16 @@ public abstract class Entity
     }
 
     public BlockPos getBlockPosBelowThatAffectsMyMovement() {
+        // MODIFIED for porting: was VFP movement/collision MixinEntity#modifyVelocityAffectingPos (@Inject HEAD
+        // cancellable). <= 1.19.4 derived the position from the bounding box instead of the supporting block, and
+        // <= 1.14.4 probed a full block below it.
+        final ProtocolVersion target = ProtocolTranslator.getTargetVersion();
+        if (target.olderThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+            return BlockPos.containing(
+                this.position.x, this.getBoundingBox().minY - (target.olderThanOrEqualTo(ProtocolVersion.v1_14_4) ? 1 : 0.5000001), this.position.z
+            );
+        }
+
         return this.getOnPos(0.500001F);
     }
 
@@ -1114,6 +1187,30 @@ public abstract class Entity
     }
 
     protected BlockPos getOnPos(final float offset) {
+        // MODIFIED for porting: was VFP movement/collision MixinEntity#modifyPosWithYOffset (@Inject HEAD cancellable).
+        // <= 1.19.4 knows nothing about the supporting block and recomputes the position from the raw entity position;
+        // <= 1.18.2 used a fixed 0.2 offset for the 1e-5 caller.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_4)) {
+            int legacyX = Mth.floor(this.position.x);
+            int legacyY = Mth.floor(
+                this.position.y
+                    - (double)(ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18_2) && offset == 1.0E-5F ? 0.2F : offset)
+            );
+            int legacyZ = Mth.floor(this.position.z);
+            BlockPos legacyPos = new BlockPos(legacyX, legacyY, legacyZ);
+            if (this.level.getBlockState(legacyPos).isAir()) {
+                BlockPos legacyPosBelow = legacyPos.below();
+                BlockState legacyStateBelow = this.level.getBlockState(legacyPosBelow);
+                if (legacyStateBelow.is(BlockTags.FENCES)
+                    || legacyStateBelow.is(BlockTags.WALLS)
+                    || legacyStateBelow.getBlock() instanceof FenceGateBlock) {
+                    return legacyPosBelow;
+                }
+            }
+
+            return legacyPos;
+        }
+
         if (this.mainSupportingBlockPos.isPresent()) {
             BlockPos getOnPos = this.mainSupportingBlockPos.get();
             if (!(offset > 1.0E-5F)) {
@@ -1197,6 +1294,62 @@ public abstract class Entity
     }
 
     private Vec3 collide(final Vec3 movement) {
+        // MODIFIED for porting: was VFP movement/collision MixinEntity#use1_20_6StepCollisionCalculation (@Inject HEAD
+        // cancellable). <= 1.20.5 used the 1.20.6 step-up resolution: a single maxUpStep probe plus a step-around probe
+        // instead of the candidate step height scan below. <= 1.13.2 additionally drops movement.y from the step-down
+        // probe. This has to return before lithium's collision path runs.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+            final AABB legacyBox = this.getBoundingBox();
+            final List<VoxelShape> legacyEntityColliders = this.level().getEntityCollisions(this, legacyBox.expandTowards(movement));
+            Vec3 adjustedMovement = movement.lengthSqr() == 0.0
+                ? movement
+                : collideBoundingBox(this, movement, legacyBox, this.level(), legacyEntityColliders);
+            final boolean changedX = movement.x != adjustedMovement.x;
+            final boolean changedY = movement.y != adjustedMovement.y;
+            final boolean changedZ = movement.z != adjustedMovement.z;
+            final boolean mayTouchGround = this.onGround() || changedY && movement.y < 0.0;
+            if (this.maxUpStep() > 0.0F && mayTouchGround && (changedX || changedZ)) {
+                Vec3 stepUpMovement = collideBoundingBox(
+                    this, new Vec3(movement.x, this.maxUpStep(), movement.z), legacyBox, this.level(), legacyEntityColliders
+                );
+                final Vec3 stepUpOnly = collideBoundingBox(
+                    this,
+                    new Vec3(0.0, this.maxUpStep(), 0.0),
+                    legacyBox.expandTowards(movement.x, 0.0, movement.z),
+                    this.level(),
+                    legacyEntityColliders
+                );
+                if (stepUpOnly.y < this.maxUpStep()) {
+                    final Vec3 stepAround = collideBoundingBox(
+                        this, new Vec3(movement.x, 0.0, movement.z), legacyBox.move(stepUpOnly), this.level(), legacyEntityColliders
+                    )
+                        .add(stepUpOnly);
+                    if (stepAround.horizontalDistanceSqr() > stepUpMovement.horizontalDistanceSqr()) {
+                        stepUpMovement = stepAround;
+                    }
+                }
+
+                if (stepUpMovement.horizontalDistanceSqr() > adjustedMovement.horizontalDistanceSqr()) {
+                    adjustedMovement = stepUpMovement.add(
+                        collideBoundingBox(
+                            this,
+                            new Vec3(
+                                0.0,
+                                -stepUpMovement.y
+                                    + (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2) ? 0 : movement.y),
+                                0.0
+                            ),
+                            legacyBox.move(stepUpMovement),
+                            this.level(),
+                            legacyEntityColliders
+                        )
+                    );
+                }
+            }
+
+            return adjustedMovement;
+        }
+
         AABB aabb = this.getBoundingBox();
         // MODIFIED for porting: lithium entity.collisions.movement EntityMixin#postponeGetEntities - the entity collisions are
         // not gathered up front any more. lithium$collideMovement only collects them once a block collision was actually
@@ -1338,7 +1491,13 @@ public abstract class Entity
             }
         }
 
-        boolean zMovementBiggerThanXMovement = Math.abs(movementX) < Math.abs(movementZ);
+        // MODIFIED for porting: was VFP compat/lithium MixinEntity#alwaysSortYXZ (@Redirect on the first Math.abs).
+        // <= 1.13.2 resolved the axes in a fixed Y, X, Z order, so lithium's "largest horizontal axis first" ordering
+        // is neutralised by making the first Math.abs return Double.MAX_VALUE.
+        boolean zMovementBiggerThanXMovement = (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)
+            ? Double.MAX_VALUE
+            : Math.abs(movementX))
+            < Math.abs(movementZ);
         if (zMovementBiggerThanXMovement) {
             movementZ = Shapes.collide(Direction.Axis.Z, entityBoundingBox, blockCollisions, movementZ);
             if (movementZ != 0.0) {
@@ -1453,7 +1612,11 @@ public abstract class Entity
 
         Vec3 resolvedMovement = Vec3.ZERO;
 
-        for (Direction.Axis axis : Direction.axisStepOrder(movement)) {
+        // MODIFIED for porting: was VFP movement/collision MixinEntity#alwaysSortYXZ (@Redirect on
+        // Direction#axisStepOrder). <= 1.13.2 always resolved the axes in Y, X, Z order.
+        for (Direction.Axis axis : ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)
+            ? Direction.YXZ_AXIS_ORDER
+            : Direction.axisStepOrder(movement)) {
             double axisMovement = movement.get(axis);
             if (axisMovement != 0.0) {
                 double collision = Shapes.collide(axis, boundingBox.move(resolvedMovement), shapes, axisMovement);
@@ -1489,7 +1652,12 @@ public abstract class Entity
                 Vec3 delta = movement.to().subtract(movement.from());
                 int maxMovementIterations = 16;
                 if (movement.axisDependentOriginalMovement().isPresent() && delta.lengthSqr() > 0.0) {
-                    for (Direction.Axis axis : Direction.axisStepOrder(movement.axisDependentOriginalMovement().get())) {
+                    // MODIFIED for porting: was VFP movement/collision MixinEntity#alwaysSortYXZ (@Redirect on
+                    // Direction#axisStepOrder). <= 1.13.2 always resolved the axes in Y, X, Z order.
+                    final Vec3 axisDependentOriginalMovement = movement.axisDependentOriginalMovement().get();
+                    for (Direction.Axis axis : ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)
+                        ? Direction.YXZ_AXIS_ORDER
+                        : Direction.axisStepOrder(axisDependentOriginalMovement)) {
                         double axisMove = delta.get(axis);
                         if (axisMove != 0.0) {
                             Vec3 to = pos.relative(axis.getPositive(), axisMove);
@@ -1517,7 +1685,18 @@ public abstract class Entity
         final LongSet visitedBlocks,
         final int maxMovementIterations
     ) {
-        AABB deflatedBoundingBoxAtTarget = this.makeBoundingBox(to).deflate(1.0E-5F);
+        // MODIFIED for porting: was VFP movement/constants MixinEntity#fixBlockCollisionMargin (@ModifyConstant on the
+        // 1.0E-5F deflate margin). <= 1.19.1 deflated by 1e-3 and <= 1.21 by 1e-7 before collecting inside-block effects.
+        final double blockCollisionMargin;
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_1)) {
+            blockCollisionMargin = 1.0E-3;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            blockCollisionMargin = 1.0E-7;
+        } else {
+            blockCollisionMargin = 1.0E-5F;
+        }
+
+        AABB deflatedBoundingBoxAtTarget = this.makeBoundingBox(to).deflate(blockCollisionMargin);
         boolean movedFar = from.distanceToSqr(to) > Mth.square(0.9999900000002526);
         boolean debugEntityBlockIntersections = this.level instanceof ServerLevel serverLevel
             && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
@@ -1945,6 +2124,13 @@ public abstract class Entity
     }
 
     public boolean isInLava() {
+        // MODIFIED for porting: was VFP movement/liquid MixinEntity#replaceLavaCheck1_13_2 (@Inject RETURN cancellable).
+        // <= 1.13.2 had no fluid tracker and tested the deflated bounding box against the loaded block states.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            final AABB lavaBox = this.getBoundingBox().deflate(0.1F, 0.4F, 0.1F);
+            return this.level.getBlockStatesIfLoaded(lavaBox).anyMatch(state -> state.getFluidState().is(FluidTags.LAVA));
+        }
+
         return !this.firstTick && this.fluidInteraction.isInFluid(FluidTags.LAVA);
     }
 
@@ -1954,6 +2140,22 @@ public abstract class Entity
     }
 
     protected static Vec3 getInputVector(final Vec3 input, final float speed, final float yRot) {
+        // MODIFIED for porting: was VFP movement/constants MixinEntity#getInputVector1_13_2 (@Inject HEAD cancellable).
+        // <= 1.13.2 computed the movement input entirely in float precision. Upstream also sets the return value to
+        // Vec3.ZERO for a length below 1.0E-4F but does not return afterwards, so the float path overwrites it again;
+        // that branch is dead and is therefore not reproduced here.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            float legacyX = (float)input.x;
+            float legacyZ = (float)input.z;
+            final float legacyLength = Math.max(Mth.sqrt(legacyX * legacyX + legacyZ * legacyZ), 1.0F);
+            final float legacyScale = speed / legacyLength;
+            legacyX *= legacyScale;
+            legacyZ *= legacyScale;
+            final float legacySin = Mth.sin(yRot * (float) (Math.PI / 180.0));
+            final float legacyCos = Mth.cos(yRot * (float) (Math.PI / 180.0));
+            return new Vec3(legacyX * legacyCos - legacyZ * legacySin, input.y, legacyZ * legacyCos + legacyX * legacySin);
+        }
+
         double length = input.lengthSqr();
         if (length < 1.0E-7) {
             return Vec3.ZERO;
@@ -2169,6 +2371,12 @@ public abstract class Entity
     }
 
     public final Vec3 calculateViewVector(final float xRot, final float yRot) {
+        // MODIFIED for porting: was VFP movement/limitation/rotation MixinEntity#revertCalculation (@Inject HEAD
+        // cancellable). <= 1.12.2 built the view vector from the shared rotation helper instead of the inlined trig.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return Vec3.directionFromRotation(xRot, yRot);
+        }
+
         float realXRot = xRot * (float) (Math.PI / 180.0);
         float realYRot = -yRot * (float) (Math.PI / 180.0);
         float yCos = Mth.cos(realYRot);
@@ -2469,7 +2677,9 @@ public abstract class Entity
     }
 
     public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
-        // MODIFIED for porting: was VFP MixinEntity#removeLeashActions + swingHand (@Redirect/@Inject)
+        // MODIFIED for porting: was VFP entity/interaction MixinEntity#removeLeashActions (@Inject HEAD cancellable).
+        // The <= 1.21.9 wrapper below is redundant - it only encloses the <= 1.21.5 block, which already implies it.
+        // swingHand is a separate @Redirect and lands on the CONSUME return further down in this method.
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)) {
             if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
                 final ItemStack itemStack = player.getItemInHand(hand);
@@ -2541,7 +2751,12 @@ public abstract class Entity
                 ItemStack itemStack = player.getItemInHand(hand);
                 if (itemStack.is(Items.LEAD) && !(leashable.getLeashHolder() instanceof Player)) {
                     if (this.level().isClientSide()) {
-                        return InteractionResult.CONSUME;
+                        // MODIFIED for porting: was VFP entity/interaction MixinEntity#swingHand (@Redirect on the
+                        // GETSTATIC of InteractionResult.CONSUME). <= 1.21.9 predicts the hand swing client-side, so
+                        // this path returns SUCCESS instead of CONSUME.
+                        return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)
+                            ? InteractionResult.SUCCESS
+                            : InteractionResult.CONSUME;
                     }
 
                     if (leashable.canHaveALeashAttachedTo(player)) {
@@ -2614,7 +2829,12 @@ public abstract class Entity
 
     protected void positionRider(final Entity passenger, final Entity.MoveFunction moveFunction) {
         Vec3 position = this.getPassengerRidingPosition(passenger);
-        Vec3 offset = passenger.getVehicleAttachmentPoint(this);
+        // MODIFIED for porting: was VFP entity/dimensions MixinEntity#use1_20_1RidingOffset (@Redirect on
+        // Entity#getVehicleAttachmentPoint). <= 1.20 positioned the rider from the pre-1.20.2 height offset table
+        // instead of the vehicle attachment point.
+        Vec3 offset = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20)
+            ? new Vec3(0.0, -EntityRidingOffsetsPre1_20_2.getHeightOffset(passenger), 0.0)
+            : passenger.getVehicleAttachmentPoint(this);
         moveFunction.accept(passenger, position.x - offset.x, position.y - offset.y, position.z - offset.z);
     }
 
@@ -2626,6 +2846,14 @@ public abstract class Entity
     }
 
     public Vec3 getPassengerRidingPosition(final Entity passenger) {
+        // MODIFIED for porting: was VFP entity/dimensions MixinEntity#getPassengerRidingPos1_20_1 (@Redirect on
+        // Entity#getPassengerAttachmentPoint). <= 1.20 used the pre-1.20.2 mounted height offset, rotated by the
+        // vehicle's yaw.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20)) {
+            return this.position()
+                .add(EntityRidingOffsetsPre1_20_2.getMountedHeightOffset(this, passenger).yRot(-this.getYRot() * (float) (Math.PI / 180)));
+        }
+
         return this.position().add(this.getPassengerAttachmentPoint(passenger, this.dimensions, 1.0F));
     }
 
@@ -2791,6 +3019,12 @@ public abstract class Entity
     }
 
     public float getPickRadius() {
+        // MODIFIED for porting: was VFP movement/constants MixinEntity#expandHitBox (@Inject HEAD cancellable).
+        // <= 1.8 used a 0.1 interaction radius, which makes the hitbox larger.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return 0.1F;
+        }
+
         return 0.0F;
     }
 
@@ -2949,6 +3183,23 @@ public abstract class Entity
     }
 
     public void setSwimming(final boolean swimming) {
+        // MODIFIED for porting: was VFP bedrock/movement MixinEntity#cancelSwimming (@Inject HEAD). Bedrock reports the
+        // swim start/stop as input data on the PlayerAuthInput packet instead of relying on the shared entity flag.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            final UserConnection connection = ProtocolTranslator.getPlayNetworkUserConnection();
+            if (connection != null && swimming != this.isSwimming()) {
+                connection.get(EntityTracker.class)
+                    .getClientPlayer()
+                    .addAuthInputData(swimming ? PlayerAuthInputPacket_InputData.StartSwimming : PlayerAuthInputPacket_InputData.StopSwimming);
+            }
+        }
+
+        // MODIFIED for porting: was VFP movement/liquid MixinEntity#cancelSwimming (@Inject HEAD cancellable).
+        // <= 1.12.2 has no swimming pose at all, so shared flag 4 is never set.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2) && swimming) {
+            return;
+        }
+
         this.setSharedFlag(4, swimming);
     }
 
@@ -3160,7 +3411,17 @@ public abstract class Entity
 
     public void makeStuckInBlock(final BlockState blockState, final Vec3 speedMultiplier) {
         this.resetFallDistance();
-        this.stuckSpeedMultiplier = speedMultiplier;
+        // MODIFIED for porting: was VFP bedrock/movement MixinEntity#prioritySlowestMovementMultiplier (@Redirect on the
+        // PUTFIELD of stuckSpeedMultiplier). Bedrock keeps the slowest multiplier per axis instead of the last one written.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) && this.stuckSpeedMultiplier != Vec3.ZERO) {
+            this.stuckSpeedMultiplier = new Vec3(
+                Math.min(this.stuckSpeedMultiplier.x, speedMultiplier.x),
+                Math.min(this.stuckSpeedMultiplier.y, speedMultiplier.y),
+                Math.min(this.stuckSpeedMultiplier.z, speedMultiplier.z)
+            );
+        } else {
+            this.stuckSpeedMultiplier = speedMultiplier;
+        }
     }
 
     private static Component removeAction(final Component component) {
@@ -4167,7 +4428,12 @@ public abstract class Entity
     }
 
     public void setYRot(final float yRot) {
-        if (!Float.isFinite(yRot)) {
+        // MODIFIED for porting: was VFP movement/limitation/rotation MixinEntity#allowInfiniteValues (@Redirect on
+        // Float.isFinite). The local player on <= 1.16.4 stores NaN/Infinity rotations instead of discarding them.
+        // LocalPlayer is fully qualified so this common class does not gain a client-only import.
+        if (!(Float.isFinite(yRot)
+            || this instanceof net.minecraft.client.player.LocalPlayer
+                && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4))) {
             Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
         } else {
             this.yRot = yRot;
@@ -4179,10 +4445,19 @@ public abstract class Entity
     }
 
     public void setXRot(final float xRot) {
-        if (!Float.isFinite(xRot)) {
+        // MODIFIED for porting: was VFP movement/limitation/rotation MixinEntity#allowInfiniteValues (@Redirect on
+        // Float.isFinite). The local player on <= 1.16.4 stores NaN/Infinity rotations instead of discarding them.
+        // LocalPlayer is fully qualified so this common class does not gain a client-only import.
+        if (!(Float.isFinite(xRot)
+            || this instanceof net.minecraft.client.player.LocalPlayer
+                && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4))) {
             Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
         } else {
-            this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
+            // MODIFIED for porting: was VFP movement/limitation/rotation MixinEntity#dontClampPitch (@Redirect on
+            // Math.clamp). <= 1.21 stored the pitch without the -90..90 clamp, so out-of-range pitches are possible.
+            this.xRot = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)
+                ? xRot % 360.0F
+                : Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
         }
     }
 
@@ -4376,10 +4651,27 @@ public abstract class Entity
 
     public @Nullable AABB getFluidInteractionBox() {
         double margin = 0.001;
-        AABB box = this.getBoundingBox().deflate(0.001);
+        // MODIFIED for porting: was VFP movement/liquid MixinEntity#inflate (@Redirect on AABB#deflate(D)).
+        // <= 1.12.2 and Bedrock shrink the fluid interaction box vertically before the margin is applied.
+        AABB fluidBox = this.getBoundingBox();
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            fluidBox = fluidBox.inflate(0, -0.4, 0);
+        }
+
+        AABB box = fluidBox.deflate(0.001);
         Entity vehicle = this.getVehicle();
         if (vehicle != null) {
-            box = vehicle.modifyPassengerFluidInteractionBox(box);
+            // MODIFIED for porting: was VFP movement/liquid MixinEntity#skipPassengerChanges (@Redirect on
+            // Entity#modifyPassengerFluidInteractionBox). <= 1.21.11 and Bedrock use the raw passenger box.
+            // DELIBERATE DEVIATION: upstream's else branch calls the method unqualified, i.e. on the
+            // PASSENGER, where vanilla calls it on the vehicle. Only AbstractBoat overrides it, so upstream's
+            // form disables the boat fluid-box adjustment on every version including native 26.2. The vanilla
+            // receiver is kept here; this only differs from upstream for targets newer than 1.21.11.
+            if (!(ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)
+                || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest))) {
+                box = vehicle.modifyPassengerFluidInteractionBox(box);
+            }
         }
 
         return box;

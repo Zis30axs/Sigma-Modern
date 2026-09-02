@@ -199,6 +199,8 @@ public class ClientConfigurationPacketListenerImpl extends ClientCommonPacketLis
                     return true;
                 }
             }));
+        // MODIFIED for porting: was VFP config_state
+        // MixinClientConfigurationPacketListenerImpl#enableAutoRead (@Inject RETURN)
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3)) {
             this.connection.channel.config().setAutoRead(true);
         }

@@ -1,5 +1,7 @@
 package net.minecraft.world.entity.animal.polarbear;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -213,7 +215,11 @@ public class PolarBear extends Animal implements NeutralMob {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        EntityDimensions dimension = this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinPolarBear#dontChangeScale (@Redirect INVOKE isBaby)
+        // Targets <=26.1 keep the adult box for cubs; only >26.1 shrinks it to BABY_DIMENSIONS.
+        EntityDimensions dimension = (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby())
+            ? BABY_DIMENSIONS
+            : super.getDefaultDimensions(pose);
         if (this.clientSideStandAnimation > 0.0F) {
             float standFactor = this.clientSideStandAnimation / 6.0F;
             float heightScaleFactor = 1.0F + standFactor;

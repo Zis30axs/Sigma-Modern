@@ -4,6 +4,8 @@ import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ActiveTextCollector;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -84,7 +86,10 @@ public class BookEditScreen extends Screen {
             .setX((this.width - 114) / 2 - 8)
             .setY(28)
             .build(this.font, 122, 134, CommonComponents.EMPTY);
-        this.page.setCharacterLimit(1024);
+        // MODIFIED for porting: was VFP limitation/book_edit MixinBookEditScreen#modifyPageLength
+        // (@ModifyConstant init intValue=1024)
+        // <=1.13.2 servers only accept 256 characters per page, so the editor must not let more be typed.
+        this.page.setCharacterLimit(ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2) ? 256 : 1024);
         this.page.setLineLimit(126 / 9);
         this.page.setValueListener(value -> this.pages.set(this.currentPage, value));
         this.addRenderableWidget(this.page);
@@ -183,7 +188,10 @@ public class BookEditScreen extends Screen {
     }
 
     private void appendPageToBook() {
-        if (this.getNumPages() < 100) {
+        // MODIFIED for porting: was VFP limitation/book_edit MixinBookEditScreen#modifyPageCount
+        // (@ModifyConstant appendPageToBook intValue=100)
+        // <=1.13.2 servers cap a writable book at 50 pages.
+        if (this.getNumPages() < (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2) ? 50 : 100)) {
             this.pages.add("");
         }
     }

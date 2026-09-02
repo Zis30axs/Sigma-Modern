@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.LivingEntity;
@@ -18,11 +20,25 @@ import org.jspecify.annotations.Nullable;
 public interface SimpleWaterloggedBlock extends BucketPickup, LiquidBlockContainer {
     @Override
     default boolean canPlaceLiquid(final @Nullable LivingEntity user, final BlockGetter level, final BlockPos pos, final BlockState state, final Fluid type) {
+        // MODIFIED for porting: was VFP block/interaction MixinSimpleWaterloggedBlock#preventLiquidPlacement1_12_2
+        // (canPlaceLiquid, @Inject RETURN, cancellable) - 1.12.2 and older have no waterlogging, so no block ever
+        // accepts a fluid.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return false;
+        }
+
         return type == Fluids.WATER;
     }
 
     @Override
     default boolean placeLiquid(final LevelAccessor level, final BlockPos pos, final BlockState state, final FluidState fluidState) {
+        // MODIFIED for porting: was VFP block/interaction MixinSimpleWaterloggedBlock#preventLiquidPlacement1_12_2
+        // (placeLiquid, @Inject HEAD, cancellable) - same gate as canPlaceLiquid above; nothing is waterlogged and no
+        // fluid tick is scheduled.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return false;
+        }
+
         if (!state.getValue(BlockStateProperties.WATERLOGGED) && fluidState.is(Fluids.WATER)) {
             if (!level.isClientSide()) {
                 level.setBlock(pos, state.setValue(BlockStateProperties.WATERLOGGED, true), 3);

@@ -2,6 +2,8 @@ package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
 import java.util.Map;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -56,6 +58,8 @@ public class LecternBlock extends BaseEntityBlock {
         )
     );
     private static final int PAGE_CHANGE_IMPULSE_TICKS = 2;
+    // MODIFIED for porting: was VFP bedrock/block MixinLecternBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0, 0, 0, 1, 0.9, 1);
 
     @Override
     public MapCodec<LecternBlock> codec() {
@@ -95,6 +99,14 @@ public class LecternBlock extends BaseEntityBlock {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinLecternBlock#changeCollisionShape
+        // (@Inject RETURN, cancellable)
+        // Bedrock lecterns collide as a solid 0.9-high block instead of base-plus-post. getOcclusionShape above
+        // and getShape below are deliberately left alone.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE_COLLISION;
     }
 

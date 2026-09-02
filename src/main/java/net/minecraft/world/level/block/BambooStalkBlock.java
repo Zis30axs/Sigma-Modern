@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -29,6 +31,11 @@ public class BambooStalkBlock extends Block implements BonemealableBlock {
     private static final VoxelShape SHAPE_SMALL = Block.column(6.0, 0.0, 16.0);
     private static final VoxelShape SHAPE_LARGE = Block.column(10.0, 0.0, 16.0);
     private static final VoxelShape SHAPE_COLLISION = Block.column(3.0, 0.0, 16.0);
+    // MODIFIED for porting: was VFP bedrock/block MixinBambooStalkBlock @Unique constants
+    // (viaFabricPlus$shape_small_bedrock, viaFabricPlus$shape_large_bedrock)
+    // Bedrock stalks are square columns anchored on the +X/+Z side of the block instead of centred.
+    private static final VoxelShape vfpShapeSmallBedrock = Block.box(8.0, 0.0, 8.0, 10.0, 16.0, 10.0);
+    private static final VoxelShape vfpShapeLargeBedrock = Block.box(8.0, 0.0, 8.0, 11.0, 16.0, 11.0);
     public static final IntegerProperty AGE = BlockStateProperties.AGE_1;
     public static final EnumProperty<BambooLeaves> LEAVES = BlockStateProperties.BAMBOO_LEAVES;
     public static final IntegerProperty STAGE = BlockStateProperties.STAGE;
@@ -60,6 +67,13 @@ public class BambooStalkBlock extends Block implements BonemealableBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinBambooStalkBlock#fixBambooShape (@Inject HEAD, cancellable)
+        // Bedrock keys the stalk thickness off AGE, not LEAVES, and uses the same box pair for outline and collision.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            final VoxelShape bedrockShape = state.getValue(AGE) == AGE_THICK_BAMBOO ? vfpShapeLargeBedrock : vfpShapeSmallBedrock;
+            return bedrockShape.move(state.getOffset(pos));
+        }
+
         VoxelShape shape = state.getValue(LEAVES) == BambooLeaves.LARGE ? SHAPE_LARGE : SHAPE_SMALL;
         return shape.move(state.getOffset(pos));
     }
@@ -71,6 +85,13 @@ public class BambooStalkBlock extends Block implements BonemealableBlock {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinBambooStalkBlock#fixBambooShape (@Inject HEAD, cancellable)
+        // Same hook as getShape above - upstream injects into both methods with one AGE-keyed box pair.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            final VoxelShape bedrockShape = state.getValue(AGE) == AGE_THICK_BAMBOO ? vfpShapeLargeBedrock : vfpShapeSmallBedrock;
+            return bedrockShape.move(state.getOffset(pos));
+        }
+
         return SHAPE_COLLISION.move(state.getOffset(pos));
     }
 

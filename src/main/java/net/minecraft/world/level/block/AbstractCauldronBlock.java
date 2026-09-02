@@ -1,5 +1,8 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.cauldron.CauldronInteraction;
@@ -38,6 +41,15 @@ public abstract class AbstractCauldronBlock extends Block {
             );
         }
     );
+    // MODIFIED for porting: was VFP block/shape MixinAbstractCauldronBlock#viaFabricPlus$collision_shape_r1_12_2_bedrock
+    // (@Unique constant) - the open five-box shell (floor plus four walls) that <= 1.12.2 and Bedrock use.
+    private static final VoxelShape vfpCollisionShapeR1_12_2Bedrock = Shapes.or(
+        Shapes.box(0.0, 0.0, 0.0, 1.0, 0.3125, 1.0),
+        Shapes.box(0.0, 0.0, 0.0, 0.125, 1.0, 1.0),
+        Shapes.box(0.0, 0.0, 0.0, 1.0, 1.0, 0.125),
+        Shapes.box(0.875, 0.0, 0.0, 1.0, 1.0, 1.0),
+        Shapes.box(0.0, 0.0, 0.875, 1.0, 1.0, 1.0)
+    );
     protected final CauldronInteraction.Dispatcher interactions;
 
     @Override
@@ -68,7 +80,30 @@ public abstract class AbstractCauldronBlock extends Block {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinAbstractCauldronBlock#changeOutlineShape
+        // (@Inject HEAD, cancellable) - <= 1.12.2 outlined the cauldron as a plain full block, Bedrock outlines the
+        // open shell. Upstream's MoreCulling-only getOcclusionShape workaround is not ported: that mod does not
+        // exist in this tree.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return Shapes.block();
+        } else if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpCollisionShapeR1_12_2Bedrock;
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinAbstractCauldronBlock#getCollisionShape (@Override, added method)
+    // Needed because BlockBehaviour#getCollisionShape falls back to getShape, so the <= 1.12.2 full-block outline
+    // above would otherwise also become a full collision box instead of the walkable shell.
+    @Override
+    protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpCollisionShapeR1_12_2Bedrock;
+        }
+
+        return super.getCollisionShape(state, level, pos, context);
     }
 
     @Override

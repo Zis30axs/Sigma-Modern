@@ -2,6 +2,8 @@ package net.minecraft.world.entity.animal.camel;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleTypes;
@@ -163,9 +165,12 @@ public class Camel extends AbstractHorse {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
+        // MODIFIED for porting: was VFP entity/dimensions MixinCamel#dontChangeScale (@Redirect isBaby, no ordinal - both call sites)
+        // <=26.1 has no separate baby camel hitbox, so both poses use the adult dimensions.
+        final boolean vfpBaby = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby();
         return pose == Pose.SITTING
-            ? (this.isBaby() ? BABY_SITTING_DIMENSIONS : ADULT_SITTING_DIMENSIONS)
-            : (this.isBaby() ? BABY_STANDING_DIMENSIONS : super.getDefaultDimensions(pose));
+            ? (vfpBaby ? BABY_SITTING_DIMENSIONS : ADULT_SITTING_DIMENSIONS)
+            : (vfpBaby ? BABY_STANDING_DIMENSIONS : super.getDefaultDimensions(pose));
     }
 
     @Override
@@ -398,7 +403,11 @@ public class Camel extends AbstractHorse {
             this.doPlayerRide(player);
         }
 
-        return this.isBaby() && player.isHolding(Items.GOLDEN_DANDELION) ? super.mobInteract(player, hand) : InteractionResult.CONSUME;
+        // MODIFIED for porting: was VFP entity/interaction MixinCamel#changeInteraction (@Redirect GETSTATIC InteractionResult.CONSUME)
+        // <=1.21.9 servers expect the client to predict success here, so the hand swings.
+        return this.isBaby() && player.isHolding(Items.GOLDEN_DANDELION)
+            ? super.mobInteract(player, hand)
+            : (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9) ? InteractionResult.SUCCESS : InteractionResult.CONSUME);
     }
 
     @Override
@@ -511,13 +520,60 @@ public class Camel extends AbstractHorse {
         return new Vec3(0.0, height, offset * scale).yRot(-this.getYRot() * (float) (Math.PI / 180.0));
     }
 
+    // MODIFIED for porting: was VFP entity/dimensions MixinCamel#onPassengerTurned (mixin @Override of Entity#onPassengerTurned)
+    // <=1.20 clamped a non-controlling passenger's yaw to +/-160 degrees relative to the camel.
+    @Override
+    public void onPassengerTurned(final Entity passenger) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20) && this.getControllingPassenger() != passenger) {
+            this.vfpClampPassengerYaw1_20_1(passenger);
+        }
+    }
+
+    // MODIFIED for porting: was VFP entity/dimensions MixinCamel#positionRider (mixin @Override of AbstractHorse#positionRider)
+    // <=1.20 re-applied the same +/-160 degree clamp after every repositioning.
+    @Override
+    protected void positionRider(final Entity passenger, final Entity.MoveFunction moveFunction) {
+        super.positionRider(passenger, moveFunction);
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20)) {
+            this.vfpClampPassengerYaw1_20_1(passenger);
+        }
+    }
+
+    // MODIFIED for porting: was VFP entity/dimensions MixinCamel#viaFabricPlus$clampPassengerYaw1_20_1 (@Unique)
+    private void vfpClampPassengerYaw1_20_1(final Entity passenger) {
+        passenger.setYBodyRot(this.getYRot());
+        final float passengerYaw = passenger.getYRot();
+
+        final float deltaDegrees = Mth.wrapDegrees(passengerYaw - this.getYRot());
+        final float clampedDelta = Mth.clamp(deltaDegrees, -160.0F, 160.0F);
+        passenger.yRotO += clampedDelta - deltaDegrees;
+
+        final float newYaw = passengerYaw + clampedDelta - deltaDegrees;
+        passenger.setYRot(newYaw);
+        passenger.setYHeadRot(newYaw);
+    }
+
     @Override
     public float getAgeScale() {
+        // MODIFIED for porting: was VFP entity/dimensions MixinCamel#changeBabyScale (@Inject HEAD cancellable)
+        // <=1.21.11 scaled baby camels by 0.45F instead of 0.6F.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11) && this.isBaby()) {
+            return 0.45F;
+        }
+
         return this.isBaby() ? 0.6F : 1.0F;
     }
 
     public double getBodyAnchorAnimationYOffset(final boolean isFront, final float partialTicks, final EntityDimensions dimensions, final float scale) {
-        double ageSitYOffset = this.isBaby() ? 0.09375 : 0.375;
+        // MODIFIED for porting: was VFP entity/dimensions MixinCamel#removeBabySitOffset (@Redirect isBaby) and #scaleSitOffset
+        // (@ModifyConstant 0.375, @Local ordinal=1 argsOnly float == scale) - <=26.1 has no baby sit offset and scales the adult one.
+        double ageSitYOffset;
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            ageSitYOffset = 0.375 * scale;
+        } else {
+            ageSitYOffset = this.isBaby() ? 0.09375 : 0.375;
+        }
+
         double baseSitOffset = dimensions.height() - ageSitYOffset;
         float sittingHeightDifference = scale * 1.43F;
         float verticalDrop = sittingHeightDifference - scale * 0.2F;

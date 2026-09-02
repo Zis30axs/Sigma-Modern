@@ -1,6 +1,9 @@
 package net.minecraft.client.gui.screens.debug;
 
 import com.google.common.collect.Lists;
+import com.viaversion.viafabricplus.features.networking.remove_signed_commands.SignedCommands1_21_6;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.GameNarrator;
@@ -111,7 +114,14 @@ public class GameModeSwitcherScreen extends Screen {
         if (minecraft.canSwitchGameMode()) {
             GameModeSwitcherScreen.GameModeIcon currentGameMode = GameModeSwitcherScreen.GameModeIcon.getFromGameType(minecraft.gameMode.getPlayerMode());
             if (toGameMode != currentGameMode && GameModeCommand.PERMISSION_CHECK.check(minecraft.player.permissions())) {
-                minecraft.player.connection.send(new ServerboundChangeGameModePacket(toGameMode.mode));
+                // MODIFIED for porting: was VFP remove_signed_commands MixinGameModeSwitcherScreen#wrapAsCommand
+                // (@Redirect ClientPacketListener#send). <= 1.21.5 has no serverbound gamemode packet, the switch is sent
+                // as the '/gamemode <mode>' command instead (username-prefixed '/gamemode <user> <id>' for <= 1.2.5).
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                    SignedCommands1_21_6.sendGameMode(toGameMode.mode);
+                } else {
+                    minecraft.player.connection.send(new ServerboundChangeGameModePacket(toGameMode.mode));
+                }
             }
         }
     }

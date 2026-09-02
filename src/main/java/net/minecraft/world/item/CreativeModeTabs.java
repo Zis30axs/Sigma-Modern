@@ -1,6 +1,9 @@
 package net.minecraft.world.item;
 
 import com.mojang.datafixers.util.Pair;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.GeneralSettings;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -65,6 +68,10 @@ public class CreativeModeTabs {
         Holder::value, Comparator.comparingInt(PaintingVariant::area).thenComparing(PaintingVariant::width)
     );
     private static CreativeModeTab.@Nullable ItemDisplayParameters CACHED_PARAMETERS;
+    // MODIFIED for porting: was VFP item/filter_creative_tabs MixinCreativeModeTabs @Unique static state -
+    // the target version and the filter setting index the tab contents were last built for.
+    private static @Nullable ProtocolVersion vfpTabVersion;
+    private static int vfpTabState;
 
     private static ResourceKey<CreativeModeTab> createKey(final String id) {
         return ResourceKey.create(Registries.CREATIVE_MODE_TAB, Identifier.withDefaultNamespace(id));
@@ -1797,6 +1804,18 @@ public class CreativeModeTabs {
     }
 
     public static boolean tryRebuildTabContents(final FeatureFlagSet enabledFeatures, final boolean hasPermissions, final HolderLookup.Provider lookup) {
+        // MODIFIED for porting: was VFP item/filter_creative_tabs MixinCreativeModeTabs#trackLastVersion
+        // (@Inject HEAD cancellable) plus its two @Unique static fields. A protocol version or filter setting
+        // change has to force a rebuild, because vanilla's needsUpdate check knows nothing about either.
+        if (vfpTabVersion != ProtocolTranslator.getTargetVersion()
+            || vfpTabState != GeneralSettings.INSTANCE.removeNotAvailableItemsFromCreativeTab.getIndex()) {
+            vfpTabVersion = ProtocolTranslator.getTargetVersion();
+            vfpTabState = GeneralSettings.INSTANCE.removeNotAvailableItemsFromCreativeTab.getIndex();
+            CACHED_PARAMETERS = new CreativeModeTab.ItemDisplayParameters(enabledFeatures, hasPermissions, lookup);
+            buildAllTabContents(CACHED_PARAMETERS);
+            return true;
+        }
+
         if (CACHED_PARAMETERS != null && !CACHED_PARAMETERS.needsUpdate(enabledFeatures, hasPermissions, lookup)) {
             return false;
         }

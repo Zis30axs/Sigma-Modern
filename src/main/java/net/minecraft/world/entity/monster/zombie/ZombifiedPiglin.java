@@ -20,6 +20,7 @@ import net.minecraft.world.entity.EntityReference;
 import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.NeutralMob;
@@ -51,6 +52,11 @@ public class ZombifiedPiglin extends Zombie implements NeutralMob {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F)
         .withEyeHeight(0.78F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombifiedPiglin#viaFabricPlus$baby_dimensions_r26_1 / _r1_21_11 (@Unique constants)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F)
+        .withEyeHeight(0.78F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    private static final EntityDimensions vfpBabyDimensionsR1_21_11 = EntityTypes.ZOMBIFIED_PIGLIN.getDimensions().scale(0.5F).withEyeHeight(0.97F);
     private static final Identifier SPEED_MODIFIER_ATTACKING_ID = Identifier.withDefaultNamespace("attacking");
     private static final AttributeModifier SPEED_MODIFIER_ATTACKING = new AttributeModifier(
         SPEED_MODIFIER_ATTACKING_ID, 0.05, AttributeModifier.Operation.ADD_VALUE
@@ -88,7 +94,20 @@ public class ZombifiedPiglin extends Zombie implements NeutralMob {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinZombifiedPiglin#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombifiedPiglin#changeBabyDimensions (@Redirect body)
+    // Targets <=1.21.11 scaled the adult box by 0.5F with eye height 0.97F; <=26.1 used a 0.99F tall box instead of 0.98F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return vfpBabyDimensionsR1_21_11;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     @Override

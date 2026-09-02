@@ -3,6 +3,7 @@ package net.minecraft.world.level.block;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -116,7 +117,12 @@ public class ButtonBlock extends FaceAttachedHorizontalDirectionalBlock {
     }
 
     protected void playSound(final @Nullable Player player, final LevelAccessor level, final BlockPos pos, final boolean pressed) {
-        level.playSound(pressed ? player : null, pos, this.getSound(pressed), SoundSource.BLOCKS);
+        // MODIFIED for porting: was VFP world/duplicated_sounds MixinButtonBlock#disableClickSounds
+        // (@WrapWithCondition on LevelAccessor#playSound). 1.8 and older send the click sound from the server, so
+        // playing it client-side too would double it. Covers both callers, press() and the scheduled tick.
+        if (!DebugSettings.INSTANCE.serversidePlaceSounds.isEnabled()) {
+            level.playSound(pressed ? player : null, pos, this.getSound(pressed), SoundSource.BLOCKS);
+        }
     }
 
     protected SoundEvent getSound(final boolean pressed) {

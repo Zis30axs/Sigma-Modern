@@ -10,7 +10,10 @@ import com.mojang.authlib.minecraft.MinecraftProfileTexture;
 import com.mojang.authlib.minecraft.MinecraftProfileTextures;
 import com.mojang.authlib.minecraft.MinecraftProfileTexture.Type;
 import com.mojang.authlib.properties.Property;
+import com.mojang.authlib.yggdrasil.ProfileResult;
 import com.mojang.logging.LogUtils;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -21,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.SkinTextureDownloader;
 import net.minecraft.core.ClientAsset;
 import net.minecraft.resources.Identifier;
@@ -81,7 +85,20 @@ public class SkinManager {
     }
 
     public Supplier<PlayerSkin> createLookup(final GameProfile profile, final boolean requireSecure) {
-        CompletableFuture<Optional<PlayerSkin>> future = this.get(profile);
+        // MODIFIED for porting: was VFP skin_loading MixinSkinManager#fetchGameProfileProperties (@Redirect on
+        // SkinManager#get). Servers older than 1.20.2 send player list entries without a "textures" property, so the
+        // profile has to be resolved against the session service first or everybody gets a default skin.
+        CompletableFuture<Optional<PlayerSkin>> future;
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20) && !profile.properties().containsKey("textures")) {
+            future = CompletableFuture.<GameProfile>supplyAsync(() -> {
+                    final ProfileResult profileResult = Minecraft.getInstance().services().sessionService().fetchProfile(profile.id(), true);
+                    return profileResult == null ? profile : profileResult.profile();
+                }, Util.backgroundExecutor())
+                .thenCompose(this::get);
+        } else {
+            future = this.get(profile);
+        }
+
         PlayerSkin defaultSkin = DefaultPlayerSkin.get(profile);
         if (SharedConstants.DEBUG_DEFAULT_SKIN_OVERRIDE) {
             return () -> defaultSkin;

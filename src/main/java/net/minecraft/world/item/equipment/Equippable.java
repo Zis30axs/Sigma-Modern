@@ -3,6 +3,9 @@ package net.minecraft.world.item.equipment;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.HolderSet;
@@ -126,9 +129,23 @@ public record Equippable(
     }
 
     public InteractionResult swapWithEquipmentSlot(final ItemStack inHand, final Player player) {
+        // MODIFIED for porting: was VFP item.interaction MixinEquippable#cancelArmorSwap (@Inject HEAD cancellable)
+        // Targets <=1.19.3 never swapped into an occupied slot, and <=1.4.7 had no armour swapping at all.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3) && !player.getItemBySlot(this.slot).isEmpty()) {
+            return InteractionResult.FAIL;
+        }
+
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_6tor1_4_7)) {
+            return InteractionResult.FAIL;
+        }
+
         if (player.canUseSlot(this.slot) && this.canBeEquippedBy(player.typeHolder())) {
             ItemStack inEquipmentSlot = player.getItemBySlot(this.slot);
-            if ((!EnchantmentHelper.has(inEquipmentSlot, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE) || player.isCreative())
+            // MODIFIED for porting: was VFP item.interaction MixinEquippable#removeCreativeCondition
+            // (@Redirect Player#isCreative, no ordinal - both call sites). On targets <=1.20 creative counts as
+            // false, which disables the enchantment bypass here and the copy-instead-of-clear path below.
+            if ((!EnchantmentHelper.has(inEquipmentSlot, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE)
+                    || ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20) && player.isCreative())
                 && !ItemStack.isSameItemSameComponents(inHand, inEquipmentSlot)) {
                 if (!player.level().isClientSide()) {
                     player.awardStat(Stats.ITEM_USED.get(inHand.getItem()));
@@ -136,7 +153,10 @@ public record Equippable(
 
                 if (inHand.getCount() <= 1) {
                     ItemStack swappedToHand = inEquipmentSlot.isEmpty() ? inHand : inEquipmentSlot.copyAndClear();
-                    ItemStack swappedToEquipment = player.isCreative() ? inHand.copy() : inHand.copyAndClear();
+                    // MODIFIED for porting: was VFP item.interaction MixinEquippable#removeCreativeCondition
+                    ItemStack swappedToEquipment = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20) && player.isCreative()
+                        ? inHand.copy()
+                        : inHand.copyAndClear();
                     player.setItemSlot(this.slot, swappedToEquipment);
                     return InteractionResult.SUCCESS.heldItemTransformedTo(swappedToHand);
                 }

@@ -182,10 +182,15 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
         // maps the removed container-acknowledgement (transaction) onto it and packs the window id into
         // bits 16-23 of the ping id. 1.16 vanilla only answered an acknowledgement for window 0 or for the
         // container that is currently open, so any other window id must not be answered here either.
-        // The upstream mixin dereferences minecraft.player unguarded; this listener also serves the
-        // configuration phase, where there is no player yet, so a missing player falls through to the
-        // plain vanilla answer instead of throwing.
-        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4) && this.minecraft.player != null) {
+        // The upstream mixin dereferences minecraft.player unguarded, and this listener also serves the
+        // configuration phase, where there is no player yet. Falling through would answer a transaction for
+        // a window the server is not tracking - the very thing this filter exists to prevent - so a missing
+        // player cancels the answer instead. 1.16 vanilla likewise answered nothing without a container.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            if (this.minecraft.player == null) {
+                return;
+            }
+
             final short inventoryId = (short)(packet.getId() >> 16 & 0xFF);
             if (inventoryId != 0 && inventoryId != this.minecraft.player.containerMenu.containerId) {
                 return;
@@ -197,8 +202,8 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
     @Override
     public void handleCustomPayload(final ClientboundCustomPayloadPacket packet) {
         // MODIFIED for porting: was VFP sync_tasks MixinClientCommonPacketListenerImpl#handleSyncTask (@Inject HEAD cancellable)
-        if (packet.payload() instanceof com.viaversion.viafabricplus.util.network.DataCustomPayload(FriendlyByteBuf vfpBuf)) {
-            com.viaversion.viafabricplus.util.network.SyncTasks.handleSyncTask(vfpBuf);
+        if (packet.payload() instanceof DataCustomPayload(FriendlyByteBuf vfpBuf)) {
+            SyncTasks.handleSyncTask(vfpBuf);
             return;
         }
         CustomPacketPayload payload = packet.payload();

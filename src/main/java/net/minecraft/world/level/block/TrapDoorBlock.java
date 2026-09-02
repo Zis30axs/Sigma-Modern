@@ -4,6 +4,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -46,6 +48,16 @@ public class TrapDoorBlock extends HorizontalDirectionalBlock implements SimpleW
     public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
     private static final Map<Direction, VoxelShape> SHAPES = Shapes.rotateAll(Block.boxZ(16.0, 13.0, 16.0));
+    // MODIFIED for porting: was VFP bedrock/block MixinTrapDoorBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    // Bedrock trapdoors are a thin slab on the far face of the block instead of vanilla's 13/16-offset boxZ.
+    private static final Map<Direction, VoxelShape> vfpShapesBedrock = Map.of(
+        Direction.NORTH, Shapes.box(0.0, 0.0, 0.8175, 1.0, 1.0, 1.0),
+        Direction.SOUTH, Shapes.box(0.0, 0.0, 0.0, 1.0, 1.0, 0.1825),
+        Direction.WEST, Shapes.box(0.8175, 0.0, 0.0, 1.0, 1.0, 1.0),
+        Direction.EAST, Shapes.box(0.0, 0.0, 0.0, 0.1825, 1.0, 1.0),
+        Direction.DOWN, Shapes.box(0.0, 0.8175, 0.0, 1.0, 1.0, 1.0),
+        Direction.UP, Shapes.box(0.0, 0.0, 0.0, 1.0, 0.1825, 1.0)
+    );
     private final BlockSetType type;
 
     @Override
@@ -69,7 +81,25 @@ public class TrapDoorBlock extends HorizontalDirectionalBlock implements SimpleW
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
-        return SHAPES.get(state.getValue(OPEN) ? state.getValue(FACING) : (state.getValue(HALF) == Half.TOP ? Direction.DOWN : Direction.UP));
+        // MODIFIED for porting: was VFP bedrock/block MixinTrapDoorBlock#changeOutlineShape (@Redirect on the GETSTATIC
+        // of TrapDoorBlock.SHAPES) - only the map is swapped, the OPEN/HALF/FACING key is unchanged.
+        final Direction shapeDirection = state.getValue(OPEN) ? state.getValue(FACING) : (state.getValue(HALF) == Half.TOP ? Direction.DOWN : Direction.UP);
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapesBedrock.get(shapeDirection);
+        }
+
+        return SHAPES.get(shapeDirection);
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinTrapDoorBlock#getOcclusionShape (@Override, added method)
+    // Without this the Bedrock outline above would leak into light occlusion, which is derived from getShape.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPES.get(state.getValue(OPEN) ? state.getValue(FACING) : (state.getValue(HALF) == Half.TOP ? Direction.DOWN : Direction.UP));
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

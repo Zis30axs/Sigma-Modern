@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -170,7 +172,14 @@ public class ShelfBlock extends BaseEntityBlock implements SelectableSlotContain
 
             Inventory inventory = player.getInventory();
             if (level.isClientSide()) {
-                return inventory.getSelectedItem().isEmpty() ? InteractionResult.PASS : InteractionResult.SUCCESS;
+                // MODIFIED for porting: was VFP block/interaction MixinShelfBlock#swingHand (@Redirect on
+                // ItemStack#isEmpty, ordinal 0 - the OptionalInt#isEmpty above is a different owner). On targets
+                // <= 1.21.10 the test is forced to false, so this branch yields SUCCESS and the arm swings instead of
+                // PASS letting the off-hand / item use run.
+                final ItemStack selectedItem = inventory.getSelectedItem();
+                return ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_11) && selectedItem.isEmpty()
+                    ? InteractionResult.PASS
+                    : InteractionResult.SUCCESS;
             }
 
             if (!state.getValue(POWERED)) {

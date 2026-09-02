@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
@@ -24,6 +26,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
@@ -31,6 +34,9 @@ public class ConduitBlock extends BaseEntityBlock implements SimpleWaterloggedBl
     public static final MapCodec<ConduitBlock> CODEC = simpleCodec(ConduitBlock::new);
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
     private static final VoxelShape SHAPE = Block.cube(6.0);
+    // MODIFIED for porting: was VFP bedrock/block MixinConduitBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    // Bedrock conduits outline as a half-height box sitting on the block floor, not a centred 6/16 cube.
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0.25, 0.0, 0.25, 0.75, 0.5, 0.75);
 
     @Override
     public MapCodec<ConduitBlock> codec() {
@@ -82,7 +88,24 @@ public class ConduitBlock extends BaseEntityBlock implements SimpleWaterloggedBl
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinConduitBlock#changeOutlineShape (@Inject RETURN, cancellable)
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP bedrock/block MixinConduitBlock#getOcclusionShape (@Override, added method)
+    // The inherited occlusion shape is derived from getShape, so the Bedrock outline above would otherwise change
+    // light occlusion as well; keep the vanilla centred cube here.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return SHAPE;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

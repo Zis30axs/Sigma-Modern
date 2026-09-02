@@ -5,6 +5,11 @@ import com.mojang.blaze3d.font.GlyphBitmap;
 import com.mojang.blaze3d.font.GlyphInfo;
 import com.mojang.blaze3d.font.GlyphProvider;
 import com.mojang.blaze3d.font.UnbakedGlyph;
+import com.viaversion.viafabricplus.features.font.BuiltinEmptyGlyph1_12_2; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.features.font.RenderableGlyphDiff; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viafabricplus.settings.impl.DebugSettings; // MODIFIED for porting: ViaFabricPlus
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion; // MODIFIED for porting: ViaFabricPlus
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -17,6 +22,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
+import net.minecraft.client.Minecraft; // MODIFIED for porting: ViaFabricPlus features/font MixinFontSet
 import net.minecraft.client.gui.GlyphSource;
 import net.minecraft.client.gui.font.glyphs.BakedGlyph;
 import net.minecraft.client.gui.font.glyphs.EffectGlyph;
@@ -67,6 +73,13 @@ public class FontSet implements AutoCloseable {
     private @Nullable EffectGlyph whiteGlyph;
     private final GlyphSource anyGlyphs = new FontSet.Source(false);
     private final GlyphSource nonFishyGlyphs = new FontSet.Source(true);
+    // MODIFIED for porting: was VFP features/font MixinFontSet @Unique state (viaFabricPlus$blankBakedGlyph1_12_2,
+    // viaFabricPlus$blankBakedGlyphPair1_12_2 and viaFabricPlus$obfuscatedLookup). <= 1.12.2 has no missing-glyph
+    // box, so unknown codepoints are drawn with the 1.12.2 blank glyph instead; the flag suppresses the version
+    // glyph filter while obfuscated text picks a random glyph.
+    private BakedGlyph vfpBlankBakedGlyph1_12_2;
+    private FontSet.SelectedGlyphs vfpBlankBakedGlyphPair1_12_2;
+    private boolean vfpObfuscatedLookup;
 
     public FontSet(final GlyphStitcher stitcher) {
         this.stitcher = stitcher;
@@ -87,6 +100,10 @@ public class FontSet implements AutoCloseable {
         this.stitcher.reset();
         this.glyphCache.clear();
         this.glyphsByWidth.clear();
+        // MODIFIED for porting: was VFP features/font MixinFontSet#bakeBlankGlyph1_12_2 (@Inject on the first
+        // SpecialGlyphs#bake call in resetTextures). Ungated - only the gated lookups below read the baked pair.
+        this.vfpBlankBakedGlyph1_12_2 = BuiltinEmptyGlyph1_12_2.INSTANCE.bake(this.stitcher);
+        this.vfpBlankBakedGlyphPair1_12_2 = new FontSet.SelectedGlyphs(() -> this.vfpBlankBakedGlyph1_12_2, () -> this.vfpBlankBakedGlyph1_12_2);
         this.missingGlyph = Objects.requireNonNull(SpecialGlyphs.MISSING.bake(this.stitcher));
         this.whiteGlyph = SpecialGlyphs.WHITE.bake(this.stitcher);
     }
@@ -145,22 +162,62 @@ public class FontSet implements AutoCloseable {
 
                 if (!hasFishyAdvance(glyph.info())) {
                     if (firstGlyph.unbaked == glyph) {
-                        return new FontSet.SelectedGlyphs(firstGlyph, firstGlyph);
+                        return this.vfpFixBlankGlyph1_12_2(new FontSet.SelectedGlyphs(firstGlyph, firstGlyph));
                     }
 
-                    return new FontSet.SelectedGlyphs(firstGlyph, new FontSet.DelayedBake(glyph));
+                    return this.vfpFixBlankGlyph1_12_2(new FontSet.SelectedGlyphs(firstGlyph, new FontSet.DelayedBake(glyph)));
                 }
             }
         }
 
-        return firstGlyph != null ? new FontSet.SelectedGlyphs(firstGlyph, this.missingGlyphGetter) : this.missingSelectedGlyphs;
+        return this.vfpFixBlankGlyph1_12_2(
+            firstGlyph != null ? new FontSet.SelectedGlyphs(firstGlyph, this.missingGlyphGetter) : this.missingSelectedGlyphs
+        );
+    }
+
+    // MODIFIED for porting: was VFP features/font MixinFontSet#fixBlankGlyph1_12_2 (@Inject computeGlyphInfo RETURN,
+    // cancellable). RETURN covers every exit path, so all three returns above are routed through this. <= 1.12.2
+    // never drew a missing-glyph box, so an unknown codepoint becomes the 1.12.2 blank glyph there.
+    private FontSet.SelectedGlyphs vfpFixBlankGlyph1_12_2(final FontSet.SelectedGlyphs glyphPair) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return glyphPair == this.missingSelectedGlyphs ? this.vfpBlankBakedGlyphPair1_12_2 : glyphPair;
+        }
+
+        return glyphPair;
     }
 
     private FontSet.SelectedGlyphs getGlyph(final int codepoint) {
-        return this.glyphCache.computeIfAbsent(codepoint, this.glyphGetter);
+        final FontSet.SelectedGlyphs glyphPair = this.glyphCache.computeIfAbsent(codepoint, this.glyphGetter);
+        // MODIFIED for porting: was VFP features/font MixinFontSet#filterBakedGlyph (@Inject getGlyph RETURN,
+        // cancellable). A codepoint the target version cannot render is blank on <= 1.12.2 and the missing-glyph
+        // box on everything newer. Upstream cancels here, which also skips resumeCharacterFiltering below - that
+        // is harmless, because vfpShouldBeInvisible() can only be true while vfpObfuscatedLookup is already false.
+        if (this.vfpShouldBeInvisible(codepoint)) {
+            return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                ? this.vfpBlankBakedGlyphPair1_12_2
+                : this.missingSelectedGlyphs;
+        }
+
+        // MODIFIED for porting: was VFP features/font MixinFontSet#resumeCharacterFiltering (@Inject getGlyph RETURN)
+        this.vfpObfuscatedLookup = false;
+        return glyphPair;
+    }
+
+    // MODIFIED for porting: was VFP features/font MixinFontSet#viaFabricPlus$shouldBeInvisible (@Unique helper).
+    // Only the default font is filtered; RenderableGlyphDiff knows which codepoints the target version can draw.
+    private boolean vfpShouldBeInvisible(final int codePoint) {
+        if (!this.vfpObfuscatedLookup && DebugSettings.INSTANCE.filterNonExistingGlyphs.getValue()) {
+            return this.stitcher.texturePrefix.equals(Minecraft.DEFAULT_FONT) && !RenderableGlyphDiff.isGlyphRenderable(codePoint);
+        } else {
+            return false;
+        }
     }
 
     public BakedGlyph getRandomGlyph(final RandomSource random, final int width) {
+        // MODIFIED for porting: was VFP features/font MixinFontSet#pauseCharacterFiltering (@Inject getRandomGlyph
+        // HEAD). Obfuscated text uses every codepoint, even ones the target version has no glyph for, so the filter
+        // is paused for this lookup; the getGlyph call below clears the flag again.
+        this.vfpObfuscatedLookup = true;
         IntList chars = this.glyphsByWidth.get(width);
         return chars != null && !chars.isEmpty() ? this.getGlyph(chars.getInt(random.nextInt(chars.size()))).nonFishy().get() : this.missingGlyph;
     }

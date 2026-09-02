@@ -215,6 +215,12 @@ public class ItemEntity extends Entity
     }
 
     private void setUnderwaterMovement() {
+        // MODIFIED for porting: was VFP movement.liquid MixinItemEntity#dontApplyWaterBuoyancy (@Inject HEAD cancellable)
+        // Targets <=1.12.2 give item entities neither the 0.99 horizontal drag nor the +5.0E-4 upward nudge in water.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return;
+        }
+
         this.setFluidMovement(0.99F);
     }
 

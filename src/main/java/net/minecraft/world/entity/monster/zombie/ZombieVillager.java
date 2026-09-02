@@ -82,6 +82,11 @@ public class ZombieVillager extends Zombie implements VillagerDataHolder {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F)
         .withEyeHeight(0.67F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.125F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombieVillager#viaFabricPlus$baby_dimensions_r26_1
+    // (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F)
+        .withEyeHeight(0.67F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.125F, 0.0F));
 
     public ZombieVillager(final EntityType<? extends ZombieVillager> type, final Level level) {
         super(type, level);
@@ -172,7 +177,11 @@ public class ZombieVillager extends Zombie implements VillagerDataHolder {
                     this.startConverting(player.getUUID(), this.random.nextInt(2401) + 3600);
                 }
 
-                return InteractionResult.SUCCESS_SERVER;
+                // MODIFIED for porting: was VFP entity.interaction MixinZombieVillager#swingHand
+                // (@Redirect GETSTATIC SUCCESS_SERVER). Targets <=1.21 swing the hand client-side on a cure.
+                return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)
+                    ? InteractionResult.SUCCESS
+                    : InteractionResult.SUCCESS_SERVER;
             } else {
                 return InteractionResult.CONSUME;
             }
@@ -206,7 +215,22 @@ public class ZombieVillager extends Zombie implements VillagerDataHolder {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
+        // MODIFIED for porting: was VFP entity.dimensions MixinZombieVillager#dontChangeScale (@Redirect isBaby) and
+        // #changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby())
+            ? vfpChangeBabyDimensions()
+            : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinZombieVillager#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 used a 0.99F tall baby box; only 26.1 actually reaches this, because <=1.21.11 already takes
+    // the super path through the isBaby redirect above.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     @Override

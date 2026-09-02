@@ -1,5 +1,7 @@
 package net.minecraft.world.item.component;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.ArrayList;
@@ -24,6 +26,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.consume_effects.ConsumeEffect;
 import net.minecraft.world.item.consume_effects.PlaySoundConsumeEffect;
 import net.minecraft.world.level.Level;
@@ -69,6 +72,14 @@ public record Consumable(
                 return InteractionResult.CONSUME;
             } else {
                 ItemStack result = this.onConsume(user.level(), user, stack);
+                // MODIFIED for porting: was VFP item/interaction MixinConsumable#dontExchangeStack (@Redirect on the
+                // InteractionResult$Success#heldItemTransformedTo call in the non-consumesOverTime branch)
+                // <= 1.20.5 servers perform the milk bucket -> bucket exchange themselves, so the client must not
+                // predict it: it keeps the original hand stack, or a fresh bucket once the milk bucket was used up.
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5) && stack.is(Items.MILK_BUCKET)) {
+                    return InteractionResult.CONSUME.heldItemTransformedTo(stack.isEmpty() ? new ItemStack(Items.BUCKET) : stack);
+                }
+
                 return InteractionResult.CONSUME.heldItemTransformedTo(result);
             }
         }

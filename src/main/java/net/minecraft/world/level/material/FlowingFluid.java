@@ -1,6 +1,9 @@
 package net.minecraft.world.level.material;
 
 import com.google.common.collect.Maps;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.protocoltranslator.impl.ViaFabricPlusMappingDataLoader;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import it.unimi.dsi.fastutil.objects.Object2ByteLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.shorts.Short2BooleanMap;
 import it.unimi.dsi.fastutil.shorts.Short2BooleanOpenHashMap;
@@ -21,7 +24,12 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.IceBlock;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.LiquidBlockContainer;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.StainedGlassBlock;
+import net.minecraft.world.level.block.StairBlock;
+import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -110,8 +118,30 @@ public abstract class FlowingFluid extends Fluid {
             return false;
         } else if (direction == Direction.UP) {
             return true;
+        } else if (state.getBlock() instanceof IceBlock) {
+            return false;
         } else {
-            return state.getBlock() instanceof IceBlock ? false : state.isFaceSturdy(level, pos, direction);
+            // MODIFIED for porting: was VFP movement/liquid MixinFlowingFluid#modifyIsSolidBlock
+            // (@Redirect INVOKE BlockState#isFaceSturdy(BlockGetter,BlockPos,Direction)) - vanilla's IceBlock ternary
+            // short-circuits before that call, so it stays in front of the redirect as its own branch.
+            // <= 1.11.1 asked the block's material whether it is solid; <= 1.13.2 additionally treated a fixed set of
+            // non-full blocks as non-solid. Both decide where a falling fluid column is turned into a downwards flow.
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+                final ViaFabricPlusMappingDataLoader.Material material = ViaFabricPlusMappingDataLoader.MATERIALS
+                    .get(ViaFabricPlusMappingDataLoader.getBlockMaterial(state.getBlock()));
+                return material.solid();
+            } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+                final Block block = state.getBlock();
+                if (block instanceof ShulkerBoxBlock || block instanceof LeavesBlock || block instanceof TrapDoorBlock
+                    || block == Blocks.BEACON || block == Blocks.CAULDRON || block == Blocks.GLASS
+                    || block == Blocks.GLOWSTONE || block == Blocks.ICE || block == Blocks.SEA_LANTERN
+                    || block instanceof StainedGlassBlock || block == Blocks.PISTON || block == Blocks.STICKY_PISTON
+                    || block == Blocks.PISTON_HEAD || block instanceof StairBlock) {
+                    return false;
+                }
+            }
+
+            return state.isFaceSturdy(level, pos, direction);
         }
     }
 

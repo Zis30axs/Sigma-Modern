@@ -1,5 +1,9 @@
 package net.minecraft.world.level.block.state;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -56,9 +60,11 @@ import net.minecraft.world.level.ScheduledTickAccess;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.InfestedBlock;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.SupportType;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -66,6 +72,8 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.levelgen.RandomSupport;
+import net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
@@ -355,6 +363,22 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
     }
 
     protected float getDestroyProgress(final BlockState state, final Player player, final BlockGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was VFP block/mining_calculation MixinBlockBehaviour#changeMiningSpeedCalculation
+        // (@Inject HEAD, cancellable). <= 1.4.7 used a constant 1.0F numerator when the held tool is wrong
+        // instead of the player's own destroy speed, which is what vanilla's shared /modifier form does.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_6tor1_4_7)) {
+            final float hardness = state.getDestroySpeed(level, pos);
+            if (hardness == -1.0F) {
+                return 0.0F;
+            }
+
+            if (!player.hasCorrectToolForDrops(state)) {
+                return 1.0F / hardness / 100F;
+            }
+
+            return player.getDestroySpeed(state) / hardness / 30F;
+        }
+
         float destroySpeed = state.getDestroySpeed(level, pos);
         if (destroySpeed == -1.0F) {
             return 0.0F;
@@ -728,6 +752,33 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
         }
 
         public float getDestroySpeed(final BlockGetter level, final BlockPos pos) {
+            // MODIFIED for porting: was VFP block/mining_calculation MixinBlockBehaviour_BlockStateBase#changeHardness
+            // (@Inject RETURN, cancellable). Per-block hardness values that were changed by a later version, so
+            // older targets have to keep breaking these blocks at their own speed.
+            final Block block = this.getBlock();
+            if (block.equals(Blocks.END_STONE_BRICKS)
+                || block.equals(Blocks.END_STONE_BRICK_SLAB)
+                || block.equals(Blocks.END_STONE_BRICK_STAIRS)
+                || block.equals(Blocks.END_STONE_BRICK_WALL)) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+                    return 0.8F;
+                }
+            } else if (block.equals(Blocks.PISTON) || block.equals(Blocks.STICKY_PISTON) || block.equals(Blocks.PISTON_HEAD)) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+                    return 0.5F;
+                }
+            } else if (block instanceof InfestedBlock) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+                    return 0.75F;
+                } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+                    return 0F;
+                }
+            } else if (block.equals(Blocks.OBSIDIAN)) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_8tob1_8_1)) {
+                    return 10.0F;
+                }
+            }
+
             return this.destroySpeed;
         }
 
@@ -988,6 +1039,13 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
         protected abstract BlockState asState();
 
         public boolean requiresCorrectToolForDrops() {
+            // MODIFIED for porting: was VFP block/mining_calculation MixinBlockBehaviour_BlockStateBase
+            // #requiresCorrectToolForDrops (@Overwrite). Below 1.14 a shulker box always needed the correct
+            // tool to drop, which is what makes it break at the older speed there.
+            if (this.getBlock() instanceof ShulkerBoxBlock && ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_14)) {
+                return true;
+            }
+
             return this.requiresCorrectToolForDrops;
         }
 
@@ -1369,7 +1427,81 @@ public abstract class BlockBehaviour implements FeatureElement, net.caffeinemc.m
                     return new Vec3(x, y, z);
                 };
             };
+            // MODIFIED for porting: was VFP bedrock/block MixinBlockBehaviour_Properties#fixBlockOffsets
+            // (@Inject RETURN). Bedrock derives the random block offset from its own position hash, so every
+            // offset block (bamboo, grass, flowers) has to use that algorithm instead of the vanilla one.
+            if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) && offsetType != BlockBehaviour.OffsetType.NONE) {
+                this.offsetFunction = (state, pos) -> vfpRandomlyModifyPosition(pos, offsetType);
+            }
+
             return this;
+        }
+
+        // MODIFIED for porting: the following constants and methods were the @Unique members of VFP
+        // bedrock/block MixinBlockBehaviour_Properties (viaFabricPlus$OFFSET_MIN / $OFFSET_MAX / $STEPS,
+        // $positionHash, $randomToFloat, $calculateOffsetValue, $randomlyModifyPosition). Together they are
+        // Bedrock's random block offset: the seed is hashed from X and Z only, mixed through BDS' LCG and then
+        // through vanilla's mixStafford13 into a Xoroshiro128PlusPlus, and each axis is quantised to 16 steps.
+        private static final float vfpOffsetMin = -0.25F; // -4/16
+        private static final float vfpOffsetMax = 0.25F; // 4/16
+        private static final int vfpSteps = 16; // Quantization steps
+
+        // Bedrock position hash algorithm. Only uses X and Z coordinates (Y is NOT used).
+        private static long vfpPositionHash(final int x, final int z) {
+            // Step 1: initial hash from X and Z
+            final long v1 = (116129781L * z) ^ ((0x2FC20F00000001L * Integer.toUnsignedLong(x)) >> 32);
+
+            // Step 2: LCG-style mixing. Bedrock uses a cdqe instruction, which sign-extends the low 32 bits.
+            final long temp = (v1 * (42317861L * v1 + 11L)) >>> 16;
+            return (int)temp ^ 0x6A09E667F3BCC909L;
+        }
+
+        // Convert a random long to a float in [0, 1) the way Bedrock does: (random >>> 40) * 2^-24.
+        private static float vfpRandomToFloat(final long random) {
+            return (random >>> 40) * 5.9604645e-8F;
+        }
+
+        // Calculate an offset value, quantised to discrete steps (Bedrock algorithm).
+        private static float vfpCalculateOffsetValue(final float min, final float max, final float random) {
+            if (min >= max) {
+                return min;
+            }
+
+            if (vfpSteps == 1) {
+                return (min + max) * 0.5F;
+            } else if (vfpSteps > 1) {
+                final float range = max - min;
+                final float stepSize = range / (vfpSteps - 1);
+                final float index = (float)Math.floor(vfpSteps * random);
+                return min + index * stepSize;
+            } else {
+                return min + (max - min) * random;
+            }
+        }
+
+        // Calculate the random offset for a given position.
+        private static Vec3 vfpRandomlyModifyPosition(final BlockPos pos, final BlockBehaviour.OffsetType type) {
+            final long seed = vfpPositionHash(pos.getX(), pos.getZ());
+
+            // vanilla's SplitMix64 (mixStafford13) generates the PRNG state
+            final long s0 = RandomSupport.mixStafford13(seed);
+            final long s1 = RandomSupport.mixStafford13(seed + RandomSupport.GOLDEN_RATIO_64);
+            final Xoroshiro128PlusPlus prng = new Xoroshiro128PlusPlus(s0, s1);
+
+            final float offsetX = vfpCalculateOffsetValue(vfpOffsetMin, vfpOffsetMax, vfpRandomToFloat(prng.nextLong()));
+            final float offsetY = switch (type) {
+                case XZ -> {
+                    // The Y range is (0,0) in XZ mode, but BDS advances the PRNG state regardless of whether
+                    // the offset is computed, so the draw still has to be consumed to stay in step with it.
+                    prng.nextLong();
+
+                    yield 0;
+                }
+                case XYZ -> vfpCalculateOffsetValue(-0.2F, 0, vfpRandomToFloat(prng.nextLong()));
+                case NONE -> 0;
+            };
+            final float offsetZ = vfpCalculateOffsetValue(vfpOffsetMin, vfpOffsetMax, vfpRandomToFloat(prng.nextLong()));
+            return new Vec3(offsetX, offsetY, offsetZ);
         }
 
         public BlockBehaviour.Properties noTerrainParticles() {

@@ -1,5 +1,7 @@
 package net.minecraft.client.gui.screens.inventory;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.List;
@@ -279,6 +281,14 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
         return null;
     }
 
+    // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerScreen
+    // #disableShiftClickItems (@Redirect body). Upstream gives no ordinal, so it covers every
+    // MouseButtonEvent#hasShiftDown call in mouseClicked and mouseReleased: shift-click quick-move is dead
+    // below 1.6.1.
+    private static boolean vfpHasShiftDown(final MouseButtonEvent event) {
+        return event.hasShiftDown() && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(LegacyProtocolVersion.r1_6_1);
+    }
+
     @Override
     public boolean mouseClicked(final MouseButtonEvent event, final boolean doubleClick) {
         if (super.mouseClicked(event, doubleClick)) {
@@ -309,7 +319,7 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
                     if (cloning) {
                         this.slotClicked(slot, slotId, event.button(), ContainerInput.CLONE);
                     } else {
-                        boolean quickKey = slotId != -999 && event.hasShiftDown();
+                        boolean quickKey = slotId != -999 && vfpHasShiftDown(event);
                         ContainerInput containerInput = ContainerInput.PICKUP;
                         if (quickKey) {
                             this.lastQuickMoved = slot != null && slot.hasItem() ? slot.getItem().copy() : ItemStack.EMPTY;
@@ -362,6 +372,13 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
 
     @Override
     public boolean mouseDragged(final MouseButtonEvent event, final double dx, final double dy) {
+        // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerScreen
+        // #disableItemDragging (@Inject HEAD, cancellable). Below 1.5 there was no quick-craft drag at all, so
+        // the slot accumulation is skipped and the plain Screen behaviour is returned instead.
+        if (ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.r1_5tor1_5_1)) {
+            return super.mouseDragged(event, dx, dy);
+        }
+
         Slot slot = this.getHoveredSlot(event.x(), event.y());
         ItemStack carried = this.menu.getCarried();
         if (slot != null && this.shouldAddSlotToQuickCraft(slot, carried) && this.quickCraftSlots.add(slot)) {
@@ -388,7 +405,7 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
         }
 
         if (this.doubleclick && slot != null && event.button() == 0 && this.menu.canTakeItemForPickAll(ItemStack.EMPTY, slot)) {
-            if (event.hasShiftDown()) {
+            if (vfpHasShiftDown(event)) {
                 if (!this.lastQuickMoved.isEmpty()) {
                     for (Slot target : this.menu.slots) {
                         if (target != null
@@ -424,7 +441,7 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
                 if (this.minecraft.options.keyPickItem.matchesMouse(event)) {
                     this.slotClicked(slot, slotId, event.button(), ContainerInput.CLONE);
                 } else {
-                    boolean quickKey = slotId != -999 && event.hasShiftDown();
+                    boolean quickKey = slotId != -999 && vfpHasShiftDown(event);
                     if (quickKey) {
                         this.lastQuickMoved = slot != null && slot.hasItem() ? slot.getItem().copy() : ItemStack.EMPTY;
                     }
@@ -497,7 +514,13 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
         this.checkHotbarKeyPressed(event);
         if (this.hoveredSlot != null && this.hoveredSlot.hasItem()) {
             if (this.minecraft.options.keyPickItem.matches(event)) {
-                this.slotClicked(this.hoveredSlot, this.hoveredSlot.index, 0, ContainerInput.CLONE);
+                // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerScreen
+                // #disableItemCloning (@WrapWithCondition on slotClicked ordinal 0 in keyPressed). Pick-item
+                // cloning out of a container did not exist below 1.4.2; only the call is skipped, the branch
+                // itself is still taken.
+                if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(LegacyProtocolVersion.r1_4_2)) {
+                    this.slotClicked(this.hoveredSlot, this.hoveredSlot.index, 0, ContainerInput.CLONE);
+                }
             } else if (this.minecraft.options.keyDrop.matches(event)) {
                 this.slotClicked(this.hoveredSlot, this.hoveredSlot.index, event.hasControlDown() ? 1 : 0, ContainerInput.THROW);
             }
@@ -514,7 +537,12 @@ public abstract class AbstractContainerScreen<T extends AbstractContainerMenu> e
             }
 
             for (int i = 0; i < 9; i++) {
-                if (this.minecraft.options.keyHotbarSlots[i].matches(event)) {
+                // MODIFIED for porting: was VFP interaction/container_clicking MixinAbstractContainerScreen
+                // #disableHotbarKeys (@Redirect on KeyMapping#matches ordinal 1). Number-key slot swapping in
+                // containers did not exist below 1.4.2. The keySwapOffhand match above is ordinal 0 and is
+                // deliberately left alone upstream.
+                if (this.minecraft.options.keyHotbarSlots[i].matches(event)
+                    && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(LegacyProtocolVersion.r1_4_2)) {
                     this.slotClicked(this.hoveredSlot, this.hoveredSlot.index, i, ContainerInput.SWAP);
                     return true;
                 }

@@ -68,13 +68,21 @@ public abstract class EventLoopGroupHolder implements com.viaversion.viafabricpl
     public static EventLoopGroupHolder remote(final boolean allowNativeTransport) {
         if (allowNativeTransport) {
             if (KQueue.isAvailable()) {
+                // MODIFIED for porting: was VFP bedrock MixinEventLoopGroupHolder#resetConnectingFlag (@Inject RETURN,
+                // which covers every return path). The holders are static singletons, so a stale connecting=true left
+                // over from a previous connect would make the next Bedrock ping take the connect path instead of the
+                // RakNet ping path. Version-independent.
+                KQUEUE.viaFabricPlus$setConnecting(false);
                 return KQUEUE;
             }
 
             if (Epoll.isAvailable()) {
+                // MODIFIED for porting: same hook, second return path.
+                EPOLL.viaFabricPlus$setConnecting(false);
                 return EPOLL;
             }
         }
+        // MODIFIED for porting: same hook, third return path.
         final EventLoopGroupHolder holder = NIO;
         if (holder instanceof com.viaversion.viafabricplus.injection.access.core.bedrock.IEventLoopGroupHolder h) {
             h.viaFabricPlus$setConnecting(false);

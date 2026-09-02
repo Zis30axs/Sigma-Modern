@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.decoration;
 
 import java.util.Objects;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -103,7 +105,11 @@ public class ItemFrame extends HangingEntity {
 
     @Override
     protected AABB calculateBoundingBox(final BlockPos blockPos, final Direction direction) {
-        return this.createBoundingBox(blockPos, direction, this.hasFramedMap());
+        // MODIFIED for porting: was VFP entity.dimensions MixinItemFrame#changeBoundingBox (@Redirect INVOKE hasFramedMap)
+        // Targets <=1.21.7 never enlarged the frame for a map, so a map-holding frame keeps the 0.75x0.75 box.
+        return this.createBoundingBox(
+            blockPos, direction, this.hasFramedMap() && ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_7)
+        );
     }
 
     @Override

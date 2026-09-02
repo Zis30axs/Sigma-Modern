@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -21,6 +23,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
@@ -28,6 +31,11 @@ public abstract class BaseRailBlock extends Block implements SimpleWaterloggedBl
     public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
     private static final VoxelShape SHAPE_FLAT = Block.column(16.0, 0.0, 2.0);
     private static final VoxelShape SHAPE_SLOPE = Block.column(16.0, 0.0, 8.0);
+    // MODIFIED for porting: was VFP block/shape MixinBaseRailBlock#viaFabricPlus$ascending_shape_r1_10_x,
+    // viaFabricPlus$ascending_shape_r1_9_x and viaFabricPlus$ascending_shape_r1_8_x (@Unique constants)
+    private static final VoxelShape vfpAscendingShapeR1_10X = Shapes.block();
+    private static final VoxelShape vfpAscendingShapeR1_9X = Block.box(0.0, 0.0, 0.0, 16.0, 2.5, 16.0);
+    private static final VoxelShape vfpAscendingShapeR1_8X = Block.box(0.0, 0.0, 0.0, 16.0, 10.0, 16.0);
     private final boolean isStraight;
 
     public static boolean isRail(final Level level, final BlockPos pos) {
@@ -52,7 +60,21 @@ public abstract class BaseRailBlock extends Block implements SimpleWaterloggedBl
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
-        return state.getValue(this.getShapeProperty()).isSlope() ? SHAPE_SLOPE : SHAPE_FLAT;
+        // MODIFIED for porting: was VFP block/shape MixinBaseRailBlock#changeOutlineShape (@Redirect on the GETSTATIC
+        // read of SHAPE_SLOPE) - only the sloped outline changes, SHAPE_FLAT stays vanilla on every version. 1.10 drew
+        // an ascending rail as a full block, 1.9-1.9.3 as a 2.5px slab and 1.8 and older as a 10px slab.
+        final VoxelShape slopeShape;
+        if (ProtocolTranslator.getTargetVersion().equalTo(ProtocolVersion.v1_10)) {
+            slopeShape = vfpAscendingShapeR1_10X;
+        } else if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_9, ProtocolVersion.v1_9_3)) {
+            slopeShape = vfpAscendingShapeR1_9X;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            slopeShape = vfpAscendingShapeR1_8X;
+        } else {
+            slopeShape = SHAPE_SLOPE;
+        }
+
+        return state.getValue(this.getShapeProperty()).isSlope() ? slopeShape : SHAPE_FLAT;
     }
 
     @Override

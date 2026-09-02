@@ -1,6 +1,9 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -24,6 +27,7 @@ import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
 
@@ -81,7 +85,36 @@ public class FarmlandBlock extends Block {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinFarmlandBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // Deliberate singleplayer carve-out: joining a local world only sets the target version once the integrated
+        // server starts, which is already too late for blocks because the world and its entities have been loaded,
+        // and the legacy shape then breaks collisions (https://github.com/ViaVersion/ViaFabricPlus/issues/436).
+        if (Minecraft.getInstance() != null && Minecraft.getInstance().isLocalServer()) {
+            return SHAPE;
+        }
+
+        // <= 1.9.3 farmland is a full block for outline and collision; light occlusion keeps the 15/16 height,
+        // see getOcclusionShape below.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_9_3)) {
+            return Shapes.block();
+        }
+
         return SHAPE;
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinFarmlandBlock#getOcclusionShape (@Override, added method)
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        // See getShape above for why singleplayer is carved out.
+        if (Minecraft.getInstance() != null && Minecraft.getInstance().isLocalServer()) {
+            return super.getOcclusionShape(state);
+        }
+
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_9_3)) {
+            return SHAPE;
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

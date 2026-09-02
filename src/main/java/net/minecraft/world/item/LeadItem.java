@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -24,14 +26,22 @@ public class LeadItem extends Item {
         Level level = context.getLevel();
         BlockPos pos = context.getClickedPos();
         BlockState state = level.getBlockState(pos);
+        InteractionResult result = InteractionResult.PASS;
         if (state.is(BlockTags.FENCES)) {
             Player player = context.getPlayer();
             if (!level.isClientSide() && player != null) {
-                return bindPlayerMobs(player, level, pos);
+                result = bindPlayerMobs(player, level, pos);
             }
         }
 
-        return InteractionResult.PASS;
+        // MODIFIED for porting: was VFP item/interaction MixinLeadItem#swingHand (@Inject RETURN, cancellable) - RETURN
+        // with no ordinal covers both vanilla exits, so they are folded into one result local here.
+        // <= 1.21 swings the hand for any lead use against a fence, including the client-side PASS.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21) && state.is(BlockTags.FENCES)) {
+            return InteractionResult.SUCCESS;
+        }
+
+        return result;
     }
 
     public static InteractionResult bindPlayerMobs(final Player player, final Level level, final BlockPos pos) {

@@ -42,6 +42,7 @@ import com.viaversion.viaversion.protocols.v1_21_4to1_21_5.packet.ServerboundPac
 import com.viaversion.viaversion.protocols.v1_21_5to1_21_6.Protocol1_21_5To1_21_6;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.vehicle.boat.Boat;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.raphimc.vialegacy.protocol.release.r1_5_2tor1_6_1.Protocolr1_5_2Tor1_6_1;
 import net.raphimc.vialegacy.protocol.release.r1_5_2tor1_6_1.packet.ServerboundPackets1_5_2;
@@ -859,7 +860,9 @@ public class LocalPlayer extends AbstractClientPlayer
             newInput = newInput.scale(this.itemUseSpeedMultiplier());
         }
 
-        if (this.isMovingSlowly()) {
+        // MODIFIED for porting: was VFP movement/slowdown MixinLocalPlayer#changeSneakSlowdownCondition
+        // (@Redirect on isMovingSlowly in modifyInput), see vfpIsSneakSlowdownActive below.
+        if (this.vfpIsSneakSlowdownActive()) {
             float sneakingMovementFactor = (float)this.getAttributeValue(Attributes.SNEAKING_SPEED);
             newInput = newInput.scale(sneakingMovementFactor);
         }
@@ -868,6 +871,20 @@ public class LocalPlayer extends AbstractClientPlayer
         // (@Redirect on modifyInputSpeedForSquareMovement in modifyInput). <= 1.21.4 did not remap the
         // input onto the unit square.
         return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? newInput : modifyInputSpeedForSquareMovement(newInput);
+    }
+
+    // MODIFIED for porting: was VFP movement/slowdown MixinLocalPlayer#changeSneakSlowdownCondition
+    // (@Redirect body). <= 1.13.2 scaled the input from the raw sneak key alone; 1.14 - 1.14.4 used the
+    // sneak key or isMovingSlowly and never slowed spectators down.
+    private boolean vfpIsSneakSlowdownActive() {
+        final ProtocolVersion vfpTarget = ProtocolTranslator.getTargetVersion();
+        if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            return this.input.keyPresses.shift();
+        } else if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            return !Minecraft.getInstance().player.isSpectator() && (this.input.keyPresses.shift() || this.isMovingSlowly());
+        }
+
+        return this.isMovingSlowly();
     }
 
     private static Vec2 modifyInputSpeedForSquareMovement(final Vec2 input) {
@@ -931,12 +948,20 @@ public class LocalPlayer extends AbstractClientPlayer
 
         boolean wasJumping = this.input.keyPresses.jump();
         boolean wasShiftKeyDown = this.input.keyPresses.shift();
-        boolean hasForwardImpulse = this.input.hasForwardImpulse();
+        // MODIFIED for porting: was VFP movement/liquid MixinLocalPlayer#easierUnderwaterSprinting
+        // (@WrapOperation on ClientInput#hasForwardImpulse in aiStep). <= 1.21.4 asked for a "walking"
+        // input instead of any forward impulse.
+        boolean hasForwardImpulse = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)
+            ? this.vfpIsWalking1_21_4()
+            : this.input.hasForwardImpulse();
         Abilities abilities = this.getAbilities();
         // MODIFIED for porting: was VFP vehicle MixinLocalPlayer#removeVehicleRequirement
         // (@Redirect on the first isPassenger call in aiStep). <= 1.20 let the player crouch while riding.
+        // MODIFIED for porting: was VFP movement/liquid MixinLocalPlayer#dontAllowSneakingWhileSwimming
+        // (@Redirect on the first isSwimming call after hasForwardImpulse). <= 1.14.1 had no swimming, so
+        // swimming must not suppress crouching there.
         this.crouching = !abilities.flying
-            && !this.isSwimming()
+            && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_14_1) && this.isSwimming())
             && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20) && this.isPassenger())
             && this.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.CROUCHING)
             && (this.isShiftKeyDown() || !this.isSleeping() && !this.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.STANDING));
@@ -1037,7 +1062,10 @@ public class LocalPlayer extends AbstractClientPlayer
                     this.jumpTriggerTime = 7;
                 } else if (!this.isSwimming() && (this.getVehicle() == null || this.jumpableVehicle() != null)) {
                     abilities.flying = !abilities.flying;
-                    if (abilities.flying && this.onGround()) {
+                    // MODIFIED for porting: was VFP movement/jump MixinLocalPlayer#dontJumpBeforeFlying
+                    // (@WrapWithCondition on jumpFromGround in aiStep). < 1.20.5 gave no jump impulse when
+                    // creative flight was toggled on while standing on the ground.
+                    if (abilities.flying && this.onGround() && ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_5)) {
                         this.jumpFromGround();
                     }
 
@@ -1048,12 +1076,25 @@ public class LocalPlayer extends AbstractClientPlayer
             }
         }
 
-        if (this.input.keyPresses.jump() && !justToggledCreativeFlight && !wasJumping && !this.onClimbable() && this.tryToStartFallFlying()) {
+        // MODIFIED for porting: was VFP movement/elytra MixinLocalPlayer#allowElytraWhenClimbing
+        // (@ModifyExpressionValue on onClimbable in aiStep). <= 1.15.1 could start gliding while on a
+        // ladder or vine, so the climbing result is forced to false there.
+        if (this.input.keyPresses.jump()
+            && !justToggledCreativeFlight
+            && !wasJumping
+            && !(this.onClimbable() && ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_15_1))
+            && this.tryToStartFallFlying()) {
             this.connection.send(new ServerboundPlayerCommandPacket(this, ServerboundPlayerCommandPacket.Action.START_FALL_FLYING));
         }
 
         this.wasFallFlying = this.isFallFlying();
-        if (this.isInWater() && this.input.keyPresses.shift() && this.isAffectedByFluids()) {
+        // MODIFIED for porting: was VFP movement/liquid MixinLocalPlayer#disableWaterRelatedMovement
+        // (@Redirect on the only isInWater call in aiStep). <= 1.12.2 never sank the player when sneak was
+        // held in water.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_12_2)
+            && this.isInWater()
+            && this.input.keyPresses.shift()
+            && this.isAffectedByFluids()) {
             this.goDownInWater();
         }
 
@@ -1067,6 +1108,17 @@ public class LocalPlayer extends AbstractClientPlayer
 
         if (abilities.flying && this.isControlledCamera()) {
             int inputYa = 0;
+            // MODIFIED for porting: was VFP movement/slowdown MixinLocalPlayer#undoSneakSlowdownForFly
+            // (@Inject before the first Input#shift call after isControlledCamera). 1.9 - 1.14.4 undid the
+            // sneak slowdown again for creative flight.
+            if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_9, ProtocolVersion.v1_14_4)) {
+                if (this.input.keyPresses.shift()) {
+                    final float movementSideways = (float)((double)this.input.moveVector.x / 0.3D);
+                    final float movementForward = (float)((double)this.input.moveVector.y / 0.3D);
+                    this.input.moveVector = new Vec2(movementSideways, movementForward);
+                }
+            }
+
             if (this.input.keyPresses.shift()) {
                 inputYa--;
             }
@@ -1138,7 +1190,9 @@ public class LocalPlayer extends AbstractClientPlayer
                 || this.isInWater() && !this.isUnderWater();
         }
 
-        return !this.isSprintingPossible(this.getAbilities().flying)
+        // MODIFIED for porting: was VFP bedrock/movement MixinLocalPlayer#allowNonSwimWaterSprinting
+        // (@Redirect on isSprintingPossible in shouldStopRunSprinting), see vfpIsSprintingPossible below.
+        return !this.vfpIsSprintingPossible(this.getAbilities().flying)
             || !this.input.hasForwardImpulse()
             || this.horizontalCollision && !this.minorHorizontalCollision;
     }
@@ -1267,7 +1321,9 @@ public class LocalPlayer extends AbstractClientPlayer
                 }
             }
 
-            float moveDistInverted = Mth.invSqrt(moveDistSq);
+            // MODIFIED for porting: was VFP movement/jump MixinLocalPlayer#useFastInverseSqrt
+            // (@Redirect on Mth#invSqrt in updateAutoJump), see vfpInvSqrt below.
+            float moveDistInverted = this.vfpInvSqrt(moveDistSq);
             Vec3 moveDir = moveDiff.scale(moveDistInverted);
             Vec3 facingDir3 = this.getForward();
             float facingVsMovingDotProduct2 = (float)(facingDir3.x * moveDir.x + facingDir3.z * moveDir.z);
@@ -1345,6 +1401,18 @@ public class LocalPlayer extends AbstractClientPlayer
         }
     }
 
+    // MODIFIED for porting: was VFP movement/jump MixinLocalPlayer#useFastInverseSqrt (@Redirect body).
+    // <= 1.19.3 used the Quake fast inverse square root here, which changes the auto jump look-ahead
+    // distance and the move direction slightly.
+    private float vfpInvSqrt(float x) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19_3)) {
+            x = Float.intBitsToFloat(1597463007 - (Float.floatToIntBits(x) >> 1));
+            return x * (1.5F - (0.5F * x) * x * x);
+        } else {
+            return Mth.invSqrt(x);
+        }
+    }
+
     @Override
         protected boolean isHorizontalCollisionMinor(final Vec3 movement) {
         // MODIFIED for porting: was VFP collision MixinLocalPlayer#neverCollideSoftly (@Inject HEAD cancellable)
@@ -1397,6 +1465,16 @@ public class LocalPlayer extends AbstractClientPlayer
             && (allowedInShallowWater || !this.isInShallowWater());
     }
 
+    // MODIFIED for porting: was VFP bedrock/movement MixinLocalPlayer#allowNonSwimWaterSprinting
+    // (@Redirect body, shared by shouldStopRunSprinting and canStartSprinting). Bedrock keeps sprinting in
+    // shallow water while swimming or on the ground, so the shallow water allowance is widened there.
+    private boolean vfpIsSprintingPossible(final boolean allowedInShallowWater) {
+        return this.isSprintingPossible(
+            allowedInShallowWater
+                || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) && (this.isSwimming() || this.onGround())
+        );
+    }
+
     private boolean canStartSprinting() {
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeCanStartSprintingConditions
         // (@Inject HEAD cancellable on canStartSprinting)
@@ -1413,9 +1491,11 @@ public class LocalPlayer extends AbstractClientPlayer
                 && (!version.olderThanOrEqualTo(ProtocolVersion.v1_21_4) && (!this.isInWater() || this.isUnderWater()) || version.olderThanOrEqualTo(ProtocolVersion.v1_21_4));
         }
 
+        // MODIFIED for porting: was VFP bedrock/movement MixinLocalPlayer#allowNonSwimWaterSprinting
+        // (@Redirect on isSprintingPossible in canStartSprinting), see vfpIsSprintingPossible above.
         return !this.isSprinting()
             && this.input.hasForwardImpulse()
-            && this.isSprintingPossible(this.getAbilities().flying)
+            && this.vfpIsSprintingPossible(this.getAbilities().flying)
             && !this.isSlowDueToUsingItem()
             && (!this.isFallFlying() || this.isUnderWater())
             && (!this.isMovingSlowly() || this.isUnderWater());

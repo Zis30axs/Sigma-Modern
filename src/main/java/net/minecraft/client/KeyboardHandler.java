@@ -11,6 +11,9 @@ import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
 import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.logging.LogUtils;
+import com.viaversion.viafabricplus.features.networking.remove_signed_commands.SignedCommands1_21_6;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.nio.file.Path;
 import java.util.Locale;
 import net.minecraft.ChatFormatting;
@@ -238,10 +241,23 @@ public class KeyboardHandler implements com.viaversion.viafabricplus.injection.a
             if (this.minecraft.player == null || !GameModeCommand.PERMISSION_CHECK.check(this.minecraft.player.permissions())) {
                 this.debugFeedbackTranslated("debug.creative_spectator.error");
             } else if (!this.minecraft.player.isSpectator()) {
-                this.minecraft.player.connection.send(new ServerboundChangeGameModePacket(GameType.SPECTATOR));
+                // MODIFIED for porting: was VFP remove_signed_commands MixinKeyboardHandler#wrapAsCommand
+                // (@Redirect ClientPacketListener#send, no ordinal - so both sends of this branch). <= 1.21.5 has no
+                // serverbound gamemode packet, the debug switch goes out as the '/gamemode <mode>' command instead
+                // (username-prefixed '/gamemode <user> <id>' for <= 1.2.5).
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                    SignedCommands1_21_6.sendGameMode(GameType.SPECTATOR);
+                } else {
+                    this.minecraft.player.connection.send(new ServerboundChangeGameModePacket(GameType.SPECTATOR));
+                }
             } else {
                 GameType newGameType = MoreObjects.firstNonNull(this.minecraft.gameMode.getPreviousPlayerMode(), GameType.CREATIVE);
-                this.minecraft.player.connection.send(new ServerboundChangeGameModePacket(newGameType));
+                // MODIFIED for porting: was VFP remove_signed_commands MixinKeyboardHandler#wrapAsCommand (second send site)
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+                    SignedCommands1_21_6.sendGameMode(newGameType);
+                } else {
+                    this.minecraft.player.connection.send(new ServerboundChangeGameModePacket(newGameType));
+                }
             }
 
             debugAction = true;

@@ -2,6 +2,9 @@ package net.minecraft.client.renderer.entity.player;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.client.entity.ClientAvatarEntity;
 import net.minecraft.client.entity.ClientAvatarState;
 import net.minecraft.client.model.HumanoidModel;
@@ -27,6 +30,7 @@ import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.ItemTags;
@@ -34,6 +38,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Avatar;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.item.CrossbowItem;
@@ -78,7 +83,31 @@ public class AvatarRenderer<AvatarlikeEntity extends Avatar & ClientAvatarEntity
 
     public Vec3 getRenderOffset(final AvatarRenderState state) {
         Vec3 offset = super.getRenderOffset(state);
-        return state.isCrouching ? offset.add(0.0, state.scale * -2.0F / 16.0, 0.0) : offset;
+        // MODIFIED for porting: was VFP movement/constants MixinAvatarRenderer#disableSneakPositionOffset
+        // (@Redirect on the AvatarRenderState.isCrouching GETFIELD). <= 1.11.1 applied no sneak render offset.
+        Vec3 result = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_11_1) && state.isCrouching
+            ? offset.add(0.0, state.scale * -2.0F / 16.0, 0.0)
+            : offset;
+        // MODIFIED for porting: was VFP movement/constants MixinAvatarRenderer#modifySleepingOffset
+        // (@Inject RETURN cancellable). The three adjustments are cumulative and applied in this order.
+        if (state.pose == Pose.SLEEPING) {
+            final Direction sleepingDir = state.bedOrientation;
+            if (sleepingDir != null) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+                    result = result.subtract(sleepingDir.getStepX() * 0.4, 0, sleepingDir.getStepZ() * 0.4);
+                }
+
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_5tob1_5_2)) {
+                    result = result.subtract(sleepingDir.getStepX() * 0.1, 0, sleepingDir.getStepZ() * 0.1);
+                }
+
+                if (ProtocolTranslator.getTargetVersion().betweenInclusive(LegacyProtocolVersion.b1_6tob1_6_6, ProtocolVersion.v1_7_6)) {
+                    result = result.subtract(0, 0.3F, 0);
+                }
+            }
+        }
+
+        return result;
     }
 
     private static HumanoidModel.ArmPose getArmPose(final Avatar avatar, final HumanoidArm arm) {

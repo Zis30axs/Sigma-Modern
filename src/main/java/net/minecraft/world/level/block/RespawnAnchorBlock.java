@@ -3,6 +3,8 @@ package net.minecraft.world.level.block;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -123,10 +125,22 @@ public class RespawnAnchorBlock extends Block {
                 }
             }
 
-            return InteractionResult.CONSUME;
+            return vfpConsumeResult(level, pos);
         } else {
-            return InteractionResult.CONSUME;
+            return vfpConsumeResult(level, pos);
         }
+    }
+
+    // MODIFIED for porting: was VFP block/interaction MixinRespawnAnchorBlock#swingHand (@Inject RETURN, cancellable),
+    // applied to both CONSUME exits of useWithoutItem. <= 1.21.10 clients did not know the respawn_anchor_works
+    // environment attribute, so they always swung the arm: SUCCESS swings, CONSUME does not.
+    private static InteractionResult vfpConsumeResult(final Level level, final BlockPos pos) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)
+            && !level.environmentAttributes().getValue(EnvironmentAttributes.RESPAWN_ANCHOR_WORKS, pos)) {
+            return InteractionResult.SUCCESS;
+        }
+
+        return InteractionResult.CONSUME;
     }
 
     private static boolean isRespawnFuel(final ItemStack itemInHand) {

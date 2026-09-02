@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.DataResult.Error;
 import com.mojang.serialization.DataResult.Success;
 import java.util.Optional;
@@ -139,6 +141,19 @@ public class BundleItem extends Item {
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
         player.startUsingItem(hand);
+        // MODIFIED for porting: was VFP item/interaction MixinBundleItem#dontSwing (@Inject RETURN, cancellable)
+        // 1.21.4 added the arm swing for bundles: <= 1.21 fails an empty bundle outright and <= 1.21.2 consumes the
+        // click without swinging.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            final ItemStack itemStack = player.getItemInHand(hand);
+            final BundleContents component = itemStack.get(DataComponents.BUNDLE_CONTENTS);
+            if (component == null || component.isEmpty()) {
+                return InteractionResult.FAIL;
+            }
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+            return InteractionResult.CONSUME;
+        }
+
         return InteractionResult.SUCCESS;
     }
 

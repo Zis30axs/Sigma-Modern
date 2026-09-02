@@ -28,6 +28,13 @@ public class FireworkRocketItem extends Item implements ProjectileItem {
 
     @Override
     public InteractionResult useOn(final UseOnContext context) {
+        // MODIFIED for porting: was VFP item/interaction MixinFireworkRocketItem#allowWhileGliding (@Inject HEAD,
+        // cancellable). <= 1.21.5 does not refuse a rocket used on a block while the player is gliding, so the click
+        // always succeeds and the server decides. This is a separate hook from the elytra gate in use() below.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5)) {
+            return InteractionResult.SUCCESS;
+        }
+
         Level level = context.getLevel();
         Player player = context.getPlayer();
         if (player != null && player.isFallFlying()) {

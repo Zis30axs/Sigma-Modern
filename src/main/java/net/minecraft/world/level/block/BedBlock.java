@@ -2,6 +2,7 @@ package net.minecraft.world.level.block;
 
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import com.mojang.math.OctahedralGroup;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -59,6 +60,8 @@ public class BedBlock extends HorizontalDirectionalBlock {
         VoxelShape northEastLeg = Shapes.rotate(northWestLeg, OctahedralGroup.BLOCK_ROT_Y_90);
         return Shapes.rotateHorizontal(Shapes.or(Block.column(16.0, 3.0, 9.0), northWestLeg, northEastLeg));
     });
+    // MODIFIED for porting: was VFP block/shape MixinBedBlock#viaFabricPlus$shape_r1_13_2 (@Unique constant)
+    private static final VoxelShape vfpShapeR1_13_2 = Block.box(0.0, 0.0, 0.0, 16.0, 9.0, 16.0);
     private final DyeColor color;
 
     @Override
@@ -188,6 +191,14 @@ public class BedBlock extends HorizontalDirectionalBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinBedBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.13.2 and Bedrock draw a bed as one flat 9/16 slab, with no leg or pillow split. Upstream's
+        // MoreCulling-only getOcclusionShape workaround is not ported: that mod does not exist in this tree.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)
+            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeR1_13_2;
+        }
+
         return SHAPES.get(getConnectedDirection(state).getOpposite());
     }
 
@@ -314,12 +325,18 @@ public class BedBlock extends HorizontalDirectionalBlock {
     private static int[][] bedAboveStandUpOffsets(final Direction forward) {
         return new int[][]{{0, 0}, {-forward.getStepX(), -forward.getStepZ()}};
     }
+
     // MODIFIED for porting: was VFP collision MixinBedBlock#getBounceRestitution
+    // Three tiers upstream: <= 1.11.1 beds did not bounce at all, up to and including 26.1 they bounced with a
+    // fixed 0.66, and from 26.2 on the block's own bounceRestitution property is used.
     @Override
     public float getBounceRestitution() {
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(com.viaversion.viaversion.api.protocol.version.ProtocolVersion.v1_11_1)) {
             return 0F;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return 0.66F;
         }
-        return 0.66F;
+
+        return super.getBounceRestitution();
     }
 }

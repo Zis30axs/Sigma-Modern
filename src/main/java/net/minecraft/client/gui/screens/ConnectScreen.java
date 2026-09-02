@@ -10,14 +10,26 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
+import com.viaversion.viafabricplus.injection.access.core.IServerData;
 import com.viaversion.viafabricplus.injection.access.networking.legacy_chat_signature.IProfilePublicKey_Data;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.protocoltranslator.impl.provider.vialegacy.ViaFabricPlusClassicMPPassProvider;
+import com.viaversion.viafabricplus.protocoltranslator.util.ProtocolVersionDetector;
+import com.viaversion.viafabricplus.save.SaveManager;
+import com.viaversion.viafabricplus.settings.impl.AuthenticationSettings;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.minecraft.ProfileKey;
 import com.viaversion.viaversion.api.minecraft.signature.storage.ChatSession1_19_0;
 import com.viaversion.viaversion.api.minecraft.signature.storage.ChatSession1_19_1;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import de.florianreuth.classic4j.model.classicube.account.CCAccount;
+import java.net.ConnectException;
+import java.security.KeyPair;
 import java.security.PrivateKey;
+import net.raphimc.minecraftauth.bedrock.BedrockAuthManager;
+import net.raphimc.minecraftauth.bedrock.model.MinecraftMultiplayerToken;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.viabedrock.protocol.storage.AuthData;
 import net.minecraft.DefaultUncaughtExceptionHandler;
 import net.minecraft.client.GameNarrator;
 import net.minecraft.client.Minecraft;
@@ -132,7 +144,38 @@ public class ConnectScreen extends Screen {
                     }
 
                     address = resolvedAddress.get();
+                    // MODIFIED for porting: was VFP integration MixinConnectScreen_1#setServerInfoAndProtocolVersion
+                    // (@WrapOperation on Optional#get). Picks the version this join translates to: a per-server
+                    // forced version wins once (then the direct-connect latch is cleared), otherwise the global
+                    // target; AUTO_DETECT reuses the version from a successful ping and otherwise probes the
+                    // server. The global setter is used because every inlined gate reads getTargetVersion().
+                    ProtocolVersion vfp$targetVersion = ProtocolTranslator.getTargetVersion();
+                    if (((IServerData) server).viaFabricPlus$forcedVersion() != null && !((IServerData) server).viaFabricPlus$passedDirectConnectScreen()) {
+                        vfp$targetVersion = ((IServerData) server).viaFabricPlus$forcedVersion();
+                        ((IServerData) server).viaFabricPlus$passDirectConnectScreen(false); // reset state
+                    }
+                    if (vfp$targetVersion == ProtocolTranslator.AUTO_DETECT_PROTOCOL) {
+                        // If the server got already pinged, try to use that version if it's valid. Otherwise, perform auto-detect
+                        final boolean vfp$serverPinged = server.state() == ServerData.State.SUCCESSFUL || server.state() == ServerData.State.INCOMPATIBLE;
+                        if (vfp$serverPinged) {
+                            vfp$targetVersion = ProtocolVersion.getProtocol(server.protocol);
+                        }
+                        if (!vfp$serverPinged || !vfp$targetVersion.isKnown()) {
+                            ConnectScreen.this.updateStatus(Component.translatable("base.viafabricplus.detecting_server_version"));
+                            try {
+                                vfp$targetVersion = ProtocolVersionDetector.get(hostAndPort, address, ProtocolTranslator.NATIVE_VERSION);
+                            } catch (final ConnectException ignored) {
+                                // Don't let this one through as not relevant
+                            }
+                        }
+                    }
+                    ProtocolTranslator.setTargetVersion(vfp$targetVersion, true);
+                    // MODIFIED for porting: was VFP integration MixinConnectScreen_1 @Unique viaFabricPlus$useClassiCubeAccount
+                    // - latched here, read by the useClassiCubeUsername hook below.
+                    final boolean vfp$useClassiCubeAccount = AuthenticationSettings.INSTANCE.setSessionNameToClassiCubeNameInServerList.getValue()
+                        && ViaFabricPlusClassicMPPassProvider.classicubeMPPass != null;
                     // MODIFIED for porting: was VFP srv_resolving MixinConnectScreen_1 getRealAddress/getRealPort (@Redirect <=1_17 uses raw host/port)
+                    // Both un-ordinaled redirects also cover the error-message stripping in the catch block below.
                     final boolean vfp$useRawAddress = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17);
                     final String vfp$connectHost = vfp$useRawAddress ? hostAndPort.getHost() : address.getHostName();
                     final int vfp$connectPort = vfp$useRawAddress ? hostAndPort.getPort() : address.getPort();
@@ -144,9 +187,18 @@ public class ConnectScreen extends Screen {
 
                         pendingConnection = new Connection(PacketFlow.CLIENTBOUND);
                         pendingConnection.setBandwidthLogger(minecraft.getDebugOverlay().getBandwidthLogger());
+                        // MODIFIED for porting: was VFP bedrock MixinConnectScreen_1#markAsConnecting (@Redirect
+                        // EventLoopGroupHolder#remote) - flags the holder as connecting so the bedrock transport
+                        // hooks in Connection#connect take the connect path instead of the RakNet ping path.
+                        final EventLoopGroupHolder vfp$eventLoopGroupHolder = EventLoopGroupHolder.remote(minecraft.options.useNativeTransport());
+                        vfp$eventLoopGroupHolder.viaFabricPlus$setConnecting(true);
                         ConnectScreen.this.channelFuture = Connection.connect(
-                            address, EventLoopGroupHolder.remote(minecraft.options.useNativeTransport()), pendingConnection
+                            address, vfp$eventLoopGroupHolder, pendingConnection
                         );
+                        // MODIFIED for porting: was VFP integration MixinConnectScreen_1#resetProtocolVersionAfterDisconnect
+                        // (@WrapOperation on Connection#connect) - a version set with revertOnDisconnect=true is
+                        // reverted when this channel closes.
+                        ProtocolTranslator.injectPreviousVersionReset(ConnectScreen.this.channelFuture.channel());
                     }
 
                     ConnectScreen.this.channelFuture.syncUninterruptibly();
@@ -171,8 +223,20 @@ public class ConnectScreen extends Screen {
                             com.viaversion.viafabricplus.ViaFabricPlusImpl.INSTANCE.getLogger().error("Could not get public key signature. Joining servers with enforce-secure-profiles enabled will not work!");
                         }
                     }
-                    // MODIFIED for porting: srv_resolving raw host/port substitution (<=1_17)
-                    address = new InetSocketAddress(vfp$connectHost, vfp$connectPort);
+                    // MODIFIED for porting: was VFP integration/bedrock MixinConnectScreen_1#setupBedrockAccount
+                    // (@Inject AFTER syncUninterruptibly). Bedrock target only: the refreshed multiplayer token has to
+                    // reach the UserConnection before the handshake is initiated, hence the shared injection point.
+                    if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+                        final BedrockAuthManager bedrockSession = SaveManager.INSTANCE.getAccountsSave().getBedrockAccount();
+                        if (bedrockSession != null) {
+                            final MinecraftMultiplayerToken multiplayerToken = bedrockSession.getMinecraftMultiplayerToken().refresh();
+                            final KeyPair sessionKeyPair = bedrockSession.getSessionKeyPair();
+                            final UUID deviceId = bedrockSession.getDeviceId();
+                            vfp$viaUser.put(new AuthData(multiplayerToken.getToken(), sessionKeyPair, deviceId));
+                        } else {
+                            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Could not get Bedrock account. Joining online mode servers will not work!");
+                        }
+                    }
                     synchronized (ConnectScreen.this) {
                         if (ConnectScreen.this.aborted) {
                             pendingConnection.disconnect(ConnectScreen.ABORT_CONNECTION);
@@ -185,8 +249,8 @@ public class ConnectScreen extends Screen {
 
                     ConnectScreen.this.connection
                         .initiateServerboundPlayConnection(
-                            address.getHostName(),
-                            address.getPort(),
+                            vfp$connectHost,
+                            vfp$connectPort,
                             LoginProtocols.SERVERBOUND,
                             LoginProtocols.CLIENTBOUND,
                             new ClientHandshakePacketListenerImpl(
@@ -202,7 +266,17 @@ public class ConnectScreen extends Screen {
                             ),
                             transferState != null
                         );
-                    ConnectScreen.this.connection.send(new ServerboundHelloPacket(minecraft.getUser().getName(), minecraft.getUser().getProfileId()));
+                    // MODIFIED for porting: was VFP integration MixinConnectScreen_1#useClassiCubeUsername
+                    // (@Redirect on User#getName) - ClassiCube servers expect the stored ClassiCube name instead of
+                    // the Mojang session name whenever an MPPass was issued for this join.
+                    String vfp$loginName = minecraft.getUser().getName();
+                    if (vfp$useClassiCubeAccount) {
+                        final CCAccount vfp$classiCubeAccount = SaveManager.INSTANCE.getAccountsSave().getClassicubeAccount();
+                        if (vfp$classiCubeAccount != null) {
+                            vfp$loginName = vfp$classiCubeAccount.username();
+                        }
+                    }
+                    ConnectScreen.this.connection.send(new ServerboundHelloPacket(vfp$loginName, minecraft.getUser().getProfileId()));
                 } catch (Exception exception) {
                     if (ConnectScreen.this.aborted) {
                         return;
@@ -216,9 +290,22 @@ public class ConnectScreen extends Screen {
                     }
 
                     ConnectScreen.LOGGER.error("Couldn't connect to server", exception);
-                    String message = address == null
-                        ? cause.getMessage()
-                        : cause.getMessage().replaceAll(address.getHostName() + ":" + address.getPort(), "").replaceAll(address.toString(), "");
+                    // MODIFIED for porting: was VFP bedrock MixinConnectScreen_1#handleNullExceptionMessage
+                    // (@WrapOperation on Exception#getMessage, un-ordinaled so both reads below). Vanilla never sees a
+                    // null message here, but RakNet/Via pipeline exceptions do, which would NPE the replaceAll chain.
+                    final String vfp$causeMessage = cause.getMessage() == null ? "" : cause.getMessage();
+                    String message;
+                    if (address == null) {
+                        message = vfp$causeMessage;
+                    } else {
+                        // MODIFIED for porting: was VFP srv_resolving MixinConnectScreen_1 getRealAddress/getRealPort
+                        // (@Redirect, second un-ordinaled call site) - <=1.17 handshakes with the raw host/port, so that
+                        // is the pair to strip here; on newer targets the resolved endpoint is stripped as in vanilla.
+                        final boolean vfp$useRawInMessage = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_17);
+                        final String vfp$messageHost = vfp$useRawInMessage ? hostAndPort.getHost() : address.getHostName();
+                        final int vfp$messagePort = vfp$useRawInMessage ? hostAndPort.getPort() : address.getPort();
+                        message = vfp$causeMessage.replaceAll(vfp$messageHost + ":" + vfp$messagePort, "").replaceAll(address.toString(), "");
+                    }
                     minecraft.execute(
                         () -> minecraft.gui
                             .setScreen(

@@ -65,6 +65,8 @@ import net.minecraft.world.entity.EntityEquipment;
 import net.minecraft.world.entity.EntityReference;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -162,6 +164,9 @@ public abstract class Player extends Avatar implements ContainerUser {
     private final Abilities abilities = new Abilities();
     // MODIFIED for porting: was VFP sprinting_and_sneaking MixinPlayer#viaFabricPlus$isSprinting (@Unique)
     private boolean vfpWasSprintingAtSetSpeed;
+    // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#viaFabricPlus$ticksSinceSwimming (@Unique)
+    // Bedrock-only state, ticked from Player#travel and consumed by the jump suppression there.
+    private int vfpTicksSinceSwimming;
     public int experienceLevel = 0;
     public int totalExperience = 0;
     public float experienceProgress = 0.0F;
@@ -346,6 +351,29 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     protected void updatePlayerPose() {
+        // MODIFIED for porting: was VFP entity.pose MixinPlayer#onUpdatePose (@Inject HEAD + cancellable)
+        // <= 1.13.2 picked the pose from a fixed chain with fall flying tested before sleeping, ignored the
+        // flying check on the sneak pose and never ran the fitting checks, so the hitbox differs too.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            final Pose vfpPose;
+            if (this.isFallFlying()) {
+                vfpPose = Pose.FALL_FLYING;
+            } else if (this.isSleeping()) {
+                vfpPose = Pose.SLEEPING;
+            } else if (this.isSwimming()) {
+                vfpPose = Pose.SWIMMING;
+            } else if (this.isAutoSpinAttack()) {
+                vfpPose = Pose.SPIN_ATTACK;
+            } else if (this.isShiftKeyDown()) {
+                vfpPose = Pose.CROUCHING;
+            } else {
+                vfpPose = Pose.STANDING;
+            }
+
+            this.setPose(vfpPose);
+            return;
+        }
+
         if (this.canPlayerFitWithinBlocksAndEntitiesWhen(Pose.SWIMMING)) {
             Pose desiredPose = this.getDesiredPose();
             Pose actualPose;
@@ -376,7 +404,11 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     protected boolean canPlayerFitWithinBlocksAndEntitiesWhen(final Pose newPose) {
-        return this.level().noCollision(this, this.getDimensions(newPose).makeBoundingBox(this.position()).deflate(1.0E-7));
+        // MODIFIED for porting: was VFP movement.limitation MixinPlayer#removeContractionOfCollisionBox
+        // (@Redirect AABB#deflate). <= 1.15.2 tested the un-shrunk pose bounding box.
+        final AABB vfpPoseBox = this.getDimensions(newPose).makeBoundingBox(this.position());
+        final boolean vfpNoContraction = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2);
+        return this.level().noCollision(this, vfpNoContraction ? vfpPoseBox : vfpPoseBox.deflate(1.0E-7));
     }
 
     @Override
@@ -598,11 +630,46 @@ public abstract class Player extends Avatar implements ContainerUser {
             speed += (float)this.getAttributeValue(Attributes.MINING_EFFICIENCY);
         }
 
+        // MODIFIED for porting: was VFP block.mining_calculation MixinPlayer#changeSpeedCalculation
+        // (@Inject at MobEffectUtil#hasDigSpeed, @Local speed). Legacy versions added the efficiency bonus onto
+        // the raw item speed instead of vanilla's `speed > 1` rule; EnchantmentAttributesEmulation1_20_6 is what
+        // feeds MINING_EFFICIENCY on those targets.
+        final float vfpEfficiency = (float)this.getAttributeValue(Attributes.MINING_EFFICIENCY);
+        if (vfpEfficiency > 0.0F) {
+            final float vfpItemSpeed = this.inventory.getSelectedItem().getDestroySpeed(state);
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_4tor1_4_5)
+                && this.hasCorrectToolForDrops(state)) {
+                speed = vfpItemSpeed + vfpEfficiency;
+            } else if (vfpItemSpeed > 1.0F
+                || ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_6tor1_4_7)) {
+                if (!this.getMainHandItem().isEmpty() && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_7_6)) {
+                    if (vfpItemSpeed <= 1.0 && !this.hasCorrectToolForDrops(state)) {
+                        speed = vfpItemSpeed + vfpEfficiency * 0.08F;
+                    } else {
+                        speed = vfpItemSpeed + vfpEfficiency;
+                    }
+                }
+            }
+        }
+
         if (MobEffectUtil.hasDigSpeed(this)) {
             speed *= 1.0F + (MobEffectUtil.getDigSpeedAmplification(this) + 1) * 0.2F;
         }
 
-        if (this.hasEffect(MobEffects.MINING_FATIGUE)) {
+        // MODIFIED for porting: was VFP block.mining_calculation MixinPlayer#changeSpeedCalculation
+        // (@Redirect Player#hasEffect, @Local speed). <= 1.7.6 scaled by 1 - (amplifier + 1) * 0.2, floored at
+        // 0, and never ran the modern per-amplifier table below.
+        boolean vfpHasMiningFatigue = this.hasEffect(MobEffects.MINING_FATIGUE);
+        if (vfpHasMiningFatigue && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_7_6)) {
+            speed *= 1.0F - (this.getEffect(MobEffects.MINING_FATIGUE).getAmplifier() + 1) * 0.2F;
+            if (speed < 0.0F) {
+                speed = 0.0F;
+            }
+
+            vfpHasMiningFatigue = false;
+        }
+
+        if (vfpHasMiningFatigue) {
             float scale = switch (this.getEffect(MobEffects.MINING_FATIGUE).getAmplifier()) {
                 case 0 -> 0.3F;
                 case 1 -> 0.09F;
@@ -888,7 +955,12 @@ public abstract class Player extends Avatar implements ContainerUser {
     @Override
     protected Vec3 maybeBackOffFromEdge(final Vec3 delta, final MoverType moverType) {
         float maxDownStep = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_10) ? 1.0F : this.maxUpStep();
-        if (!this.abilities.flying
+        // MODIFIED for porting: was VFP movement.limitation MixinPlayer#disableFlyingCheck
+        // (@Redirect GETFIELD Abilities.flying). <= 1.16.1 read this as false, so the sneak edge protection
+        // also runs while flying.
+        final boolean vfpFlying = !ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_1)
+            && this.abilities.flying;
+        if (!vfpFlying
             && !(delta.y > 0.0)
             && (moverType == MoverType.SELF || moverType == MoverType.PLAYER)
             && this.isStayingOnGroundSurface()
@@ -938,6 +1010,12 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     private boolean isAboveGround(final float maxDownStep) {
+        // MODIFIED for porting: was VFP movement.limitation MixinPlayer#isOnGround (@Inject HEAD + cancellable)
+        // <= 1.16.1 only asked onGround() here and never ran the fall-distance step-down probe.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_1)) {
+            return this.onGround();
+        }
+
         return this.onGround() || this.fallDistance < maxDownStep && !this.canFallAtLeast(0.0, 0.0, maxDownStep - this.fallDistance);
     }
 
@@ -1420,21 +1498,70 @@ public abstract class Player extends Avatar implements ContainerUser {
         if (this.isPassenger()) {
             super.travel(input);
         } else {
-            if (this.isSwimming()) {
+            // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#preventSwimmingResurface
+            // (@Redirect Player#isSwimming). On Bedrock a swimmer looking slightly up with no fluid above is
+            // held level, which also skips the whole vanilla swim block below.
+            final boolean vfpBedrock = ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest);
+            boolean vfpSwimming = this.isSwimming();
+            if (vfpBedrock && vfpSwimming) {
+                final double vfpResurfaceLookAngleY = this.getLookAngle().y;
+                // The value used here (0.55) isn't entirely correct, however in most cases it should be fine.
+                if (this.level().getFluidState(BlockPos.containing(this.getX(), this.getY() + 0.4, this.getZ())).isEmpty()
+                    && vfpResurfaceLookAngleY > 0.0
+                    && vfpResurfaceLookAngleY < 0.55) {
+                    this.setDeltaMovement(this.getDeltaMovement().x(), 0.0, this.getDeltaMovement().z());
+                    vfpSwimming = false;
+                }
+            }
+
+            if (vfpSwimming) {
                 double lookAngleY = this.getLookAngle().y;
                 double multiplier = lookAngleY < -0.2 ? 0.085 : 0.06;
+                // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#modifyWaterAbovePosition
+                // (@Redirect BlockPos#containing). Bedrock probes the fluid 0.9 blocks below the vanilla point.
+                final double vfpWaterAboveOffset = vfpBedrock ? 0.9 : 0.0;
                 if (lookAngleY <= 0.0
                     || this.jumping
-                    || !this.level().getFluidState(BlockPos.containing(this.getX(), this.getY() + 1.0 - 0.1, this.getZ())).isEmpty()) {
+                    || !this.level()
+                        .getFluidState(BlockPos.containing(this.getX(), this.getY() + 1.0 - 0.1 - vfpWaterAboveOffset, this.getZ()))
+                        .isEmpty()) {
                     Vec3 movement = this.getDeltaMovement();
-                    this.setDeltaMovement(movement.add(0.0, (lookAngleY - movement.y) * multiplier, 0.0));
+                    // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#preventSwimmingMotionWhenJumping
+                    // (@WrapWithCondition setDeltaMovement ordinal 0). Bedrock drops the swim look-angle motion
+                    // completely while the jump key is held.
+                    if (!vfpBedrock || !this.isJumping()) {
+                        this.setDeltaMovement(movement.add(0.0, (lookAngleY - movement.y) * multiplier, 0.0));
+                    }
+                }
+            }
+
+            // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#preventJumpingWhenStartedSwimming
+            // (@Inject at the Player#getAbilities INVOKE below). Bedrock swallows the jump for the first ten
+            // ticks after swimming started.
+            if (vfpBedrock) {
+                if (this.isSwimming()) {
+                    this.vfpTicksSinceSwimming++;
+                } else {
+                    this.vfpTicksSinceSwimming = 0;
+                }
+
+                if (this.vfpTicksSinceSwimming > 0 && this.vfpTicksSinceSwimming < 10 && this.isJumping()) {
+                    this.setDeltaMovement(this.getDeltaMovement().x(), 0.0, this.getDeltaMovement().z());
                 }
             }
 
             if (this.getAbilities().flying) {
                 double originalMovementY = this.getDeltaMovement().y;
                 super.travel(input);
-                this.setDeltaMovement(this.getDeltaMovement().with(Direction.Axis.Y, originalMovementY * 0.6));
+                // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#removeFlySlipperiness
+                // (@Redirect setDeltaMovement ordinal 1). Bedrock creative flight stops dead once there is no
+                // horizontal input instead of keeping the drift.
+                final Vec3 vfpFlyMovement = this.getDeltaMovement().with(Direction.Axis.Y, originalMovementY * 0.6);
+                if (vfpBedrock && input.horizontalDistanceSqr() == 0.0) {
+                    this.setDeltaMovement(new Vec3(0.0, vfpFlyMovement.y, 0.0));
+                } else {
+                    this.setDeltaMovement(vfpFlyMovement);
+                }
             } else {
                 super.travel(input);
             }
@@ -1478,6 +1605,20 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     public boolean tryToStartFallFlying() {
+        // MODIFIED for porting: was VFP movement.elytra MixinPlayer#replaceGlidingCondition
+        // (@Inject HEAD + cancellable). <= 1.14.4 only looked for an elytra in the chest slot while already
+        // falling, never consulted canGlide()/isInWater(), and did not set the flag itself.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            if (!this.onGround() && this.getDeltaMovement().y < 0.0 && !this.isFallFlying()) {
+                final ItemStack vfpChestItem = this.getItemBySlot(EquipmentSlot.CHEST);
+                if (vfpChestItem.is(Items.ELYTRA) && canGlideUsing(vfpChestItem, EquipmentSlot.CHEST)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         if (!this.isFallFlying() && this.canGlide() && !this.isInWater()) {
             this.startFallFlying();
             return true;
@@ -1619,6 +1760,12 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     public boolean canEat(final boolean canAlwaysEat) {
+        // MODIFIED for porting: was VFP interaction MixinPlayer#preventEatingFoodInCreative
+        // (@Inject HEAD + cancellable). <= 1.14.4 refused to start eating while invulnerable (creative).
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4) && this.abilities.invulnerable) {
+            return false;
+        }
+
         return this.abilities.invulnerable || canAlwaysEat || this.foodData.needsFood();
     }
 
@@ -1704,6 +1851,12 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     public boolean isCreative() {
+        // MODIFIED for porting: was VFP interaction MixinPlayer#fixCreativeCheck (@Inject HEAD + cancellable)
+        // <= 1.8 servers only convey the ability flags, never the game mode.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return this.abilities.instabuild;
+        }
+
         return this.gameMode() == GameType.CREATIVE;
     }
 
@@ -1841,10 +1994,22 @@ public abstract class Player extends Avatar implements ContainerUser {
     }
 
     public float getAttackStrengthScale(final float a) {
+        // MODIFIED for porting: was VFP interaction.cooldown MixinPlayer#removeAttackCooldown (@Redirect Mth#clamp)
+        // <= 1.8 has no attack cooldown at all.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return 1.0F;
+        }
+
         return Mth.clamp((this.attackStrengthTicker + a) / this.getCurrentItemAttackStrengthDelay(), 0.0F, 1.0F);
     }
 
     public float getItemSwapScale(final float a) {
+        // MODIFIED for porting: was VFP interaction.cooldown MixinPlayer#removeSwapCooldown (@Redirect Mth#clamp)
+        // <= 1.8 has no item swap cooldown at all.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return 1.0F;
+        }
+
         return Mth.clamp((this.itemSwapTicker + a) / this.getCurrentItemAttackStrengthDelay(), 0.0F, 1.0F);
     }
 
@@ -2044,6 +2209,12 @@ public abstract class Player extends Avatar implements ContainerUser {
 
     @Override
     public boolean onClimbable() {
+        // MODIFIED for porting: was VFP movement.limitation MixinPlayer#allowClimbingWhileFlying
+        // (@Inject HEAD + cancellable). <= 1.21.2 kept climbing ladders while abilities.flying was set.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+            return super.onClimbable();
+        }
+
         return this.abilities.flying ? false : super.onClimbable();
     }
 

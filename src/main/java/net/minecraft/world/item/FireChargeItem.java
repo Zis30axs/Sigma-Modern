@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Position;
@@ -28,6 +30,13 @@ public class FireChargeItem extends Item implements ProjectileItem {
 
     @Override
     public InteractionResult useOn(final UseOnContext context) {
+        // MODIFIED for porting: was VFP item/interaction MixinFireChargeItem#disableClientSideUsage (@Inject HEAD,
+        // cancellable). <= 1.14.4 leaves the fire placement, the sound and the game event entirely to the server, so
+        // the client only swings.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4) && context.getLevel().isClientSide()) {
+            return InteractionResult.SUCCESS;
+        }
+
         Level level = context.getLevel();
         BlockPos pos = context.getClickedPos();
         BlockState blockState = level.getBlockState(pos);

@@ -5,6 +5,8 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -56,6 +58,8 @@ public class FenceGateBlock extends HorizontalDirectionalBlock {
     private static final Map<Direction.Axis, VoxelShape> SHAPE_OCCLUSION_WALL = Maps.newEnumMap(
         Util.mapValues(SHAPE_OCCLUSION, v -> v.move(0.0, -0.1875, 0.0).optimize())
     );
+    // MODIFIED for porting: was VFP block/shape MixinFenceGateBlock#viaFabricPlus$x_and_z_axis_collision_shape_b1_8_1 (@Unique constant)
+    private static final VoxelShape vfpXAndZAxisCollisionShapeB1_8_1 = Block.box(0.0, 0.0, 0.0, 16.0, 24.0, 16.0);
     private final WoodType type;
 
     @Override
@@ -71,6 +75,12 @@ public class FenceGateBlock extends HorizontalDirectionalBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinFenceGateBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // b1.8-b1.8.1 and older drew the gate as a full cube unless it was joined into a wall.
+        if (!state.getValue(IN_WALL) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_8tob1_8_1)) {
+            return Shapes.block();
+        }
+
         Direction.Axis axis = state.getValue(FACING).getAxis();
         return (state.getValue(IN_WALL) ? SHAPES_WALL : SHAPES).get(axis);
     }
@@ -103,6 +113,12 @@ public class FenceGateBlock extends HorizontalDirectionalBlock {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinFenceGateBlock#changeCollisionShape (@Inject HEAD, cancellable)
+        // A closed gate on b1.8-b1.8.1 and older collided as a 24-high full-width box on both axes.
+        if (!state.getValue(OPEN) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_8tob1_8_1)) {
+            return vfpXAndZAxisCollisionShapeB1_8_1;
+        }
+
         Direction.Axis axis = state.getValue(FACING).getAxis();
         return state.getValue(OPEN) ? Shapes.empty() : SHAPE_COLLISION.get(axis);
     }

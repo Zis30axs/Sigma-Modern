@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.vehicle.boat;
 
 import java.util.function.Supplier;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -99,6 +101,12 @@ public abstract class AbstractChestBoat extends AbstractBoat implements HasCusto
 
     @Override
     public InteractionResult interact(final Player player, final InteractionHand hand, final Vec3 location) {
+        // MODIFIED for porting: was VFP entity.interaction MixinAbstractChestBoat#openWhenSneaking (@Inject HEAD cancellable)
+        // Targets <=1.21.5 opened the chest on sneak-interact before any boat leashing/riding handling ran.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5) && player.isSecondaryUseActive()) {
+            return this.interactWithContainerVehicle(player);
+        }
+
         InteractionResult superInteraction = super.interact(player, hand, location);
         if (superInteraction != InteractionResult.PASS) {
             return superInteraction;

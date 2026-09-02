@@ -4,6 +4,8 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.function.IntPredicate;
 import java.util.stream.IntStream;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -52,11 +54,33 @@ public class Mth {
     // MODIFIED for porting: lithium math.sine_lut MthMixin replaces the sine table lookup with CompactSineLUT,
     // which stores only a quarter of the table and mirrors it.
     public static float sin(final double i) {
+        // MODIFIED for porting: was VFP movement.constants MixinMth#changeSinScaling (@Inject HEAD cancellable)
+        // Targets <=1.21.9 indexed the table with float math (10430.378F) instead of 26.2's double scale, which
+        // shifts every trig-derived movement and look vector by one table entry near the bucket boundaries.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)) {
+            final float index = (float)i; // Convert back as float; the game still passes the same types
+            return vfpSinFromTableIndex((int)(index * 10430.378F) & 65535);
+        }
+
         return net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.sin(i);
     }
 
     public static float cos(final double i) {
+        // MODIFIED for porting: was VFP movement.constants MixinMth#changeCosScaling (@Inject HEAD cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_9)) {
+            final float index = (float)i;
+            return vfpSinFromTableIndex((int)(index * 10430.378F + 16384.0F) & 65535);
+        }
+
         return net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.cos(i);
+    }
+
+    // MODIFIED for porting: was VFP movement.constants MixinMth#changeSinScaling / #changeCosScaling read SIN[index]
+    // directly. That is not possible here: lithium releases Mth.SIN once CompactSineLUT has copied it and keeps its
+    // own lookup(int) private, so the LUT is re-entered through its public sin(double) with the midpoint of the
+    // double-scaled bucket that maps back to exactly this index (verified for every index in [0, 65535]).
+    private static float vfpSinFromTableIndex(final int index) {
+        return net.caffeinemc.mods.lithium.common.util.math.CompactSineLUT.sin((index + 0.5) / SIN_SCALE);
     }
 
     public static float sqrt(final float x) {

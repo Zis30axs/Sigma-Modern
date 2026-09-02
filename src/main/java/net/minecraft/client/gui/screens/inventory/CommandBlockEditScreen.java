@@ -1,5 +1,6 @@
 package net.minecraft.client.gui.screens.inventory;
 
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundSetCommandBlockPacket;
@@ -36,6 +37,14 @@ public class CommandBlockEditScreen extends AbstractCommandBlockEditScreen {
     protected void init() {
         super.init();
         this.enableControls(false);
+        // MODIFIED for porting: was VFP screen_changes MixinCommandBlockEditScreen#removeWidgets (@Inject init TAIL).
+        // The mode / conditional / auto controls only exist from 1.9 onwards (setting default: target <= 1.8).
+        if (DebugSettings.INSTANCE.hideModernCommandBlockScreenFeatures.isEnabled()) {
+            this.modeButton.visible = false;
+            this.conditionalButton.visible = false;
+            this.autoexecButton.visible = false;
+            this.updateGui();
+        }
     }
 
     @Override

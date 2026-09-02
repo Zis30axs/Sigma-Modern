@@ -1,6 +1,7 @@
 package net.minecraft.client.gui.components;
 
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
+import com.viaversion.viafabricplus.injection.access.core.IEditBox; // MODIFIED for porting: ViaFabricPlus
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -28,8 +29,9 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
+// MODIFIED for porting: was VFP compat/classic4j MixinEditBox (implements IEditBox)
 @OnlyIn(Dist.CLIENT)
-public class EditBox extends AbstractWidget {
+public class EditBox extends AbstractWidget implements IEditBox {
     private static final WidgetSprites SPRITES = new WidgetSprites(
         Identifier.withDefaultNamespace("widget/text_field"), Identifier.withDefaultNamespace("widget/text_field_highlighted")
     );
@@ -60,6 +62,10 @@ public class EditBox extends AbstractWidget {
     private long focusedTime = Util.getMillis();
     private int textX;
     private int textY;
+    // MODIFIED for porting: was VFP compat/classic4j MixinEditBox#viaFabricPlus$forbiddenCharactersUnlocked (@Unique).
+    // ClassiCube allows characters in names/passwords which vanilla's chat filter rejects, so the ClassiCube login
+    // screen unlocks its two boxes. Version-independent - there is no ProtocolTranslator gate upstream either.
+    private boolean vfpForbiddenCharactersUnlocked = false;
 
     public EditBox(final Font font, final Component narration) {
         this(font, 150, 20, narration);
@@ -136,7 +142,9 @@ public class EditBox extends AbstractWidget {
         int end = Math.max(this.cursorPos, this.highlightPos);
         int maxInsertionLength = this.maxLength - this.value.length() - (start - end);
         if (maxInsertionLength > 0) {
-            String text = StringUtil.filterText(input);
+            // MODIFIED for porting: was VFP compat/classic4j MixinEditBox#allowForbiddenCharacters
+            // (@Redirect on StringUtil#filterText)
+            String text = this.vfpForbiddenCharactersUnlocked ? input : StringUtil.filterText(input);
             int insertionLength = text.length();
             if (maxInsertionLength < insertionLength) {
                 if (Character.isHighSurrogate(text.charAt(maxInsertionLength - 1))) {
@@ -354,7 +362,9 @@ public class EditBox extends AbstractWidget {
             return false;
         }
 
-        if (event.isAllowedChatCharacter()) {
+        // MODIFIED for porting: was VFP compat/classic4j MixinEditBox#allowForbiddenCharacters
+        // (@Redirect on CharacterEvent#isAllowedChatCharacter)
+        if (this.vfpForbiddenCharactersUnlocked || event.isAllowedChatCharacter()) {
             if (this.isEditable) {
                 this.insertText(event.codepointAsString());
             }
@@ -628,6 +638,13 @@ public class EditBox extends AbstractWidget {
     public void setHint(final Component hint) {
         boolean hasNoStyle = hint.getStyle().equals(Style.EMPTY);
         this.hint = hasNoStyle ? hint.copy().withStyle(DEFAULT_HINT_STYLE) : hint;
+    }
+
+    // MODIFIED for porting: was VFP compat/classic4j MixinEditBox#viaFabricPlus$unlockForbiddenCharacters
+    // (accessor interface method). Called by the ClassiCube login screen for its name and password fields.
+    @Override
+    public void viaFabricPlus$unlockForbiddenCharacters() {
+        this.vfpForbiddenCharactersUnlocked = true;
     }
 
     @FunctionalInterface

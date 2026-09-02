@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -36,6 +38,10 @@ public class BrewingStandBlock extends BaseEntityBlock {
         BlockStateProperties.HAS_BOTTLE_0, BlockStateProperties.HAS_BOTTLE_1, BlockStateProperties.HAS_BOTTLE_2
     };
     private static final VoxelShape SHAPE = Shapes.or(Block.column(2.0, 2.0, 14.0), Block.column(14.0, 0.0, 2.0));
+    // MODIFIED for porting: was VFP block/shape MixinBrewingStandBlock#viaFabricPlus$shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpShapeR1_12_2 = Shapes.or(
+        Block.box(0.0, 0.0, 0.0, 16.0, 2.0, 16.0) /* Base */, Block.box(7.0, 0.0, 7.0, 9.0, 14.0, 9.0) /* Stick */
+    );
 
     @Override
     public MapCodec<BrewingStandBlock> codec() {
@@ -59,6 +65,13 @@ public class BrewingStandBlock extends BaseEntityBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinBrewingStandBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 drew the brewing stand as a 2px base plus a 2x2 stick, and since collision falls back to getShape
+        // this changes the stand's hitbox as well.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return vfpShapeR1_12_2;
+        }
+
         return SHAPE;
     }
 

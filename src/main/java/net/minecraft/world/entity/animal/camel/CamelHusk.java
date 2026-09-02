@@ -1,5 +1,7 @@
 package net.minecraft.world.entity.animal.camel;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
@@ -74,6 +76,12 @@ public class CamelHusk extends Camel {
 
     @Override
     public boolean canBeABaby() {
+        // MODIFIED for porting: was VFP entity.dimensions MixinCamelHusk#babyVariant (@Inject HEAD cancellable)
+        // Targets <=1.21.11 never had the adult-only camel husk, so baby variants must be allowed there.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return true;
+        }
+
         return false;
     }
 

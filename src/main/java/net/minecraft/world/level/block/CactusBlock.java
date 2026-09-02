@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -20,6 +22,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CactusBlock extends Block {
@@ -32,6 +35,8 @@ public class CactusBlock extends Block {
     private static final int ATTEMPT_GROW_CACTUS_FLOWER_AGE = 8;
     private static final double ATTEMPT_GROW_CACTUS_FLOWER_SMALL_CACTUS_CHANCE = 0.1;
     private static final double ATTEMPT_GROW_CACTUS_FLOWER_TALL_CACTUS_CHANCE = 0.25;
+    // MODIFIED for porting: was VFP bedrock/block MixinCactusBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0.0625, 0, 0.0625, 0.9375, 1, 0.9375);
 
     @Override
     public MapCodec<CactusBlock> codec() {
@@ -83,6 +88,13 @@ public class CactusBlock extends Block {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinCactusBlock#changeCollisionShape
+        // (@Inject RETURN, cancellable)
+        // Bedrock cactus collision is a full-height 14/16 box; the outline shape is deliberately left alone.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE_COLLISION;
     }
 

@@ -1,5 +1,10 @@
 package net.minecraft.world.inventory;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Container;
@@ -94,6 +99,13 @@ public class MerchantMenu extends AbstractContainerMenu {
 
     @Override
     public boolean canTakeItemForPickAll(final ItemStack carried, final Slot target) {
+        // MODIFIED for porting: was VFP interaction.container_clicking MixinMerchantMenu#modifyCanInsertIntoSlot
+        // (@Inject HEAD cancellable). Targets <=1.13.2 need this true so the emulated autofill below can gather
+        // matching stacks with PICKUP_ALL.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            return true;
+        }
+
         return false;
     }
 
@@ -170,6 +182,14 @@ public class MerchantMenu extends AbstractContainerMenu {
     }
 
     public void tryMoveItems(final int newTradeIndex) {
+        // MODIFIED for porting: was VFP interaction.container_clicking MixinMerchantMenu#onSwitchTo
+        // (@Inject HEAD cancellable). Pre-1.14 servers have no trade-switch packet, so on targets <=1.13.2 vanilla is
+        // cancelled entirely and the moves are emulated with real container clicks instead.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            this.vfpSwitchTo(newTradeIndex);
+            return;
+        }
+
         if (newTradeIndex >= 0 && this.getOffers().size() > newTradeIndex) {
             ItemStack oldCostA = this.tradeContainer.getItem(0);
             if (!oldCostA.isEmpty()) {
@@ -213,6 +233,71 @@ public class MerchantMenu extends AbstractContainerMenu {
                     }
                 }
             }
+        }
+    }
+
+    // MODIFIED for porting: was VFP interaction.container_clicking MixinMerchantMenu#onSwitchTo (@Inject body).
+    // Drives real MultiPlayerGameMode container inputs: quick-move both trade slots out, then refill them from the
+    // inventory, bailing out whenever a click did not actually move anything.
+    private void vfpSwitchTo(final int newTradeIndex) {
+        if (newTradeIndex >= this.getOffers().size()) {
+            return;
+        }
+
+        final MultiPlayerGameMode interactionManager = Minecraft.getInstance().gameMode;
+        final LocalPlayer player = Minecraft.getInstance().player;
+
+        // move 1st input slot to inventory
+        if (!this.tradeContainer.getItem(0).isEmpty()) {
+            final int count = this.tradeContainer.getItem(0).getCount();
+            interactionManager.handleContainerInput(this.containerId, 0, 0, ContainerInput.QUICK_MOVE, player);
+            if (count == this.tradeContainer.getItem(0).getCount()) {
+                return;
+            }
+        }
+
+        // move 2nd input slot to inventory
+        if (!this.tradeContainer.getItem(1).isEmpty()) {
+            final int count = this.tradeContainer.getItem(1).getCount();
+            interactionManager.handleContainerInput(this.containerId, 1, 0, ContainerInput.QUICK_MOVE, player);
+            if (count == this.tradeContainer.getItem(1).getCount()) {
+                return;
+            }
+        }
+
+        // refill the slots
+        if (this.tradeContainer.getItem(0).isEmpty() && this.tradeContainer.getItem(1).isEmpty()) {
+            final MerchantOffer tradeOffer = this.getOffers().get(newTradeIndex);
+            this.vfpAutofill(interactionManager, player, 0, tradeOffer.getItemCostA());
+            tradeOffer.getItemCostB().ifPresent(item -> this.vfpAutofill(interactionManager, player, 1, item));
+        }
+    }
+
+    // MODIFIED for porting: was VFP interaction.container_clicking MixinMerchantMenu#viaFabricPlus$autofill (@Unique)
+    private void vfpAutofill(
+        final MultiPlayerGameMode interactionManager, final LocalPlayer player, final int inputSlot, final ItemCost stackNeeded
+    ) {
+        int slot;
+        for (slot = 3; slot < 39; slot++) {
+            final ItemStack itemStack = this.slots.get(slot).getItem();
+            if (!itemStack.isEmpty() && stackNeeded.test(itemStack)) {
+                final ItemStack itemStack2 = this.tradeContainer.getItem(inputSlot);
+                if (itemStack2.isEmpty() || ItemStack.isSameItemSameComponents(itemStack, itemStack2)) {
+                    break;
+                }
+            }
+        }
+
+        if (slot == 39) {
+            return;
+        }
+
+        final boolean wasHoldingItem = !player.containerMenu.getCarried().isEmpty();
+        interactionManager.handleContainerInput(this.containerId, slot, 0, ContainerInput.PICKUP, player);
+        interactionManager.handleContainerInput(this.containerId, slot, 0, ContainerInput.PICKUP_ALL, player);
+        interactionManager.handleContainerInput(this.containerId, inputSlot, 0, ContainerInput.PICKUP, player);
+        if (wasHoldingItem) {
+            interactionManager.handleContainerInput(this.containerId, slot, 0, ContainerInput.PICKUP, player);
         }
     }
 

@@ -2,6 +2,7 @@ package net.minecraft.client.multiplayer;
 
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
+import com.viaversion.viafabricplus.features.block.connections.BlockConnectionsEmulation1_12_2;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
 import com.viaversion.viafabricplus.injection.access.networking.downloading_terrain.ILevelLoadingScreen;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
@@ -1007,6 +1008,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         this.level
             .getChunkSource()
             .replaceWithPacketData(x, z, chunkData.getReadBuffer(), chunkData.getHeightmaps(), chunkData.getBlockEntitiesTagsConsumer(x, z));
+        // MODIFIED for porting: was VFP block/connections MixinClientChunkCache#updateBlockConnections
+        // (@Inject updateLevelChunk TAIL). Unconditional here: the version gate (<=1.12.2 or Bedrock, plus the
+        // experimentalBlockConnections setting) lives inside BlockConnectionsEmulation1_12_2.isApplicable().
+        BlockConnectionsEmulation1_12_2.updateChunkNeighborConnections(this.level, x, z);
     }
 
     private void enableChunkLight(final LevelChunk chunk, final int x, final int z) {
@@ -1055,6 +1060,9 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleBlockUpdate(final ClientboundBlockUpdatePacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.level.setServerVerifiedBlockState(packet.getPos(), packet.getBlockState(), 19);
+        // MODIFIED for porting: was VFP block/connections MixinClientChunkCache#updateBlockConnections
+        // (@Inject handleBlockUpdate TAIL) - re-connects the neighbours of the changed block.
+        BlockConnectionsEmulation1_12_2.updateChunkNeighborConnections(this.level, packet.getPos());
     }
 
     @Override
@@ -1182,17 +1190,23 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         } else {
             Optional<SignedMessageBody> body = packet.body().unpack(this.messageSignatureCache);
             if (body.isEmpty()) {
+                // MODIFIED for porting: was VFP removeChatPacketError (@WrapWithCondition, first un-ordinaled call
+                // site of Logger#error(String,Object) in this method) - log line only, the disconnect below is vanilla.
                 if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_2)) {
                     LOGGER.error("Message from player with ID {} referenced unrecognized signature id", packet.sender());
                 }
-                // MODIFIED for porting: was VFP removeChatPacketError (@WrapWithCondition)
                 this.connection.disconnect(INVALID_PACKET);
             } else {
                 this.messageSignatureCache.push(body.get(), packet.signature());
                 UUID senderId = packet.sender();
                 PlayerInfo sender = this.getPlayerInfo(senderId);
                 if (sender == null) {
-                    LOGGER.error("Received player chat packet for unknown player with ID: {}", senderId);
+                    // MODIFIED for porting: was VFP removeChatPacketError (@WrapWithCondition, second un-ordinaled
+                    // call site of Logger#error(String,Object) in this method). Before 1.20.2 the sender is routinely
+                    // unknown to the client, so only the log line is suppressed - the error handling below still runs.
+                    if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_20_2)) {
+                        LOGGER.error("Received player chat packet for unknown player with ID: {}", senderId);
+                    }
                     this.minecraft.gui.chatListener().handleChatMessageError(senderId, packet.signature(), packet.chatType());
                 } else {
                     RemoteChatSession chatSession = sender.getChatSession();
@@ -1687,12 +1701,18 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleBlockEvent(final ClientboundBlockEventPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.minecraft.level.blockEvent(packet.getPos(), packet.getBlock(), packet.getB0(), packet.getB1());
+        // MODIFIED for porting: was VFP block/connections MixinClientChunkCache#updateBlockConnections
+        // (@Inject handleBlockEvent TAIL).
+        BlockConnectionsEmulation1_12_2.updateChunkNeighborConnections(this.level, packet.getPos());
     }
 
     @Override
     public void handleBlockDestruction(final ClientboundBlockDestructionPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.minecraft.level.destroyBlockProgress(packet.getId(), packet.getPos(), packet.getProgress());
+        // MODIFIED for porting: was VFP block/connections MixinClientChunkCache#updateBlockConnections
+        // (@Inject handleBlockDestruction TAIL).
+        BlockConnectionsEmulation1_12_2.updateChunkNeighborConnections(this.level, packet.getPos());
     }
 
     @Override

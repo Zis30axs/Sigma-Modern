@@ -55,8 +55,11 @@ public final class ServerAddress implements com.viaversion.viafabricplus.injecti
 
         try {
             HostAndPort result = HostAndPort.fromString(input).withDefaultPort(25565);
-            ServerAddress addr = new ServerAddress(result);
-            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            ServerAddress addr = result.getHost().isEmpty() ? INVALID : new ServerAddress(result);
+            // MODIFIED for porting: was VFP srv_resolving MixinServerAddress#resolveSrv (@Inject RETURN, cancellable)
+            // <= 1.16.4 clients resolved the _minecraft._tcp SRV record themselves, so do the lookup here. Upstream skips
+            // it for INVALID, which is also what makes the `return INVALID` paths above and below equivalent to its RETURN.
+            if (!addr.equals(INVALID) && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
                 return ServerNameResolver.DEFAULT.redirectHandler.lookupRedirect(addr).orElse(addr);
             }
             return addr;

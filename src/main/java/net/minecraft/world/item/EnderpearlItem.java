@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -20,6 +22,12 @@ public class EnderpearlItem extends Item {
 
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
+        // MODIFIED for porting: was VFP item/interaction MixinEnderpearlItem#removeCreativeModeEnderPearl (@Inject
+        // HEAD, cancellable). Creative players cannot throw ender pearls on 1.8 and older.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8) && player.getAbilities().instabuild) {
+            return InteractionResult.PASS;
+        }
+
         ItemStack itemStack = player.getItemInHand(hand);
         level.playSound(
             null,

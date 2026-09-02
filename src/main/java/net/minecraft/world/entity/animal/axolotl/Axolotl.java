@@ -115,6 +115,8 @@ public class Axolotl extends Animal implements Bucketable {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.375F, 0.21F)
         .withEyeHeight(0.09375F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.1875F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinAxolotl#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.5F, 0.25F).withEyeHeight(0.2F);
     private static final int REGEN_BUFF_BASE_DURATION = 100;
 
     public Axolotl(final EntityType<? extends Axolotl> type, final Level level) {
@@ -546,7 +548,16 @@ public class Axolotl extends Animal implements Bucketable {
     @Override
     protected void usePlayerItem(final Player player, final InteractionHand hand, final ItemStack itemStack) {
         if (itemStack.is(Items.TROPICAL_FISH_BUCKET)) {
-            player.setItemInHand(hand, ItemUtils.createFilledResult(itemStack, player, new ItemStack(Items.WATER_BUCKET)));
+            // MODIFIED for porting: was VFP entity.interaction MixinAxolotl#dontExchangeStack
+            // (@Redirect ItemUtils#createFilledResult). Targets <=1.20.5 get the raw water bucket handed over
+            // instead of the 1.20.5+ filled-result exchange with its remainder handling.
+            final ItemStack newItemStack = new ItemStack(Items.WATER_BUCKET);
+            player.setItemInHand(
+                hand,
+                ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)
+                    ? newItemStack
+                    : ItemUtils.createFilledResult(itemStack, player, newItemStack)
+            );
         } else {
             super.usePlayerItem(player, hand, itemStack);
         }
@@ -574,7 +585,19 @@ public class Axolotl extends Animal implements Bucketable {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinAxolotl#changeBabyDimensions
+        // (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinAxolotl#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 sized the baby axolotl with eye height 0.2F and no PASSENGER attachment override.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     public enum AxolotlAnimationState {

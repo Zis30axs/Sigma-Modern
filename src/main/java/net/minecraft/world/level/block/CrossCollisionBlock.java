@@ -1,6 +1,8 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Function;
@@ -19,7 +21,11 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-public abstract class CrossCollisionBlock extends Block implements SimpleWaterloggedBlock {
+// MODIFIED for porting: was VFP block/shape MixinCrossCollisionBlock (ICrossCollisionBlock implementation).
+// The legacy fence and iron-bars shape tables are VoxelShape[] indexed by a 4-bit N/E/S/W connection mask, which
+// this class computes and memoises for its subclasses.
+public abstract class CrossCollisionBlock extends Block
+    implements SimpleWaterloggedBlock, com.viaversion.viafabricplus.injection.access.block.shape.ICrossCollisionBlock {
     public static final BooleanProperty NORTH = PipeBlock.NORTH;
     public static final BooleanProperty EAST = PipeBlock.EAST;
     public static final BooleanProperty SOUTH = PipeBlock.SOUTH;
@@ -32,6 +38,10 @@ public abstract class CrossCollisionBlock extends Block implements SimpleWaterlo
         .collect(Util.toMap());
     private final Function<BlockState, VoxelShape> collisionShapes;
     private final Function<BlockState, VoxelShape> shapes;
+    // MODIFIED for porting: was VFP block/shape MixinCrossCollisionBlock @Unique
+    // viaFabricPlus$SHAPE_INDEX_CACHE - per-block cache of the connection index, ungated because every legacy
+    // target version that uses the shape tables needs it.
+    private final Object2IntMap<BlockState> vfpShapeIndexCache = new Object2IntOpenHashMap<>();
 
     protected CrossCollisionBlock(
         final float postWidth,
@@ -121,5 +131,29 @@ public abstract class CrossCollisionBlock extends Block implements SimpleWaterlo
             default:
                 return super.mirror(state, mirror);
         }
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinCrossCollisionBlock#viaFabricPlus$getShapeIndex
+    // (ICrossCollisionBlock implementation) - 0..15 bitmask of the four horizontal connections, in Direction
+    // 2D data order, used to index the legacy shape tables in FenceBlock and IronBarsBlock.
+    @Override
+    public int viaFabricPlus$getShapeIndex(final BlockState state) {
+        return this.vfpShapeIndexCache.computeIfAbsent(state, _ -> {
+            int index = 0;
+            if (state.getValue(CrossCollisionBlock.NORTH)) {
+                index |= 1 << Direction.NORTH.get2DDataValue();
+            }
+            if (state.getValue(CrossCollisionBlock.EAST)) {
+                index |= 1 << Direction.EAST.get2DDataValue();
+            }
+            if (state.getValue(CrossCollisionBlock.SOUTH)) {
+                index |= 1 << Direction.SOUTH.get2DDataValue();
+            }
+            if (state.getValue(CrossCollisionBlock.WEST)) {
+                index |= 1 << Direction.WEST.get2DDataValue();
+            }
+
+            return index;
+        });
     }
 }

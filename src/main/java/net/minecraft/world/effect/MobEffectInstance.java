@@ -8,6 +8,8 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.netty.buffer.ByteBuf;
 import it.unimi.dsi.fastutil.ints.Int2IntFunction;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -79,7 +81,9 @@ public class MobEffectInstance implements Comparable<MobEffectInstance> {
     ) {
         this.effect = effect;
         this.duration = duration;
-        this.amplifier = Mth.clamp(amplifier, 0, 255);
+        // MODIFIED for porting: was VFP limitation.allow_negative_amplifier MixinMobEffectInstance#dontClampValue (@Redirect INVOKE Mth#clamp)
+        // Targets <=1.20.3 may send negative or >255 amplifiers, so the clamp has to be skipped there.
+        this.amplifier = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_3) ? amplifier : Mth.clamp(amplifier, 0, 255);
         this.ambient = ambient;
         this.visible = visible;
         this.showIcon = showIcon;

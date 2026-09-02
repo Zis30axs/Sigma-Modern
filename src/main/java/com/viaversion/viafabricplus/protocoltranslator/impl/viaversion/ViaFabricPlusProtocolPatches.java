@@ -28,11 +28,14 @@ import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.viaversion.viafabricplus.util.NotificationUtil;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.minecraft.GameMode;
+import com.viaversion.viaversion.api.protocol.Protocol;
 import com.viaversion.viaversion.api.protocol.ProtocolManager;
 import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
 import com.viaversion.viaversion.api.protocol.packet.State;
+import com.viaversion.viaversion.api.protocol.remapper.PacketHandler;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.exception.InformativeException;
 import com.viaversion.viaversion.api.minecraft.BlockChangeRecord;
 import com.viaversion.viaversion.api.minecraft.BlockChangeRecord1_16_2;
 import com.viaversion.viaversion.protocols.v1_10to1_11.Protocol1_10To1_11;
@@ -42,6 +45,9 @@ import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.packet.ClientboundPac
 import com.viaversion.viaversion.protocols.v1_16_4to1_17.Protocol1_16_4To1_17;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import com.viaversion.viaversion.protocols.v1_19_3to1_19_4.packet.ServerboundPackets1_19_4;
 import com.viaversion.viaversion.protocols.v1_20_2to1_20_3.packet.ServerboundPackets1_20_3;
 import com.viaversion.viaversion.protocols.v1_20_3to1_20_5.Protocol1_20_3To1_20_5;
@@ -64,8 +70,16 @@ import com.viaversion.viaversion.protocols.v1_21to1_21_2.packet.ServerboundPacke
 /**
  * MODIFIED for porting: replaces the ViaFabricPlus mixins whose {@code @Mixin} target is a ViaVersion
  * class instead of a Minecraft class. Sigma-Modern has no Mixin runtime and cannot edit the ViaVersion
- * jar, so the equivalent behaviour is installed through ViaVersion's own public protocol API right after
- * {@code ProtocolManager#registerProtocols} has run (see {@link ViaFabricPlusPlatformLoader#load()}).
+ * jar, so the equivalent behaviour is installed through ViaVersion's own public protocol API.
+ *
+ * <p>Timing matters. {@code ProtocolManager#registerProtocols} only puts the instances in a map - the work
+ * that installs each protocol's own packet handlers ({@code loadMappingData()} -> {@code initialize()} ->
+ * {@code registerPackets()}) is submitted to Via's mapping-loader pool and runs asynchronously. Patching a
+ * protocol before that finishes either throws (a {@code replace*} call finds no handler to replace), gets
+ * silently overwritten (an {@code override = true} registration is replaced by ViaVersion's own), or turns
+ * an {@code append*} into a first registration that later collides. So every protocol is joined on its
+ * mapping-loader future first, and {@link #apply()} is called after {@code ViaManagerImpl.initAndLoad}
+ * returns rather than from {@code ViaFabricPlusPlatformLoader#load()}, which runs inside that bootstrap.
  *
  * <p>Only library mixins whose behaviour is reachable through the public API live here. The remaining
  * ones are listed with their exact reason in VFP_AUDIT.md.
@@ -77,12 +91,22 @@ public final class ViaFabricPlusProtocolPatches {
 
     public static void apply() {
         final ProtocolManager protocolManager = Via.getManager().getProtocolManager();
+        awaitMappings(protocolManager,
+            Protocol1_21To1_21_2.class,
+            Protocol1_19_3To1_19_4.class,
+            Protocol1_20_3To1_20_5.class,
+            Protocol1_21_5To1_21_6.class,
+            Protocol1_20To1_20_2.class,
+            Protocol1_10To1_11.class,
+            Protocol1_16_4To1_17.class,
+            Protocol1_16_1To1_16_2.class);
 
         // was VFP features/movement/packet/MixinEntityPacketRewriter1_21_2#dontCancelIdlePacket
         // (@Redirect no-oping PacketWrapper#cancel in lambda$registerPackets$14, the
-        // MOVE_PLAYER_STATUS_ONLY handler). That handler drops the idle movement packet whenever the
-        // on-ground state did not change, which starves <= 1.21 servers of the per-tick movement packet
-        // they expect. Appending to the same handler chain undoes only that cancel.
+        // MOVE_PLAYER_STATUS_ONLY handler). That handler cancels the idle movement packet when the
+        // on-ground state is unchanged AND the horizontal-collision flag changed, which starves <= 1.21
+        // servers of the per-tick movement packet they expect. Appending to the same handler chain undoes
+        // only that one cancel - the handler contains no other.
         final Protocol1_21To1_21_2 protocol1_21To1_21_2 = protocolManager.getProtocol(Protocol1_21To1_21_2.class);
         if (protocol1_21To1_21_2 != null) {
             protocol1_21To1_21_2.appendServerbound(ServerboundPackets1_21_2.MOVE_PLAYER_STATUS_ONLY, wrapper -> wrapper.setCancelled(false));
@@ -116,10 +140,11 @@ public final class ViaFabricPlusProtocolPatches {
     // Protocol#appendClientbound semantics - so they are appended with a no-op parent, reusing the in-tree
     // bodies verbatim.
     //
-    // WorldHeightSupport#handleUpdateLight is NOT ported: it runs INSTEAD of ViaVersion's handler for
-    // classic and falls back to it otherwise, and the public Protocol interface exposes no way to read an
-    // already-registered handler. Overriding it would drop the 1.17 light handling for every non-classic
-    // target <= 1.16.4, which is worse than the classic-only lighting glitch. Recorded in VFP_AUDIT.md.
+    // WorldHeightSupport#handleUpdateLight runs INSTEAD of ViaVersion's handler for classic and falls back
+    // to it otherwise. The public Protocol interface cannot read an already-registered handler, so the
+    // fallback is supplied as a verbatim re-implementation of ViaVersion's own LIGHT_UPDATE handler
+    // (WorldPacketRewriter1_17.java:58-100) - see vfpLightUpdate1_17 below. replaceClientbound keeps the
+    // mapped type, so the packet id stays correct.
     private static void applyClassicWorldHeight(final ProtocolManager protocolManager) {
         final Protocol1_16_4To1_17 protocol1_16_4To1_17 = protocolManager.getProtocol(Protocol1_16_4To1_17.class);
         if (protocol1_16_4To1_17 != null) {
@@ -129,6 +154,7 @@ public final class ViaFabricPlusProtocolPatches {
             }));
             protocol1_16_4To1_17.appendClientbound(ClientboundPackets1_16_2.LEVEL_CHUNK, WorldHeightSupport.handleChunkData(wrapper -> {
             }));
+            protocol1_16_4To1_17.replaceClientbound(ClientboundPackets1_16_2.LIGHT_UPDATE, WorldHeightSupport.handleUpdateLight(vfpLightUpdate1_17()));
         } else {
             ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_16_4To1_17 is not registered, classic world height will be clamped");
         }
@@ -183,6 +209,43 @@ public final class ViaFabricPlusProtocolPatches {
         }
     }
 
+    // Verbatim re-implementation of ViaVersion's 1.16.2 -> 1.17 LIGHT_UPDATE handler
+    // (WorldPacketRewriter1_17.java:58-100). It is the non-classic fallback of
+    // WorldHeightSupport#handleUpdateLight, which cannot reach the registered original through public API.
+    private static PacketHandler vfpLightUpdate1_17() {
+        return wrapper -> {
+            wrapper.passthrough(Types.VAR_INT); // x
+            wrapper.passthrough(Types.VAR_INT); // y
+            wrapper.passthrough(Types.BOOLEAN); // trust edges
+
+            final int skyLightMask = wrapper.read(Types.VAR_INT);
+            final int blockLightMask = wrapper.read(Types.VAR_INT);
+            // Now all written as a representation of BitSets
+            wrapper.write(Types.LONG_ARRAY_PRIMITIVE, new long[]{skyLightMask}); // Sky light mask
+            wrapper.write(Types.LONG_ARRAY_PRIMITIVE, new long[]{blockLightMask}); // Block light mask
+            wrapper.write(Types.LONG_ARRAY_PRIMITIVE, new long[]{wrapper.read(Types.VAR_INT)}); // Empty sky light mask
+            wrapper.write(Types.LONG_ARRAY_PRIMITIVE, new long[]{wrapper.read(Types.VAR_INT)}); // Empty block light mask
+
+            vfpWriteLightArrays1_17(wrapper, skyLightMask);
+            vfpWriteLightArrays1_17(wrapper, blockLightMask);
+        };
+    }
+
+    private static void vfpWriteLightArrays1_17(final PacketWrapper wrapper, final int bitMask) throws InformativeException {
+        final List<byte[]> light = new ArrayList<>();
+        for (int i = 0; i < 18; i++) {
+            if ((bitMask & 1 << i) != 0) {
+                light.add(wrapper.read(Types.BYTE_ARRAY_PRIMITIVE));
+            }
+        }
+
+        // Now needs the length of the bytearray-array
+        wrapper.write(Types.VAR_INT, light.size());
+        for (final byte[] bytes : light) {
+            wrapper.write(Types.BYTE_ARRAY_PRIMITIVE, bytes);
+        }
+    }
+
     // was VFP features/limitation/max_chat_length/MixinProtocol1_10To1_11#changeMaxChatLength
     // (@ModifyConstant replacing the hardcoded 100 in the anonymous Protocol1_10To1_11$6 CHAT handler with
     // MaxChatLength.getChatLength()). Re-registering that serverbound handler is public API and reproduces
@@ -195,13 +258,32 @@ public final class ViaFabricPlusProtocolPatches {
             return;
         }
 
-        protocol.registerServerbound(ServerboundPackets1_9_3.CHAT, wrapper -> {
+        protocol.registerServerbound(ServerboundPackets1_9_3.CHAT, ServerboundPackets1_9_3.CHAT, wrapper -> {
             final String message = wrapper.passthrough(Types.STRING);
             final int limit = MaxChatLength.getChatLength();
             if (message.length() > limit) {
                 wrapper.set(Types.STRING, 0, message.substring(0, limit).trim());
             }
         }, true);
+    }
+
+    // Blocks until each protocol's registerPackets() has run, so the patches below cannot race it.
+    // getMappingLoaderFuture returns null once the mappings are loaded, which is the "already done" case.
+    // This never deadlocks: apply() runs on Util.backgroundExecutor(), not on a Via-Mappingloader thread.
+    @SafeVarargs
+    private static void awaitMappings(final ProtocolManager protocolManager, final Class<? extends Protocol>... protocols) {
+        for (final Class<? extends Protocol> protocol : protocols) {
+            final CompletableFuture<Void> future = protocolManager.getMappingLoaderFuture(protocol);
+            if (future == null) {
+                continue;
+            }
+
+            try {
+                future.join();
+            } catch (final CompletionException | CancellationException e) {
+                ViaFabricPlusImpl.INSTANCE.getLogger().error("Failed to load mappings for {}, its ViaFabricPlus patches may not apply", protocol.getSimpleName(), e);
+            }
+        }
     }
 
     // was VFP features/networking/remove_signed_commands/MixinProtocol1_20_3To1_20_5#removeCommandHandlers

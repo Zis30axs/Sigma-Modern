@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
@@ -55,6 +57,14 @@ public abstract class LeavesBlock extends Block implements SimpleWaterloggedBloc
 
     @Override
     protected VoxelShape getBlockSupportShape(final BlockState state, final BlockGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was VFP block/shape MixinLeavesBlock#changeSidesShape (@Inject HEAD, cancellable)
+        // 1.14 through 1.15.2 inclusive - note the between gate, not an olderThanOrEqualTo - let leaves support
+        // blocks and entities, so the default full-block support shape has to come back. The hook sits on the abstract
+        // base class so every leaf subtype inherits it.
+        if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_14, ProtocolVersion.v1_15_2)) {
+            return super.getBlockSupportShape(state, level, pos);
+        }
+
         return Shapes.empty();
     }
 

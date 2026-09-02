@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.google.common.collect.Maps;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -87,6 +89,14 @@ public class FlowerPotBlock extends Block {
         final BlockState state, final Level level, final BlockPos pos, final Player player, final BlockHitResult hitResult
     ) {
         if (this.isEmpty()) {
+            return InteractionResult.CONSUME;
+        }
+
+        // MODIFIED for porting: was VFP block/interaction MixinFlowerPotBlock#alwaysConsume (@Inject on the ordinal-0
+        // GETFIELD of potted in useWithoutItem, cancellable)
+        // <= 1.10 has no empty-hand retrieval of a potted plant, so the click is merely consumed. The isEmpty() guard
+        // above already establishes upstream's second condition, potted != Blocks.AIR.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_10)) {
             return InteractionResult.CONSUME;
         }
 

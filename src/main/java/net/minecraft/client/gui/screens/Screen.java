@@ -3,6 +3,8 @@ package net.minecraft.client.gui.screens;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.mojang.logging.LogUtils;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -320,6 +322,17 @@ public abstract class Screen extends AbstractContainerEventHandler implements Re
     }
 
     protected static void clickCommandAction(final LocalPlayer player, final String command, final @Nullable Screen screenAfterCommand) {
+        // MODIFIED for porting: was VFP run_command_action MixinScreen#changeCommandHandling (@Inject HEAD, cancellable)
+        // <= 1.21.4 has no unattended-command packet, and a run_command value without a leading '/' is not a command
+        // there: <= 1.19 sent it as plain chat, 1.19.1 - 1.21.4 dropped it. Newer targets keep the vanilla behaviour.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4) && !command.startsWith("/")) {
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_19)) {
+                player.connection.sendChat(command);
+            }
+
+            return;
+        }
+
         player.connection.sendUnattendedCommand(Commands.trimOptionalPrefix(command), screenAfterCommand);
     }
 

@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -75,7 +77,14 @@ public class BucketItem extends Item implements DispensibleContainerItem {
                             player.awardStat(Stats.ITEM_USED.get(this));
                             bucketPickupBlock.getPickupSound().ifPresent(soundEvent -> player.playSound(soundEvent, 1.0F, 1.0F));
                             level.gameEvent(player, GameEvent.FLUID_PICKUP, pos);
-                            ItemStack result = ItemUtils.createFilledResult(itemStack, player, taken);
+                            // MODIFIED for porting: was VFP item/interaction MixinBucketItem#dontExchangeStack
+                            // (@Redirect on the ordinal-1 ItemUtils#createFilledResult call). <= 1.20.5 servers do the
+                            // empty-bucket -> filled-bucket swap themselves, so the client must not consume or replace
+                            // the held bucket and just hands back the freshly filled stack. The ordinal-0 call in the
+                            // empty-bucket path above is left alone.
+                            ItemStack result = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)
+                                ? taken
+                                : ItemUtils.createFilledResult(itemStack, player, taken);
                             if (!level.isClientSide()) {
                                 CriteriaTriggers.FILLED_BUCKET.trigger((ServerPlayer)player, taken);
                             }

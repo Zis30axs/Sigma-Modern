@@ -1,5 +1,7 @@
 package net.minecraft.world.entity.animal.equine;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -32,12 +34,18 @@ public abstract class AbstractChestedHorse extends AbstractHorse {
     private static final EntityDataAccessor<Boolean> DATA_ID_CHEST = SynchedEntityData.defineId(AbstractChestedHorse.class, EntityDataSerializers.BOOLEAN);
     private static final boolean DEFAULT_HAS_CHEST = false;
     private final EntityDimensions babyDimensions;
+    // MODIFIED for porting: was VFP entity.dimensions MixinAbstractChestedHorse#viaFabricPlus$baby_dimensions_r1_21_11
+    // (@Unique field) populated by #initializeDimensions (@Inject <init> RETURN)
+    private final EntityDimensions vfpBabyDimensionsR1_21_11;
 
     protected AbstractChestedHorse(final EntityType<? extends AbstractChestedHorse> type, final Level level) {
         super(type, level);
         this.canGallop = false;
         this.babyDimensions = type.getDimensions()
             .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, type.getHeight() + 0.03125F, -0.3125F))
+            .scale(0.5F);
+        this.vfpBabyDimensionsR1_21_11 = type.getDimensions()
+            .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, type.getHeight() - 0.15625F, 0.0F))
             .scale(0.5F);
     }
 
@@ -66,7 +74,19 @@ public abstract class AbstractChestedHorse extends AbstractHorse {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? this.babyDimensions : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinAbstractChestedHorse#changeBabyDimensions
+        // (@Redirect GETFIELD babyDimensions)
+        return this.isBaby() ? this.vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinAbstractChestedHorse#changeBabyDimensions (@Redirect body)
+    // Targets <=1.21.11 attached the passenger at type height - 0.15625F with no z offset.
+    private EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return this.vfpBabyDimensionsR1_21_11;
+        } else {
+            return this.babyDimensions;
+        }
     }
 
     @Override

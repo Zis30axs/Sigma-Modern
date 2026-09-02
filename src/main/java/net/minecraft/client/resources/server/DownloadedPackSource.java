@@ -1,5 +1,8 @@
 package net.minecraft.client.resources.server;
 
+import com.viaversion.viafabricplus.features.networking.resource_pack_header.ResourcePackHeaderDiff;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.google.common.collect.Lists;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
@@ -13,6 +16,7 @@ import java.net.Proxy;
 import java.net.URL;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -170,9 +174,20 @@ public class DownloadedPackSource implements AutoCloseable {
             private static final HashFunction CACHE_HASHING_FUNCTION = Hashing.sha1();
 
             private Map<String, String> createDownloadHeaders() {
-                WorldVersion version = SharedConstants.getCurrentVersion();
+                // MODIFIED for porting: was VFP networking/resource_pack_header MixinDownloadedPackSource_4#editHeaders
+                // (@Redirect on SharedConstants.getCurrentVersion) - the pack download request has to advertise the
+                // target version. ResourcePackHeaderDiff falls back to the current version for unknown targets, so
+                // this applies to every target version.
+                WorldVersion version = ResourcePackHeaderDiff.get(ProtocolTranslator.getTargetVersion());
                 User currentUser = DownloadedPackSource.this.minecraft.getUser();
-                return Map.of(
+                // MODIFIED for porting: was VFP networking/resource_pack_header
+                // MixinDownloadedPackSource_4#editHeaders(Object) (@Redirect on String.valueOf(Object)) - <= 1.21.7
+                // only ever saw a single pack format number, without PackFormat's own "major.minor" rendering.
+                final PackFormat packVersion = version.packVersion(PackType.CLIENT_RESOURCES);
+                final String packFormat = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_7)
+                    ? String.valueOf(packVersion.major())
+                    : String.valueOf(packVersion);
+                final Map<String, String> headers = Map.of(
                     "X-Minecraft-Username",
                     currentUser.getName(),
                     "X-Minecraft-UUID",
@@ -182,10 +197,23 @@ public class DownloadedPackSource implements AutoCloseable {
                     "X-Minecraft-Version-ID",
                     version.id(),
                     "X-Minecraft-Pack-Format",
-                    String.valueOf(version.packVersion(PackType.CLIENT_RESOURCES)),
+                    packFormat,
                     "User-Agent",
                     "Minecraft Java/" + version.name()
                 );
+                // MODIFIED for porting: was VFP networking/resource_pack_header MixinDownloadedPackSource_4#removeHeaders
+                // (@Inject TAIL, cancellable) - <= 1.14.3 sent no version id header, and <= 1.12.2 sent neither pack
+                // format nor user agent. Map.of above is immutable, hence the copy.
+                final LinkedHashMap<String, String> modifiableMap = new LinkedHashMap<>(headers);
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_3)) {
+                    modifiableMap.remove("X-Minecraft-Version-ID");
+                    if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+                        modifiableMap.remove("X-Minecraft-Pack-Format");
+                        modifiableMap.remove("User-Agent");
+                    }
+                }
+
+                return modifiableMap;
             }
 
             @Override

@@ -89,6 +89,7 @@ import com.viaversion.viaversion.api.type.Types;
 import com.viaversion.viaversion.protocols.v1_11_1to1_12.Protocol1_11_1To1_12;
 import com.viaversion.viaversion.protocols.v1_9_1to1_9_3.packet.ServerboundPackets1_9_3;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.client.gui.components.DebugScreenOverlay;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.debug.DebugScreenEntries;
@@ -221,6 +222,7 @@ import net.minecraft.util.FileUtil;
 import net.minecraft.util.FileZipper;
 import net.minecraft.util.MemoryReserve;
 import net.minecraft.util.ModCheck;
+import net.minecraft.util.Mth;
 import net.minecraft.util.NativeModuleLister;
 import net.minecraft.util.TimeUtil;
 import net.minecraft.util.Unit;
@@ -260,6 +262,7 @@ import net.minecraft.world.level.validation.DirectoryValidator;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import org.apache.commons.io.FileUtils;
@@ -1769,7 +1772,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             this.missTime = 0;
         }
 
-        if (this.missTime <= 0 && !this.player.isUsingItem()) {
+        // MODIFIED for porting: was VFP interaction/replace_block_item_use_logic MixinMinecraft
+        // #allowBlockBreakAndItemUsageAtTheSameTime (@ModifyExpressionValue on the LocalPlayer#isUsingItem
+        // call in this condition). <= 1.7.6 kept breaking the block while an item was being used, so the read
+        // is forced to false there.
+        if (this.missTime <= 0 && !(this.player.isUsingItem() && ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_7_6))) {
             ItemStack heldItem = this.player.getItemInHand(InteractionHand.MAIN_HAND);
             if (!heldItem.has(DataComponents.PIERCING_WEAPON)) {
                 if (down && this.hitResult != null && this.hitResult.getType() == HitResult.Type.BLOCK) {
@@ -1869,7 +1876,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                             break;
                         }
                     case MISS:
-                        if (this.gameMode.hasMissTime()) {
+                        // MODIFIED for porting: was VFP interaction/cooldown MixinMinecraft#removeHitPenalty
+                        // (@WrapOperation on MultiPlayerGameMode#hasMissTime ordinal 1). In <= 1.7 this code
+                        // sat in the BLOCK case and so never ran, which means no 10-tick miss penalty there.
+                        // The ordinal 0 call in the null-hitResult branch above deliberately stays unwrapped.
+                        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_7_6) && this.gameMode.hasMissTime()) {
                             this.missTime = 10;
                         }
 
@@ -1902,7 +1913,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             return;
         }
 
-        if (!this.gameMode.isDestroying()) {
+        // MODIFIED for porting: was VFP interaction/replace_block_item_use_logic MixinMinecraft
+        // #allowItemUsageAndBlockBreakAtTheSameTime (@ModifyExpressionValue on the MultiPlayerGameMode
+        // #isDestroying call in this condition). <= 1.7.6 allowed item use while mining, so the read is forced
+        // to false there.
+        if (!(this.gameMode.isDestroying() && ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_7_6))) {
             this.rightClickDelay = 4;
             if (!this.player.isHandsBusy()) {
                 if (this.hitResult == null) {
@@ -2024,9 +2039,21 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
             if (this.gui.screen() == null) {
                 profiler.popPush("Keybindings");
+                // MODIFIED for porting: was VFP interaction/cooldown MixinMinecraft#moveCooldownIncrement
+                // (@Inject at the handleKeybinds INVOKE). <= 1.8 decremented the click cooldown before input
+                // handling instead of after it, which is what restores the 1.8 click cadence.
+                final boolean vfp$moveCooldown = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8);
+                if (vfp$moveCooldown && this.missTime > 0) {
+                    --this.missTime;
+                }
+
                 this.handleKeybinds();
                 if (this.missTime > 0) {
-                    this.missTime--;
+                    // MODIFIED for porting: was VFP interaction/cooldown MixinMinecraft#moveCooldownIncrement
+                    // (@Redirect on the missTime GETFIELD ordinal 1, i.e. the read inside this decrement; the
+                    // ordinal 0 read is the test above and stays untouched). Upstream feeds 0 into that read
+                    // for <= 1.8, so the store lands on -1 and the post-keybind decrement is neutralised.
+                    this.missTime = (vfp$moveCooldown ? 0 : this.missTime) - 1;
                 }
             }
         }
@@ -3336,11 +3363,43 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         if (cameraEntity != null) {
             if (this.level != null && this.player != null) {
                 Profiler.get().push("pick");
-                this.hitResult = this.player.raycastHitResult(partialTicks, cameraEntity);
+                // MODIFIED for porting: was VFP bedrock/reach_around_raycast MixinMinecraft
+                // #bedrockReachAroundRaycast (@ModifyExpressionValue on the LocalPlayer#raycastHitResult call).
+                // The wrapped value has to feed crosshairPickEntity below as well, hence the wrap here.
+                this.hitResult = this.vfpBedrockReachAroundRaycast(this.player.raycastHitResult(partialTicks, cameraEntity), cameraEntity);
                 this.crosshairPickEntity = this.hitResult instanceof EntityHitResult entityHitResult ? entityHitResult.getEntity() : null;
                 Profiler.get().pop();
             }
         }
+    }
+
+    // MODIFIED for porting: was VFP bedrock/reach_around_raycast MixinMinecraft#bedrockReachAroundRaycast
+    // (@ModifyExpressionValue body). Bedrock lets you interact with the block you are standing on when looking
+    // down steeply, so a MISS is turned into a hit on the block under the camera entity's feet.
+    private HitResult vfpBedrockReachAroundRaycast(final HitResult hitResult, final Entity cameraEntity) {
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            if (hitResult.getType() != HitResult.Type.MISS) {
+                return hitResult;
+            }
+
+            if (!this.vfpCanReachAround(cameraEntity)) {
+                return hitResult;
+            }
+
+            final int x = Mth.floor(cameraEntity.getX());
+            final int y = Mth.floor(cameraEntity.getY() - 0.2F);
+            final int z = Mth.floor(cameraEntity.getZ());
+            final BlockPos floorPos = new BlockPos(x, y, z);
+            return new BlockHitResult(Vec3.atCenterOf(floorPos), cameraEntity.getDirection(), floorPos, false);
+        }
+
+        return hitResult;
+    }
+
+    // MODIFIED for porting: was VFP bedrock/reach_around_raycast MixinMinecraft#viaFabricPlus$canReachAround
+    // (@Unique helper).
+    private boolean vfpCanReachAround(final Entity entity) {
+        return entity.onGround() && entity.getVehicle() == null && entity.getXRot() >= 45;
     }
 
     public void showDebugChat(final Component message) {

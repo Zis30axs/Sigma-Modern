@@ -116,6 +116,8 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
     private static final int DEFAULT_RESTOCKS_TODAY = 0;
     private static final boolean DEFAULT_ASSIGN_PROFESSION_WHEN_SPAWNED = false;
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F).withEyeHeight(0.63F);
+    // MODIFIED for porting: was VFP entity.dimensions MixinVillager#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F).withEyeHeight(0.63F);
     private int updateMerchantTimer;
     private boolean increaseProfessionLevelOnUpdate;
     private @Nullable Player lastTradedPlayer;
@@ -358,7 +360,20 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
+        // MODIFIED for porting: was VFP entity.dimensions MixinVillager#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) // MODIFIED for porting
+            ? vfpChangeBabyDimensions()
+            : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinVillager#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 gave the baby villager a 0.99F tall box instead of the 26.2 value 0.98F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     @Override

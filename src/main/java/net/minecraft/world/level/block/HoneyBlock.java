@@ -1,6 +1,9 @@
 package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
@@ -20,6 +23,7 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class HoneyBlock extends HalfTransparentBlock {
@@ -29,6 +33,8 @@ public class HoneyBlock extends HalfTransparentBlock {
     private static final double THROTTLE_SLIDE_SPEED_TO = 0.05;
     private static final int SLIDE_ADVANCEMENT_CHECK_INTERVAL = 20;
     private static final VoxelShape SHAPE = Block.column(14.0, 0.0, 15.0);
+    // MODIFIED for porting: was VFP bedrock/block MixinHoneyBlock#viaFabricPlus$shape_bedrock (@Unique constant)
+    private static final VoxelShape vfpShapeBedrock = Shapes.box(0.0625, 0, 0.0625, 0.9375, 1, 0.9375);
 
     @Override
     public MapCodec<HoneyBlock> codec() {
@@ -45,6 +51,12 @@ public class HoneyBlock extends HalfTransparentBlock {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP bedrock/block MixinHoneyBlock#changeCollisionShape (@Inject RETURN cancellable)
+        // Bedrock honey blocks are inset 1/16 on X/Z but keep the full block height, unlike the shortened vanilla shape.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return vfpShapeBedrock;
+        }
+
         return SHAPE;
     }
 
@@ -69,6 +81,18 @@ public class HoneyBlock extends HalfTransparentBlock {
         final InsideBlockEffectApplier effectApplier,
         final boolean isPrecise
     ) {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#applyBedrockHoneyCollision (@Inject HEAD cancellable)
+        // Bedrock replaces the whole vanilla handling: slide effects only, no advancement, no doSlideMovement and no super call.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            if (this.isSlidingDown(pos, entity)) {
+                this.maybeDoSlideEffects(level, entity);
+            }
+
+            final Vec3 velocity = entity.getDeltaMovement();
+            entity.setDeltaMovement(new Vec3(velocity.x * 0.4F, Math.max(-0.12F, velocity.y), velocity.z * 0.4F));
+            return;
+        }
+
         if (this.isSlidingDown(pos, entity)) {
             this.maybeDoSlideAchievement(entity, pos);
             this.doSlideMovement(entity);
@@ -78,11 +102,56 @@ public class HoneyBlock extends HalfTransparentBlock {
         super.entityInside(state, level, pos, entity, effectApplier, isPrecise);
     }
 
+    @Override
+    public void stepOn(final Level level, final BlockPos pos, final BlockState onState, final Entity entity) {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#stepOn (mixin @Override of Block#stepOn)
+        // Bedrock damps horizontal movement when stepping onto honey; vanilla does nothing here.
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            final double absoluteY = Math.abs(entity.getDeltaMovement().y);
+            if (absoluteY < 0.1 && !entity.isSteppingCarefully()) {
+                final double frictionFactor = 0.4 + absoluteY * 0.2;
+                entity.setDeltaMovement(entity.getDeltaMovement().multiply(frictionFactor, 1.0F, frictionFactor));
+            }
+        } else {
+            super.stepOn(level, pos, onState, entity);
+        }
+    }
+
+    @Override
+    public float getFriction() {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#getFriction (mixin @Override of Block#getFriction)
+        return ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) ? 0.8F : super.getFriction();
+    }
+
+    @Override
+    public float getSpeedFactor() {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#getSpeedFactor (mixin @Override of Block#getSpeedFactor)
+        return ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) ? 1F : super.getSpeedFactor();
+    }
+
+    @Override
+    public float getJumpFactor() {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#getJumpFactor (mixin @Override of Block#getJumpFactor)
+        return ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) ? 0.6F : super.getJumpFactor();
+    }
+
     private static double getOldDeltaY(final double deltaY) {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#simplifyVelocityComparisons (@Inject HEAD cancellable)
+        // Not Bedrock-gated: every target <=1.21 compared the raw delta-Y, without 1.21.2+'s gravity round trip.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            return deltaY;
+        }
+
         return deltaY / 0.98F + 0.08;
     }
 
     private static double getNewDeltaY(final double deltaY) {
+        // MODIFIED for porting: was VFP bedrock/movement MixinHoneyBlock#simplifyVelocityComparisons (@Inject HEAD cancellable)
+        // Same hook as getOldDeltaY: <=1.21 targets keep the raw delta-Y.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21)) {
+            return deltaY;
+        }
+
         return (deltaY - 0.08) * 0.98F;
     }
 

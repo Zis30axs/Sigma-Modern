@@ -1,6 +1,7 @@
 package net.minecraft.world.entity.animal.wolf;
 
 import java.util.Optional;
+import com.viaversion.viafabricplus.features.entity.metadata.WolfHealthTracker1_14_4;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
@@ -77,9 +78,14 @@ import net.minecraft.world.entity.monster.skeleton.AbstractSkeleton;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.variant.SpawnContext;
 import net.minecraft.world.entity.variant.VariantUtils;
+import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.DyeColor;
+import net.minecraft.world.item.DyeItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.ServerLevelAccessor;
@@ -284,7 +290,8 @@ public class Wolf extends TamableAnimal implements NeutralMob {
         if (this.isAngry()) {
             return this.getSoundSet().growlSound().value();
         } else if (this.random.nextInt(3) == 0) {
-            return this.isTame() && this.getHealth() < 20.0F ? this.getSoundSet().whineSound().value() : this.getSoundSet().pantSound().value();
+            // MODIFIED for porting: was VFP entity.metadata MixinWolf#fixWolfHealth (@Redirect Wolf#getHealth)
+            return this.isTame() && this.vfpGetHealth() < 20.0F ? this.getSoundSet().whineSound().value() : this.getSoundSet().pantSound().value();
         } else {
             return this.getSoundSet().ambientSound().value();
         }
@@ -454,8 +461,56 @@ public class Wolf extends TamableAnimal implements NeutralMob {
     @Override
     public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
+        // MODIFIED for porting: was VFP entity.interaction MixinWolf#fixWolfInteract (@Inject HEAD cancellable)
+        // Targets <=1.14.4 replace the whole interaction with the 1.14.4 one (feeding heals by the food's nutrition
+        // and dyeing needs no collar-dye tag), while 1.14.4 < target <= 1.21.5 needs the body-armour shearing that
+        // Entity#interact's ported removeLeashActions returns before vanilla can reach.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            final Item item = itemStack.getItem();
+            if (this.isTame()) {
+                final FoodProperties foodComponent = itemStack.get(DataComponents.FOOD);
+                if (foodComponent != null) {
+                    if (this.isFood(itemStack) && WolfHealthTracker1_14_4.getWolfHealth(this) < 20.0F) {
+                        if (!player.getAbilities().instabuild) {
+                            itemStack.shrink(1);
+                        }
+
+                        this.heal(foodComponent.nutrition());
+                        return InteractionResult.SUCCESS;
+                    }
+                } else if (item instanceof DyeItem) {
+                    final DyeColor dyeColor = itemStack.get(DataComponents.DYE);
+                    if (dyeColor != null && dyeColor != this.getCollarColor()) {
+                        this.setCollarColor(dyeColor);
+                        if (!player.getAbilities().instabuild) {
+                            itemStack.shrink(1);
+                        }
+
+                        return InteractionResult.SUCCESS;
+                    }
+                }
+            } else if (item == Items.BONE && !this.isAngry()) {
+                if (!player.getAbilities().instabuild) {
+                    itemStack.shrink(1);
+                }
+
+                return InteractionResult.SUCCESS;
+            }
+
+            return super.mobInteract(player, hand);
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_5) && this.isTame()) {
+            if (itemStack.is(Items.SHEARS)
+                && this.isOwnedBy(player)
+                && this.isWearingBodyArmor()
+                && (!EnchantmentHelper.has(this.getBodyArmorItem(), EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE) || player.isCreative())) {
+                this.playSound(SoundEvents.ARMOR_UNEQUIP_WOLF);
+                return InteractionResult.SUCCESS;
+            }
+        }
+
         if (this.isTame()) {
-            if (this.isFood(itemStack) && this.getHealth() < this.getMaxHealth()) {
+            // MODIFIED for porting: was VFP entity.metadata MixinWolf#fixWolfHealth (@Redirect Wolf#getHealth)
+            if (this.isFood(itemStack) && this.vfpGetHealth() < this.getMaxHealth()) {
                 this.feed(player, hand, itemStack, 2.0F, 2.0F);
                 return InteractionResult.SUCCESS;
             }
@@ -537,10 +592,22 @@ public class Wolf extends TamableAnimal implements NeutralMob {
             return 1.5393804F;
         } else if (this.isTame()) {
             float maxHealth = this.getMaxHealth();
-            float damageRatio = (maxHealth - this.getHealth()) / maxHealth;
+            // MODIFIED for porting: was VFP entity.metadata MixinWolf#fixWolfHealth (@Redirect Wolf#getHealth)
+            float damageRatio = (maxHealth - this.vfpGetHealth()) / maxHealth;
             return (0.55F - damageRatio * 0.4F) * (float) Math.PI;
         } else {
             return (float) (Math.PI / 5);
+        }
+    }
+
+    // MODIFIED for porting: was VFP entity.metadata MixinWolf#fixWolfHealth (@Redirect body, method = "*")
+    // Targets <=1.14.4 carried the wolf health as entity metadata rather than as an attribute, and it drives the
+    // tail angle, the whine-vs-pant ambient sound and the client-side feed check.
+    private float vfpGetHealth() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            return WolfHealthTracker1_14_4.getWolfHealth(this);
+        } else {
+            return this.getHealth();
         }
     }
 
@@ -589,7 +656,8 @@ public class Wolf extends TamableAnimal implements NeutralMob {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-                // MODIFIED for porting: was VFP entity.dimensions Mixin* (@Redirect isBaby)
+        // MODIFIED for porting: was VFP entity.dimensions MixinWolf#dontChangeScale (@Redirect isBaby)
+        // Only >26.1 targets give baby wolves BABY_DIMENSIONS; older ones take the age-scaled super box.
         return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
     }
 

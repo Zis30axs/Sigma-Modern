@@ -10,6 +10,8 @@ import it.unimi.dsi.fastutil.doubles.DoubleList;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.AxisCycle;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Util;
@@ -242,6 +244,22 @@ public final class Shapes {
     }
 
     public static double collide(final Direction.Axis axis, final AABB moving, final Iterable<VoxelShape> shapes, double distance) {
+        // MODIFIED for porting: was VFP movement.collision MixinShapes#calculateMaxOffset1_12_2 (@Inject HEAD cancellable)
+        // Targets <=1.12.2 swept every AABB of every shape with the pre-1.13 per-box clamp and had no 1.0E-7 early-out.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            for (final VoxelShape shape : shapes) {
+                for (final AABB shapeBox : shape.toAabbs()) {
+                    distance = switch (axis) {
+                        case X -> vfpIntersectX(moving, shapeBox, distance);
+                        case Y -> vfpIntersectY(moving, shapeBox, distance);
+                        case Z -> vfpIntersectZ(moving, shapeBox, distance);
+                    };
+                }
+            }
+
+            return distance;
+        }
+
         for (VoxelShape shape : shapes) {
             if (Math.abs(distance) < 1.0E-7) {
                 return 0.0;
@@ -251,6 +269,63 @@ public final class Shapes {
         }
 
         return distance;
+    }
+
+    // MODIFIED for porting: was VFP movement.collision MixinShapes#viaFabricPlus$intersectX (@Unique helper)
+    private static double vfpIntersectX(final AABB box, final AABB shapeBox, double maxDist) {
+        if (box.maxY <= shapeBox.minY || box.minY >= shapeBox.maxY || box.maxZ <= shapeBox.minZ || box.minZ >= shapeBox.maxZ) {
+            return maxDist;
+        }
+
+        double e;
+        if (maxDist > 0.0 && box.maxX <= shapeBox.minX) {
+            double d = shapeBox.minX - box.maxX;
+            if (d < maxDist) {
+                maxDist = d;
+            }
+        } else if (maxDist < 0.0 && box.minX >= shapeBox.maxX && (e = shapeBox.maxX - box.minX) > maxDist) {
+            maxDist = e;
+        }
+
+        return maxDist;
+    }
+
+    // MODIFIED for porting: was VFP movement.collision MixinShapes#viaFabricPlus$intersectY (@Unique helper)
+    private static double vfpIntersectY(final AABB playerBox, final AABB shapeBox, double maxDist) {
+        if (playerBox.maxX <= shapeBox.minX || playerBox.minX >= shapeBox.maxX || playerBox.maxZ <= shapeBox.minZ || playerBox.minZ >= shapeBox.maxZ) {
+            return maxDist;
+        }
+
+        double e;
+        if (maxDist > 0.0 && playerBox.maxY <= shapeBox.minY) {
+            double d = shapeBox.minY - playerBox.maxY;
+            if (d < maxDist) {
+                maxDist = d;
+            }
+        } else if (maxDist < 0.0 && playerBox.minY >= shapeBox.maxY && (e = shapeBox.maxY - playerBox.minY) > maxDist) {
+            maxDist = e;
+        }
+
+        return maxDist;
+    }
+
+    // MODIFIED for porting: was VFP movement.collision MixinShapes#viaFabricPlus$intersectZ (@Unique helper)
+    private static double vfpIntersectZ(final AABB playerBox, final AABB shapeBox, double maxDist) {
+        if (playerBox.maxX <= shapeBox.minX || playerBox.minX >= shapeBox.maxX || playerBox.maxY <= shapeBox.minY || playerBox.minY >= shapeBox.maxY) {
+            return maxDist;
+        }
+
+        double e;
+        if (maxDist > 0.0 && playerBox.maxZ <= shapeBox.minZ) {
+            double d = shapeBox.minZ - playerBox.maxZ;
+            if (d < maxDist) {
+                maxDist = d;
+            }
+        } else if (maxDist < 0.0 && playerBox.minZ >= shapeBox.maxZ && (e = shapeBox.maxZ - playerBox.minZ) > maxDist) {
+            maxDist = e;
+        }
+
+        return maxDist;
     }
 
     public static boolean blockOccludes(final VoxelShape shape, final VoxelShape occluder, final Direction direction) {

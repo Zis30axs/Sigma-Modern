@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block.piston;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -40,6 +42,25 @@ public class PistonHeadBlock extends DirectionalBlock {
     private static final VoxelShape SHAPE_PLATFORM = Block.boxZ(16.0, 0.0, 4.0);
     private static final Map<Direction, VoxelShape> SHAPES_SHORT = Shapes.rotateAll(Shapes.or(SHAPE_PLATFORM, Block.boxZ(4.0, 4.0, 16.0)));
     private static final Map<Direction, VoxelShape> SHAPES = Shapes.rotateAll(Shapes.or(SHAPE_PLATFORM, Block.boxZ(4.0, 4.0, 20.0)));
+    // MODIFIED for porting: was VFP block/shape MixinPistonHeadBlock#viaFabricPlus$<direction>_head_shape
+    // (@Unique constants) - the bare 4-thick head plate per facing, without the 1.13+ arm stub.
+    private static final VoxelShape vfpEastHeadShape = Block.box(12.0, 0.0, 0.0, 16.0, 16.0, 16.0);
+    private static final VoxelShape vfpWestHeadShape = Block.box(0.0, 0.0, 0.0, 4.0, 16.0, 16.0);
+    private static final VoxelShape vfpSouthHeadShape = Block.box(0.0, 0.0, 12.0, 16.0, 16.0, 16.0);
+    private static final VoxelShape vfpNorthHeadShape = Block.box(0.0, 0.0, 0.0, 16.0, 16.0, 4.0);
+    private static final VoxelShape vfpUpHeadShape = Block.box(0.0, 12.0, 0.0, 16.0, 16.0, 16.0);
+    private static final VoxelShape vfpDownHeadShape = Block.box(0.0, 0.0, 0.0, 16.0, 4.0, 16.0);
+    // MODIFIED for porting: was VFP block/shape MixinPistonHeadBlock#viaFabricPlus$<direction>_arm_shape_r1_8_x
+    // (@Unique constants) - the 1.8.x arm stubs that only ever showed up in the collision box.
+    private static final VoxelShape vfpUpArmShapeR1_8X = Block.box(6.0, 0.0, 6.0, 10.0, 12.0, 10.0);
+    private static final VoxelShape vfpDownArmShapeR1_8X = Block.box(6.0, 4.0, 6.0, 10.0, 16.0, 10.0);
+    private static final VoxelShape vfpSouthArmShapeR1_8X = Block.box(4.0, 6.0, 0.0, 12.0, 10.0, 12.0);
+    private static final VoxelShape vfpNorthArmShapeR1_8X = Block.box(4.0, 6.0, 4.0, 12.0, 10.0, 16.0);
+    private static final VoxelShape vfpEastArmShapeR1_8X = Block.box(0.0, 6.0, 4.0, 12.0, 10.0, 12.0);
+    private static final VoxelShape vfpWestArmShapeR1_8X = Block.box(6.0, 4.0, 4.0, 10.0, 12.0, 16.0);
+    // MODIFIED for porting: was VFP block/shape MixinPistonHeadBlock#viaFabricPlus$selfInflicted (@Unique field)
+    // Re-entrancy flag: the <= 1.12.2 collision branch calls getShape and has to see the unmodified 1.13+ outline.
+    private boolean vfpSelfInflicted;
 
     @Override
     protected MapCodec<PistonHeadBlock> codec() {
@@ -58,7 +79,45 @@ public class PistonHeadBlock extends DirectionalBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinPistonHeadBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 had no outline for the arm at all, only the head plate. When the flag is set we are being called
+        // back from the collision hook below, which wants the untouched 1.13+ head + arm union.
+        if (this.vfpSelfInflicted) {
+            this.vfpSelfInflicted = false;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return switch (state.getValue(FACING)) {
+                case DOWN -> vfpDownHeadShape;
+                case UP -> vfpUpHeadShape;
+                case NORTH -> vfpNorthHeadShape;
+                case SOUTH -> vfpSouthHeadShape;
+                case WEST -> vfpWestHeadShape;
+                case EAST -> vfpEastHeadShape;
+            };
+        }
+
         return (state.getValue(SHORT) ? SHAPES_SHORT : SHAPES).get(state.getValue(FACING));
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinPistonHeadBlock#getCollisionShape (@Override, added method)
+    // <= 1.8 collided against the head plate plus a thin 1.8-style arm stub; 1.9 through 1.12.2 collide against the
+    // 1.13+ outline, which the flag above hands back to us.
+    @Override
+    protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return switch (state.getValue(FACING)) {
+                case DOWN -> Shapes.or(vfpDownHeadShape, vfpDownArmShapeR1_8X);
+                case UP -> Shapes.or(vfpUpHeadShape, vfpUpArmShapeR1_8X);
+                case NORTH -> Shapes.or(vfpNorthHeadShape, vfpNorthArmShapeR1_8X);
+                case SOUTH -> Shapes.or(vfpSouthHeadShape, vfpSouthArmShapeR1_8X);
+                case WEST -> Shapes.or(vfpWestHeadShape, vfpWestArmShapeR1_8X);
+                case EAST -> Shapes.or(vfpEastHeadShape, vfpEastArmShapeR1_8X);
+            };
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            this.vfpSelfInflicted = true;
+            return this.getShape(state, level, pos, context);
+        }
+
+        return super.getCollisionShape(state, level, pos, context);
     }
 
     private boolean isFittingBase(final BlockState armState, final BlockState potentialBase) {

@@ -4,6 +4,9 @@ import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.tags.TagKey;
@@ -42,7 +45,11 @@ public class EntityFluidInteraction {
             if (hasFluidAndLoaded(entity.level(), x0 - 1, y0, z0 - 1, x1 + 1, y1, z1 + 1)) {
                 double entityY = entity.getBoundingBox().minY;
                 int eyeBlockX = entity.getBlockX();
-                double eyeY = entity.getEyeY();
+                // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction#subtractMagicOffset (@Redirect INVOKE Entity#getEyeY)
+                // 1.16 - 1.20.3 test the eye against a point 1/9 of a block below the real eye height.
+                double eyeY = ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_16, ProtocolVersion.v1_20_3)
+                    ? entity.getEyeY() - 0.11111111F
+                    : entity.getEyeY();
                 int eyeBlockZ = entity.getBlockZ();
                 Fluid lastFluidType = null;
                 EntityFluidInteraction.Tracker tracker = null;
@@ -57,7 +64,18 @@ public class EntityFluidInteraction {
                             if (!fluidState.isEmpty()) {
                                 double fluidBottom = mutablePos.getY();
                                 double fluidTop = fluidBottom + fluidState.getHeight(level, mutablePos);
-                                if (!(fluidTop < box.minY)) {
+                                // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction#removeConditional
+                                // (@ModifyExpressionValue on `fluidTop < box.minY`) - <=1.12.2 and Bedrock never skip a fluid block
+                                // whose surface sits below the interaction box.
+                                final boolean vfpFluidTopBelowBox;
+                                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                                    || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+                                    vfpFluidTopBelowBox = false;
+                                } else {
+                                    vfpFluidTopBelowBox = fluidTop < box.minY;
+                                }
+
+                                if (!vfpFluidTopBelowBox) {
                                     Fluid fluidType = fluidState.getType();
                                     if (fluidType != lastFluidType) {
                                         lastFluidType = fluidType;
@@ -65,15 +83,36 @@ public class EntityFluidInteraction {
                                     }
 
                                     if (tracker != null) {
-                                        if (x == eyeBlockX && z == eyeBlockZ && eyeY >= fluidBottom && eyeY <= fluidTop) {
+                                        // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction#addMagicOffset
+                                        // (@ModifyExpressionValue on `eyeY <= fluidTop`) - <=1.15.2 counts the eye as submerged up to
+                                        // 2/9 of a block above the fluid surface.
+                                        if (x == eyeBlockX
+                                            && z == eyeBlockZ
+                                            && eyeY >= fluidBottom
+                                            && (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)
+                                                ? eyeY <= fluidBottom + (fluidState.getHeight(level, mutablePos) + 0.11111111F * 2F)
+                                                : eyeY <= fluidTop)) {
                                             tracker.eyesInside = true;
                                         }
 
-                                        tracker.height = Math.max(fluidTop - entityY, tracker.height);
+                                        // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction#adjustHeightCalculation
+                                        // (@Redirect INVOKE Math#max) - <=1.12.2 and Bedrock report the fluid 0.4 deeper than 1.13+ do.
+                                        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                                            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+                                            tracker.height = Math.max((fluidTop - entityY) + 0.4, tracker.height);
+                                        } else {
+                                            tracker.height = Math.max(fluidTop - entityY, tracker.height);
+                                        }
+
                                         if (!ignoreCurrent) {
                                             Vec3 flow = fluidState.getFlow(level, mutablePos);
                                             if (tracker.height < 0.4) {
-                                                flow = flow.scale(tracker.height);
+                                                // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction#dontScaleCurrent
+                                                // (@Redirect INVOKE Vec3#scale) - <=1.12.2 and Bedrock accumulate the unscaled flow.
+                                                if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                                                    && !ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+                                                    flow = flow.scale(tracker.height);
+                                                }
                                             }
 
                                             tracker.accumulateCurrent(flow);
@@ -169,18 +208,37 @@ public class EntityFluidInteraction {
         }
 
         public void applyCurrentTo(final Entity entity, final double scale) {
-            if (this.currentCount != 0 && !(this.accumulatedCurrent.lengthSqr() < 1.0E-5F)) {
+            // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction_Tracker#useLengthInstead (@Redirect INVOKE
+            // Vec3#lengthSqr) + #changeThreshold (@ModifyConstant 1.0E-5F) - <=1.21.11 compares the un-squared magnitude against 0,
+            // so every non-zero accumulated current is applied.
+            final boolean vfpLegacyCurrentGate = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11);
+            if (this.currentCount != 0
+                && !((vfpLegacyCurrentGate ? this.accumulatedCurrent.length() : this.accumulatedCurrent.lengthSqr())
+                    < (vfpLegacyCurrentGate ? 0.0 : 1.0E-5F))) {
                 Vec3 impulse;
                 if (!(entity instanceof Player)) {
                     impulse = this.accumulatedCurrent.normalize();
                 } else {
-                    impulse = this.accumulatedCurrent.scale(1.0 / this.currentCount);
+                    // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction_Tracker#normalizeInsteadScale
+                    // (@Redirect INVOKE Vec3#scale ordinal 0) - <=1.12.2 and Bedrock push the player along the normalised current.
+                    if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                        || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+                        impulse = this.accumulatedCurrent.normalize();
+                    } else {
+                        impulse = this.accumulatedCurrent.scale(1.0 / this.currentCount);
+                    }
                 }
 
                 Vec3 oldMovement = entity.getDeltaMovement();
                 impulse = impulse.scale(scale);
                 double min = 0.003;
-                if (Math.abs(oldMovement.x) < 0.003 && Math.abs(oldMovement.z) < 0.003 && impulse.length() < 0.0045000000000000005) {
+                // MODIFIED for porting: was VFP movement/liquid MixinEntityFluidInteraction_Tracker#dontScaleSmallValues
+                // (@Redirect INVOKE Vec3#length) - <=1.12.2 and Bedrock never raise a tiny impulse to the 0.0045 minimum.
+                final double vfpImpulseLength = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                        || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)
+                    ? Double.MAX_VALUE
+                    : impulse.length();
+                if (Math.abs(oldMovement.x) < 0.003 && Math.abs(oldMovement.z) < 0.003 && vfpImpulseLength < 0.0045000000000000005) {
                     impulse = impulse.normalize().scale(0.0045000000000000005);
                 }
 

@@ -26,8 +26,12 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import com.viaversion.viafabricplus.features.entity.attribute.EnchantmentAttributesEmulation1_20_6;
+import com.viaversion.viafabricplus.features.entity.dimensions.EntityRidingOffsetsPre1_20_2;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
@@ -572,11 +576,25 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
 
     @Override
     protected float getBlockSpeedFactor() {
+        // MODIFIED for porting: was VFP entity.attribute MixinLivingEntity#setGenericMovementEfficiencyAttribute
+        // (@Inject HEAD). <= 1.20.5 has no MOVEMENT_EFFICIENCY attribute, so soul speed is emulated; recomputing it
+        // here keeps the value correct at the exact point in the tick where it is read.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+            EnchantmentAttributesEmulation1_20_6.setGenericMovementEfficiencyAttribute(this);
+        }
+
         return Mth.lerp((float)this.getAttributeValue(Attributes.MOVEMENT_EFFICIENCY), super.getBlockSpeedFactor(), 1.0F);
     }
 
     private static float computeModifiedFriction(final float friction, final float modifier) {
-        return Mth.clamp(1.0F - (1.0F - friction) * modifier, 0.0F, 1.0F);
+        final float modifiedFriction = 1.0F - (1.0F - friction) * modifier;
+        // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#dontClampFriction (@Redirect on Mth.clamp).
+        // <= 26.1 did not clamp here, so a friction modifier could push the result outside 0..1.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return modifiedFriction;
+        }
+
+        return Mth.clamp(modifiedFriction, 0.0F, 1.0F);
     }
 
     public float getLuck() {
@@ -848,7 +866,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         }
 
         if (this.level().isClientSide()) {
-            this.swing(InteractionHand.MAIN_HAND);
+            // MODIFIED for porting: was VFP swinging MixinLivingEntity#dontSwingHand (@WrapWithCondition on swing).
+            // 1.15.2 and older neither played nor sent a swing animation when dropping an item.
+            if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_15_2)) {
+                this.swing(InteractionHand.MAIN_HAND);
+            }
+
             return null;
         }
 
@@ -936,7 +959,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             List<ParticleOptions> particles = this.entityData.get(DATA_EFFECT_PARTICLES);
             if (!particles.isEmpty()) {
                 boolean isAmbient = this.entityData.get(DATA_EFFECT_AMBIENCE_ID);
-                int bound = this.isInvisible() ? 15 : 4;
+                // MODIFIED for porting: was VFP movement.constants MixinLivingEntity#changeParticleDensity
+                // (@ModifyExpressionValue on the int constant 4). Older than 1.20.5 used a bound of 2, so
+                // potion particles were roughly twice as dense.
+                int bound = this.isInvisible() ? 15 : (ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_20_5) ? 2 : 4);
                 int ambientFactor = isAmbient ? 5 : 1;
                 if (this.random.nextInt(bound * ambientFactor) == 0) {
                     this.level()
@@ -1791,7 +1817,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             BlockPos ladderCheckPos = this.blockPosition();
             BlockState state = this.getInBlockState();
             if (this.isFallFlying() && state.is(BlockTags.CAN_GLIDE_THROUGH)) {
-                return false;
+                return this.vfpAllowGappedLadderClimb();
             } else if (state.is(BlockTags.CLIMBABLE)) {
                 this.lastClimbablePos = Optional.of(ladderCheckPos);
                 return true;
@@ -1799,12 +1825,38 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                 this.lastClimbablePos = Optional.of(ladderCheckPos);
                 return true;
             } else {
-                return false;
+                return this.vfpAllowGappedLadderClimb();
             }
         }
     }
 
+    // MODIFIED for porting: was VFP movement.collision MixinLivingEntity#allowGappedLadderClimb (@Inject RETURN,
+    // cancellable). Older than b1.5-b1.5.2 the climb check also looked at the block above the entity, so a ladder
+    // with a one block gap in it could still be climbed. Only the false returns of onClimbable can change; the
+    // spectator return is left alone because upstream's own !isSpectator() test makes the hook a no-op there.
+    private boolean vfpAllowGappedLadderClimb() {
+        if (ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.b1_5tob1_5_2) && !this.isSpectator()) {
+            final BlockPos abovePos = this.blockPosition().above();
+            final BlockState aboveState = this.level().getBlockState(abovePos);
+            if (aboveState.is(BlockTags.CLIMBABLE)) {
+                this.lastClimbablePos = Optional.of(abovePos);
+                return true;
+            } else if (aboveState.getBlock() instanceof TrapDoorBlock && this.trapdoorUsableAsLadder(abovePos, aboveState)) {
+                this.lastClimbablePos = Optional.of(abovePos);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private boolean trapdoorUsableAsLadder(final BlockPos pos, final BlockState state) {
+        // MODIFIED for porting: was VFP movement.collision MixinLivingEntity#disableCrawling (@Inject HEAD,
+        // cancellable). <= 1.8 had no trapdoor-as-ladder behaviour at all.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return false;
+        }
+
         if (!state.getValue(TrapDoorBlock.OPEN)) {
             return false;
         }
@@ -2561,7 +2613,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         MobEffectInstance levitationEffect = this.getEffect(MobEffects.LEVITATION);
         if (levitationEffect != null) {
             movementY += (0.05 * (levitationEffect.getAmplifier() + 1) - movement.y) * 0.2;
-        } else if (!this.level().isClientSide() || this.level().hasChunkAt(posBelow)) {
+        } else if (!this.level().isClientSide() || this.vfpHasChunkAtForGravity(posBelow)) {
             movementY -= this.getEffectiveGravity();
         } else if (this.getY() > this.level().getMinY()) {
             movementY = -0.1;
@@ -2578,6 +2630,17 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             float verticalFriction = this.omnidirectionalAirMover() ? airDrag : computeModifiedFriction(0.98F, entityAirDragModifier);
             this.setDeltaMovement(movement.x * friction, movementY * verticalFriction, movement.z * friction);
         }
+    }
+
+    // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#modifyLoadedCheck (@Redirect on
+    // Level#hasChunkAt in travelInAir). <= 1.13.2 additionally required the chunk to be present in the chunk
+    // source, which reproduces 1.13 gravity behaviour at chunk borders.
+    private boolean vfpHasChunkAtForGravity(final BlockPos pos) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            return this.level().hasChunkAt(pos) && this.level().getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4);
+        }
+
+        return this.level().hasChunkAt(pos);
     }
 
     @Override
@@ -2598,7 +2661,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected void travelInWater(final Vec3 input, final double baseGravity, final boolean isFalling, final double oldY) {
-        float slowDown = this.isSprinting() ? 0.9F : this.getWaterSlowDown();
+        // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#modifySwimSprintSpeed (@Redirect on the
+        // ordinal-0 isSprinting) plus #modifySwimFriction (@ModifyConstant on 0.9F). <= 1.12.2 knew no swim
+        // sprinting, so the slowdown always starts from getWaterSlowDown(); the two hooks collapse into this one
+        // expression because once isSprinting() reads false the replaced 0.9F branch is unreachable.
+        float slowDown = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_12_2) && this.isSprinting()
+            ? 0.9F
+            : this.getWaterSlowDown();
         float speed = 0.02F;
         float waterWalker = (float)this.getAttributeValue(Attributes.WATER_MOVEMENT_EFFICIENCY);
         if (!this.onGround()) {
@@ -2617,7 +2686,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         this.moveRelative(speed, input);
         this.move(MoverType.SELF, this.getDeltaMovement());
         Vec3 movement = this.getDeltaMovement();
-        if (this.horizontalCollision && this.onClimbable()) {
+        // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#disableClimbing (@Redirect on the
+        // ordinal-0 horizontalCollision read in the slice after the DOLPHINS_GRACE check). <= 1.13.2 had no
+        // in-water ladder climb nudge to y = 0.2.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_13_2) && this.horizontalCollision && this.onClimbable()) {
             movement = new Vec3(movement.x, 0.2, movement.z);
         }
 
@@ -2627,7 +2699,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected boolean isInShallowFluid(final TagKey<Fluid> fluidTag) {
-        return this.getFluidHeight(fluidTag) <= this.getFluidJumpThreshold();
+        // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#dontApplyLavaMovement (@Redirect on
+        // getFluidHeight). <= 1.15.2 never saw lava as shallow, so the pre-1.16 lava movement branch is taken.
+        final double fluidHeight = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2) && fluidTag == FluidTags.LAVA
+            ? Double.MAX_VALUE
+            : this.getFluidHeight(fluidTag);
+        return fluidHeight <= this.getFluidJumpThreshold();
     }
 
     private void travelInLava(final Vec3 input, final double baseGravity, final boolean isFalling, final double oldY) {
@@ -2663,7 +2740,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     private void travelFallFlying(final Vec3 input) {
-        if (this.onClimbable()) {
+        // MODIFIED for porting: was VFP movement.elytra MixinLivingEntity#dontStopGlidingWhenClimbing (@Redirect on
+        // onClimbable). <= 1.21.4 did not stop elytra gliding when the entity was on a climbable block.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_4) && this.onClimbable()) {
             this.travelInAir(input);
             this.stopFallFlying();
         } else {
@@ -2689,7 +2768,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         double lookHorLength = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
         double moveHorLength = movement.horizontalDistance();
         double gravity = this.getEffectiveGravity();
-        double liftForce = Mth.square(Math.cos(leanAngle));
+        // MODIFIED for porting: was VFP movement.elytra MixinLivingEntity#fixCosTable (@Redirect on Math.cos).
+        // <= 1.18 took the elytra lift from the float sine table instead of Math.cos. leanAngle is already a float,
+        // so passing it straight to Mth.cos matches upstream's Mth.cos((float) a).
+        double liftForce = Mth.square(
+            ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? Mth.cos(leanAngle) : Math.cos(leanAngle)
+        );
         movement = movement.add(0.0, gravity * (-1.0 + liftForce * 0.75), 0.0);
         if (movement.y < 0.0 && lookHorLength > 0.0) {
             double convert = movement.y * -0.1 * liftForce;
@@ -2762,15 +2846,51 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         this.setDeltaMovement(this.handleOnClimbable(this.getDeltaMovement()));
         this.move(MoverType.SELF, this.getDeltaMovement());
         Vec3 movement = this.getDeltaMovement();
-        if ((this.horizontalCollision || this.jumping) && (this.onClimbable() || this.wasInPowderSnow && PowderSnowBlock.canEntityWalkOnPowderSnow(this))) {
+        // MODIFIED for porting: was VFP movement.jump MixinLivingEntity#disableJumpOnLadder (@Redirect on the
+        // LivingEntity.jumping GETFIELD). <= 1.13.2 did not apply the 0.2 upward nudge when only jumping was set.
+        if ((this.horizontalCollision || ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_13_2) && this.jumping)
+            && (this.onClimbable() || this.vfpInPowderSnowForClimbBoost() && PowderSnowBlock.canEntityWalkOnPowderSnow(this))) {
             movement = new Vec3(movement.x, 0.2, movement.z);
         }
 
         return movement;
     }
 
-    public Vec3 getFluidFallingAdjustedMovement(final double baseGravity, final boolean isFalling, final Vec3 movement) {
-        if (baseGravity != 0.0 && !this.isSprinting()) {
+    // MODIFIED for porting: was VFP movement.collision MixinLivingEntity#dontCheckLastTick (@Redirect on the
+    // LivingEntity.wasInPowderSnow GETFIELD in handleRelativeFrictionAndCalculateMovement). <= 1.21.4 used the
+    // current block state instead of the previous tick's flag. Kept as a method so the read stays as lazy as the
+    // field read it replaces.
+    private boolean vfpInPowderSnowForClimbBoost() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            return this.getInBlockState().is(Blocks.POWDER_SNOW);
+        }
+
+        return this.wasInPowderSnow;
+    }
+
+    public Vec3 getFluidFallingAdjustedMovement(final double baseGravity, boolean isFalling, final Vec3 movement) {
+        // MODIFIED for porting: was VFP bedrock.movement MixinLivingEntity#applyLevitationVelocity (@Inject HEAD,
+        // cancellable). Bedrock applies levitation directly to the fluid movement instead of the gravity term.
+        final MobEffectInstance vfpLevitation = this.getEffect(MobEffects.LEVITATION);
+        if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest) && vfpLevitation != null) {
+            return new Vec3(movement.x, movement.y + (((vfpLevitation.getAmplifier() + 1) * 0.05) - movement.y) * 0.2, movement.z);
+        }
+
+        // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#modifySwimSprintFallSpeed (@Inject HEAD,
+        // cancellable). <= 1.12.2 subtracted a flat 0.02 here instead of the baseGravity / 16 logic.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2) && !this.isNoGravity()) {
+            return new Vec3(movement.x, movement.y - 0.02, movement.z);
+        }
+
+        // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#modifyMovingDown (@ModifyVariable HEAD,
+        // argsOnly). <= 1.13.2 never took the -0.003 clamp path.
+        isFalling = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_13_2) && isFalling;
+        // MODIFIED for porting: was VFP bedrock.movement MixinLivingEntity#changeFluidGravityCondition (@Redirect on
+        // isSprinting). Bedrock gates the fluid falling gravity on swimming rather than sprinting.
+        final boolean vfpFluidSprinting = ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)
+            ? this.isSwimming()
+            : this.isSprinting();
+        if (baseGravity != 0.0 && !vfpFluidSprinting) {
             double yd;
             if (isFalling && Math.abs(movement.y - 0.005) >= 0.003 && Math.abs(movement.y - baseGravity / 16.0) < 0.003) {
                 yd = -0.003;
@@ -2802,8 +2922,20 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     private float getFrictionInfluencedSpeed(final float blockFriction) {
+        // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#modifyFrictionInfluencedSpeed
+        // (@Inject HEAD, cancellable). <= 1.13.2 derived the speed from the pre-1.14 drag formula.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+            final float drag = this.onGround() ? blockFriction * 0.91F : 0.91F;
+            final float accel = 0.16277136F / (drag * drag * drag);
+            return this.onGround() ? this.getSpeed() * accel : this.getFlyingSpeed();
+        }
+
         if (this.onGround()) {
-            return blockFriction > 0.6 ? this.getSpeed() * (0.21600002F / (blockFriction * blockFriction * blockFriction)) : this.getSpeed();
+            // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#allowFrictionLessThan
+            // (@ModifyConstant on 0.6). <= 26.1 always took the accelerated ground speed branch, even on blocks
+            // with a friction below 0.6.
+            final double vfpMinFriction = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1) ? Double.MIN_VALUE : 0.6;
+            return blockFriction > vfpMinFriction ? this.getSpeed() * (0.21600002F / (blockFriction * blockFriction * blockFriction)) : this.getSpeed();
         } else {
             return this.getFlyingSpeed();
         }
@@ -3138,6 +3270,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     public void aiStep() {
+        // MODIFIED for porting: was VFP movement.jump MixinLivingEntity#removeJumpDelay (@Inject HEAD). Beta and
+        // below (older than 1.0.0-1.0.1) had no 10 tick jump cooldown at all.
+        if (ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.r1_0_0tor1_0_1)) {
+            this.noJumpDelay = 0;
+        }
+
         if (this.noJumpDelay > 0) {
             this.noJumpDelay--;
         }
@@ -3158,22 +3296,28 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         double dx = movement.x;
         double dy = movement.y;
         double dz = movement.z;
-        if (this.is(EntityTypes.PLAYER)) {
+        // MODIFIED for porting: was VFP movement.constants MixinLivingEntity#modifyVelocityZero (@ModifyConstant on
+        // every 0.003 double constant in aiStep). <= 1.8 zeroed a velocity axis below 0.005 instead of 0.003.
+        final double vfpVelocityCutoff = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8) ? 0.005 : 0.003;
+        // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#useEuclideanDistanceCalculation
+        // (@Redirect on the LivingEntity#is entity type check). <= 1.21.4 gave the player the same per-axis dead
+        // zone as every other entity instead of the squared horizontal distance one.
+        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_4) && this.is(EntityTypes.PLAYER)) {
             if (movement.horizontalDistanceSqr() < 9.0E-6) {
                 dx = 0.0;
                 dz = 0.0;
             }
         } else {
-            if (Math.abs(movement.x) < 0.003) {
+            if (Math.abs(movement.x) < vfpVelocityCutoff) {
                 dx = 0.0;
             }
 
-            if (Math.abs(movement.z) < 0.003) {
+            if (Math.abs(movement.z) < vfpVelocityCutoff) {
                 dz = 0.0;
             }
         }
 
-        if (Math.abs(movement.y) < 0.003) {
+        if (Math.abs(movement.y) < vfpVelocityCutoff) {
             dy = 0.0;
         }
 
@@ -3196,9 +3340,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         if (this.jumping && this.isAffectedByFluids()) {
             double fluidHeight;
             if (this.isInLava()) {
-                fluidHeight = this.getFluidHeight(FluidTags.LAVA);
+                fluidHeight = this.vfpJumpFluidHeight(FluidTags.LAVA);
             } else {
-                fluidHeight = this.getFluidHeight(FluidTags.WATER);
+                fluidHeight = this.vfpJumpFluidHeight(FluidTags.WATER);
             }
 
             boolean inWaterAndHasFluidHeight = this.isInWater() && fluidHeight > 0.0;
@@ -3236,7 +3380,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         AABB beforeTravelBox = this.getBoundingBox();
         Vec3 input = new Vec3(this.xxa, this.yya, this.zza);
         if (this.hasEffect(MobEffects.SLOW_FALLING) || this.hasEffect(MobEffects.LEVITATION)) {
-            this.resetFallDistance();
+            // MODIFIED for porting: was VFP movement.limitation MixinLivingEntity#dontResetLevitationFallDistance
+            // (@Redirect on resetFallDistance). <= 1.12.2 only cleared the fall distance for SLOW_FALLING, so
+            // LEVITATION on its own must leave it alone.
+            if (this.hasEffect(MobEffects.SLOW_FALLING) || ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_12_2)) {
+                this.resetFallDistance();
+            }
         }
 
         if (this.getControllingPassenger() instanceof Player controller && this.isAlive()) {
@@ -3282,6 +3431,21 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         }
     }
 
+    // MODIFIED for porting: was VFP movement.liquid MixinLivingEntity#redirectFluidHeight (@Redirect on
+    // getFluidHeight, which has no ordinal and so covers both call sites of the aiStep jump block). <= 1.12.2 and
+    // Bedrock always see a full block of water while in water, so the water jump branch behaves as it did before
+    // fluid heights existed. The lava call site can never pass the tag check, but the redirect covers it too.
+    private double vfpJumpFluidHeight(final TagKey<Fluid> fluidTag) {
+        if ((ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)
+                || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest))
+            && fluidTag == FluidTags.WATER
+            && this.isInWater()) {
+            return 1;
+        }
+
+        return this.getFluidHeight(fluidTag);
+    }
+
     protected void applyInput() {
         this.xxa *= 0.98F;
         this.zza *= 0.98F;
@@ -3324,7 +3488,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected boolean canGlide() {
-        if (!this.onGround() && !this.isPassenger() && !this.hasEffect(MobEffects.LEVITATION)) {
+        // MODIFIED for porting: was VFP movement.elytra MixinLivingEntity#allowElytraInVehicle (@Redirect on
+        // isPassenger) and #allowElytraWhenLevitating (@Redirect on hasEffect). <= 1.14.4 could glide while riding a
+        // vehicle and <= 1.15.2 could glide while levitating.
+        if (!this.onGround()
+            && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_14_4) && this.isPassenger())
+            && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_15_2) && this.hasEffect(MobEffects.LEVITATION))) {
             for (EquipmentSlot slot : EquipmentSlot.VALUES) {
                 if (canGlideUsing(this.getItemBySlot(slot), slot)) {
                     return true;
@@ -3341,6 +3510,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     protected void pushEntities() {
+        // MODIFIED for porting: was VFP movement.collision MixinLivingEntity#preventEntityPush (@Inject HEAD,
+        // cancellable). <= 1.8 had no clientside entity pushing or cramming.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return;
+        }
+
         List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
         if (!pushableEntities.isEmpty()) {
             if (this.level() instanceof ServerLevel serverLevel) {
@@ -3552,7 +3727,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
 
     private void updatingUsingItem() {
         if (this.isUsingItem()) {
-            if (ItemStack.isSameItem(this.getItemInHand(this.getUsedItemHand()), this.useItem)) {
+            // MODIFIED for porting: was VFP interaction MixinLivingEntity#replaceItemStackEqualsCheck (@Redirect on
+            // ItemStack.isSameItem). <= 1.14.3 compared by reference identity, so replacing the held stack with an
+            // equal one stopped the item use.
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_3)
+                ? this.getItemInHand(this.getUsedItemHand()) == this.useItem
+                : ItemStack.isSameItem(this.getItemInHand(this.getUsedItemHand()), this.useItem)) {
                 this.useItem = this.getItemInHand(this.getUsedItemHand());
                 this.updateUsingItem(this.useItem);
             } else {
@@ -4006,6 +4186,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
     }
 
     public EquipmentSlot getEquipmentSlotForItem(final ItemStack itemStack) {
+        // MODIFIED for porting: was VFP interaction MixinLivingEntity#removeShieldSlotPreference (@Inject HEAD,
+        // cancellable). <= 1.9.3 did not auto-equip shields to the offhand.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_9_3) && itemStack.is(Items.SHIELD)) {
+            return EquipmentSlot.MAINHAND;
+        }
+
         Equippable equippable = itemStack.get(DataComponents.EQUIPPABLE);
         return equippable != null && this.canUseSlot(equippable.slot()) ? equippable.slot() : EquipmentSlot.MAINHAND;
     }
@@ -4106,6 +4292,14 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
 
     @Override
     public Vec3 getPassengerRidingPosition(final Entity passenger) {
+        // MODIFIED for porting: was VFP entity.dimensions MixinLivingEntity#getPassengerRidingPos1_20_1 (@Redirect on
+        // getPassengerAttachmentPoint). <= 1.20 had no attachment points; the rider offset came from the hardcoded
+        // per-entity mounted height offsets, rotated by the vehicle's yaw.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20)) {
+            return this.position()
+                .add(EntityRidingOffsetsPre1_20_2.getMountedHeightOffset(this, passenger).yRot(-this.getYRot() * (float) (Math.PI / 180)));
+        }
+
         return this.position().add(this.getPassengerAttachmentPoint(passenger, this.getDimensions(this.getPose()), this.getScale() * this.getAgeScale()));
     }
 

@@ -72,6 +72,10 @@ public class Drowned extends Zombie implements RangedAttackMob {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.49F, 0.98F)
         .withEyeHeight(0.775F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinDrowned#viaFabricPlus$baby_dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR26_1 = EntityDimensions.scalable(0.49F, 0.99F)
+        .withEyeHeight(0.775F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, 0.0F, 0.1875F, 0.0F));
     private boolean searchingForLand;
 
     public Drowned(final EntityType<? extends Drowned> type, final Level level) {
@@ -162,7 +166,20 @@ public class Drowned extends Zombie implements RangedAttackMob {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
+        // MODIFIED for porting: was VFP entity.dimensions MixinDrowned#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) // MODIFIED for porting
+            ? vfpChangeBabyDimensions()
+            : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinDrowned#changeBabyDimensions (@Redirect body)
+    // Targets <=26.1 gave the baby drowned a 0.99F tall box instead of the 26.2 value 0.98F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return vfpBabyDimensionsR26_1;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     @Override

@@ -2,6 +2,8 @@ package net.minecraft.world.entity.monster;
 
 import java.util.EnumSet;
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
@@ -211,6 +213,12 @@ public class Shulker extends AbstractGolem implements Enemy {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
+        // MODIFIED for porting: was VFP entity.dimensions MixinShulker#keepDefaultDimensions (@Inject HEAD cancellable)
+        // Targets <=26.1 never grew the shulker hitbox by the peek amount, so the plain super dimensions win.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return super.getDefaultDimensions(pose);
+        }
+
         EntityDimensions dimension = super.getDefaultDimensions(pose);
         if (this.getAttachFace() == Direction.DOWN && this.currentPeekAmount > 0.0F) {
             float heightScaleFactor = 1.0F + this.currentPeekAmount;

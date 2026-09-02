@@ -45,6 +45,11 @@ public class Horse extends AbstractHorse {
         .getDimensions()
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, EntityTypes.HORSE.getHeight() - 0.125F, 0.0F))
         .scale(0.7F);
+    // MODIFIED for porting: was VFP entity.dimensions MixinHorse#viaFabricPlus$baby_dimensions_r1_21_11 (@Unique constant)
+    private static final EntityDimensions vfpBabyDimensionsR1_21_11 = EntityTypes.HORSE
+        .getDimensions()
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, EntityTypes.HORSE.getHeight() + 0.125F, 0.0F))
+        .scale(0.5F);
     private static final int DEFAULT_VARIANT = 0;
 
     public Horse(final EntityType<? extends Horse> type, final Level level) {
@@ -255,7 +260,18 @@ public class Horse extends AbstractHorse {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinHorse#changeBabyDimensions (@Redirect GETSTATIC BABY_DIMENSIONS)
+        return this.isBaby() ? vfpChangeBabyDimensions() : super.getDefaultDimensions(pose);
+    }
+
+    // MODIFIED for porting: was VFP entity.dimensions MixinHorse#changeBabyDimensions (@Redirect body)
+    // Targets <=1.21.11 scaled the foal by 0.5F and attached the rider at height + 0.125F instead of height - 0.125F.
+    private static EntityDimensions vfpChangeBabyDimensions() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            return vfpBabyDimensionsR1_21_11;
+        } else {
+            return BABY_DIMENSIONS;
+        }
     }
 
     public static class HorseGroupData extends AgeableMob.AgeableMobGroupData {

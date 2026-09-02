@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,6 +28,20 @@ public class SnowLayerBlock extends Block {
     public static final int MAX_HEIGHT = 8;
     public static final IntegerProperty LAYERS = BlockStateProperties.LAYERS;
     private static final VoxelShape[] SHAPES = Block.boxes(8, height -> Block.column(16.0, 0.0, height * 2));
+    // MODIFIED for porting: was VFP block/shape MixinSnowLayerBlock#viaFabricPlus$layers_to_shape_r1_12_2 (@Unique
+    // constant) - indexed by LAYERS - 1. Index 0 keeps upstream's -0.00001 lower bound so a single snow layer still
+    // has a non-empty zero-height collision plane, where Sigma's SHAPES[0] collapses to an empty shape.
+    private static final VoxelShape[] vfpLayersToShapeR1_12_2 = new VoxelShape[]{
+        Block.box(0.0, -0.00001 /* 0.0 */, 0.0, 16.0, 0.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 2.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 4.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 6.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 8.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 10.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 12.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 14.0, 16.0),
+        Block.box(0.0, 0.0, 0.0, 16.0, 16.0, 16.0)
+    };
     public static final int HEIGHT_IMPASSABLE = 5;
 
     @Override
@@ -50,6 +66,13 @@ public class SnowLayerBlock extends Block {
 
     @Override
     protected VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinSnowLayerBlock#changeCollisionShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 takes snow collision from its own 9-entry table. Only getCollisionShape is hooked upstream;
+        // getShape, getBlockSupportShape and getVisualShape stay vanilla.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return vfpLayersToShapeR1_12_2[state.getValue(LAYERS) - 1];
+        }
+
         return SHAPES[state.getValue(LAYERS) - 1];
     }
 

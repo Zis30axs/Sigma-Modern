@@ -2,6 +2,8 @@ package net.minecraft.world.entity;
 
 import com.google.common.collect.ImmutableMap;
 import java.util.Map;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -35,6 +37,13 @@ public abstract class Avatar extends LivingEntity {
         )
         .put(Pose.DYING, EntityDimensions.fixed(0.2F, 0.2F).withEyeHeight(1.62F))
         .build();
+    // MODIFIED for porting: was VFP movement.constants MixinAvatar#viaFabricPlus$sneaking_dimensions_v1_13_2 / _v1_8 (@Unique constants)
+    private static final EntityDimensions vfpSneakingDimensionsV1_13_2 = EntityDimensions.scalable(0.6F, 1.65F)
+        .withEyeHeight(1.54F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, DEFAULT_VEHICLE_ATTACHMENT));
+    private static final EntityDimensions vfpSneakingDimensionsV1_8 = EntityDimensions.scalable(0.6F, 1.8F)
+        .withEyeHeight(1.54F)
+        .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, DEFAULT_VEHICLE_ATTACHMENT));
     protected static final EntityDataAccessor<HumanoidArm> DATA_PLAYER_MAIN_HAND = SynchedEntityData.defineId(Avatar.class, EntityDataSerializers.HUMANOID_ARM);
     protected static final EntityDataAccessor<Byte> DATA_PLAYER_MODE_CUSTOMISATION = SynchedEntityData.defineId(Avatar.class, EntityDataSerializers.BYTE);
 
@@ -64,6 +73,16 @@ public abstract class Avatar extends LivingEntity {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
+        // MODIFIED for porting: was VFP movement.constants MixinAvatar#modifyDimensions (@Inject HEAD cancellable)
+        // 1.8 sneaked at full 1.8F height, 1.9-1.13.2 at 1.65F; both kept the 1.54F eye height instead of 1.5F/1.27F.
+        if (pose == Pose.CROUCHING) {
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                return vfpSneakingDimensionsV1_8;
+            } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_13_2)) {
+                return vfpSneakingDimensionsV1_13_2;
+            }
+        }
+
         return POSES.getOrDefault(pose, STANDING_DIMENSIONS);
     }
 

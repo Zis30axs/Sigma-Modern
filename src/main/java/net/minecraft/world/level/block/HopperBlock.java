@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.google.common.collect.ImmutableMap;
 import com.mojang.serialization.MapCodec;
 import java.util.Map;
@@ -42,6 +44,10 @@ public class HopperBlock extends BaseEntityBlock {
     public static final MapCodec<HopperBlock> CODEC = simpleCodec(HopperBlock::new);
     public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING_HOPPER;
     public static final BooleanProperty ENABLED = BlockStateProperties.ENABLED;
+    // MODIFIED for porting: was VFP block/shape MixinHopperBlock#viaFabricPlus$inside_shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpInsideShapeR1_12_2 = Block.box(2.0, 10.0, 2.0, 14.0, 16.0, 14.0);
+    // MODIFIED for porting: was VFP block/shape MixinHopperBlock#viaFabricPlus$hopper_shape_r1_12_2 (@Unique constant)
+    private static final VoxelShape vfpHopperShapeR1_12_2 = Shapes.join(Shapes.block(), vfpInsideShapeR1_12_2, BooleanOp.ONLY_FIRST);
     private final Function<BlockState, VoxelShape> shapes;
     private final Map<Direction, VoxelShape> interactionShapes;
 
@@ -72,11 +78,24 @@ public class HopperBlock extends BaseEntityBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinHopperBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 outlined the hopper as a full block with only the inner bowl carved out, with no spout box.
+        // Upstream's MoreCulling-only getOcclusionShape workaround is not ported: that mod does not exist in this tree.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return vfpHopperShapeR1_12_2;
+        }
+
         return this.shapes.apply(state);
     }
 
     @Override
     protected VoxelShape getInteractionShape(final BlockState state, final BlockGetter level, final BlockPos pos) {
+        // MODIFIED for porting: was VFP block/shape MixinHopperBlock#changeRaycastShape (@Inject HEAD, cancellable)
+        // <= 1.12.2 raycast against the inner bowl only, regardless of which way the hopper faces.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            return vfpInsideShapeR1_12_2;
+        }
+
         return this.interactionShapes.get(state.getValue(FACING));
     }
 

@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -75,6 +78,16 @@ public class ChestBlock extends AbstractChestBlock<ChestBlockEntity> implements 
     public static final int EVENT_SET_OPEN_COUNT = 1;
     private static final VoxelShape SHAPE = Block.column(14.0, 0.0, 14.0);
     private static final Map<Direction, VoxelShape> HALF_SHAPES = Shapes.rotateHorizontal(Block.boxZ(14.0, 0.0, 14.0, 0.0, 15.0));
+    // MODIFIED for porting: was VFP block/shape MixinChestBlock @Unique constants
+    // (viaFabricPlus$single_chest_shape_bedrock, viaFabricPlus$double_chest_shapes_bedrock)
+    // Bedrock chests are inset 0.025 on every free side and 0.95 high; the double halves extend to the seam.
+    private static final VoxelShape vfpSingleChestShapeBedrock = Shapes.box(0.025, 0.0, 0.025, 0.975, 0.95, 0.975);
+    private static final Map<Direction, VoxelShape> vfpDoubleChestShapesBedrock = Map.of(
+        Direction.NORTH, Shapes.box(0.025, 0.0, 0.0, 0.975, 0.95, 0.975),
+        Direction.SOUTH, Shapes.box(0.025, 0.0, 0.025, 0.975, 0.95, 1.0),
+        Direction.WEST, Shapes.box(0.0, 0.0, 0.025, 0.975, 0.95, 0.975),
+        Direction.EAST, Shapes.box(0.025, 0.0, 0.025, 1.0, 0.95, 0.975)
+    );
     private final SoundEvent openSound;
     private final SoundEvent closeSound;
     private static final DoubleBlockCombiner.Combiner<ChestBlockEntity, Optional<Container>> CHEST_COMBINER = new DoubleBlockCombiner.Combiner<ChestBlockEntity, Optional<Container>>() {
@@ -191,10 +204,38 @@ public class ChestBlock extends AbstractChestBlock<ChestBlockEntity> implements 
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinChestBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // 1.4.2 and older outlined a chest as a plain full block; Bedrock uses its own slightly inset boxes.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_2)) {
+            return Shapes.block();
+        } else if (ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            return switch (state.getValue(TYPE)) {
+                case SINGLE -> vfpSingleChestShapeBedrock;
+                case LEFT, RIGHT -> vfpDoubleChestShapesBedrock.get(getConnectedDirection(state));
+            };
+        }
+
         return switch ((ChestType)state.getValue(TYPE)) {
             case SINGLE -> SHAPE;
             case LEFT, RIGHT -> (VoxelShape)HALF_SHAPES.get(getConnectedDirection(state));
         };
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinChestBlock#getOcclusionShape (@Override, added method)
+    // The inherited occlusion shape is derived from getShape, so the forced full block / Bedrock outline above would
+    // otherwise change light occlusion; state this explicitly instead.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_4_2)
+            || ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest)) {
+            if (state.getValue(TYPE) == ChestType.SINGLE) {
+                return SHAPE;
+            } else {
+                return HALF_SHAPES.get(getConnectedDirection(state));
+            }
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     public static Direction getConnectedDirection(final BlockState state) {

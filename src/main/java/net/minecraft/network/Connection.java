@@ -16,13 +16,21 @@ import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.epoll.EpollDatagramChannel;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.local.LocalChannel;
 import io.netty.channel.local.LocalServerChannel;
+import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.flow.FlowControlHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.TimeoutException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.net.SocketException;
 import java.nio.channels.ClosedChannelException;
 import java.util.Objects;
 import java.util.Queue;
@@ -30,12 +38,26 @@ import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import javax.crypto.Cipher;
+import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
 import com.viaversion.viafabricplus.injection.access.core.ILocalSampleLogger;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.protocoltranslator.netty.RakNetPingEncapsulationCodec;
+import com.viaversion.viafabricplus.save.SaveManager;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import com.viaversion.viafabricplus.util.bedrock.NetherNetInetSocketAddress;
+import com.viaversion.viafabricplus.util.bedrock.NetherNetJsonRpcAddress;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.platform.ViaChannelInitializer;
+import dev.kastle.netty.channel.nethernet.NetherNetChannelFactory;
+import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling;
+import dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxSignaling;
+import dev.kastle.webrtc.PeerConnectionFactory;
+import net.raphimc.viabedrock.api.BedrockProtocolVersion;
+import net.raphimc.viabedrock.netty.PacketCodec;
+import net.raphimc.viabedrock.netty.raknet.MessageCodec;
+import net.raphimc.viabedrock.protocol.RakNetStatusProtocol;
 import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.raphimc.vialegacy.netty.PreNettyLengthPrepender;
 import net.raphimc.vialegacy.netty.PreNettyLengthRemover;
@@ -63,6 +85,7 @@ import net.minecraft.server.network.EventLoopGroupHolder;
 import net.minecraft.util.Mth;
 import net.minecraft.util.Util;
 import net.minecraft.util.debugchart.LocalSampleLogger;
+import org.cloudburstmc.netty.channel.raknet.RakChannelFactory;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
@@ -103,9 +126,25 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
         this.receiving = receiving;
     }
 
+    // MODIFIED for porting: was VFP bedrock MixinConnection#channelRegistered (merged override of
+    // SimpleChannelInboundHandler#channelRegistered). RakNet and NetherNet channels never fire channelActive on
+    // their own, so on a Bedrock target it is invoked manually as soon as the channel is registered.
+    @Override
+    public void channelRegistered(final ChannelHandlerContext ctx) throws Exception {
+        super.channelRegistered(ctx);
+        if (BedrockProtocolVersion.bedrockLatest.equals(this.viaFabricPlus$getTargetVersion())) {
+            this.channelActive(ctx);
+        }
+    }
+
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        super.channelActive(ctx);
+        // MODIFIED for porting: was VFP bedrock MixinConnection#dontCallChannelActiveTwice (@WrapWithCondition on
+        // the super.channelActive call) - on a Bedrock target channelRegistered above already made this call.
+        if (!BedrockProtocolVersion.bedrockLatest.equals(this.viaFabricPlus$getTargetVersion())) {
+            super.channelActive(ctx);
+        }
+
         this.channel = ctx.channel();
         this.address = this.channel.remoteAddress();
         if (this.delayedDisconnect != null) {
@@ -120,6 +159,15 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
+        // MODIFIED for porting: was VFP integration MixinConnection#printNetworkingErrors (@Inject HEAD).
+        // Diagnostics only and version-independent; SocketException/ConnectException just mean the server is not
+        // reachable, so those stay out of the log.
+        if (DebugSettings.INSTANCE.printNetworkingErrorsToLogs.getValue()
+            && !(cause instanceof SocketException)
+            && !(cause instanceof ConnectException)) {
+            ViaFabricPlusImpl.INSTANCE.getLogger().error("An exception occurred while handling a packet", cause);
+        }
+
         if (cause instanceof SkipPacketException) {
             LOGGER.debug("Skipping packet due to errors", cause.getCause());
         } else {
@@ -482,7 +530,20 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
             targetVersion = ProtocolTranslator.NATIVE_VERSION;
         }
         ((IConnection) connection).viaFabricPlus$setTargetVersion(targetVersion);
-        return new Bootstrap().group(eventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
+        // MODIFIED for porting: was VFP bedrock MixinConnection#setTargetVersion (@Inject connect HEAD, rebinding the
+        // eventLoopGroupHolder parameter through a LocalRef). It sits below the version resolution above because
+        // upstream's bedrock mixin has priority 1001 and reads the version that hook stores. RakNet has no KQueue
+        // transport and NetherNet requires NIO, so the holder is swapped for the NIO one; the connecting flag is
+        // carried over because remote(boolean) resets it on every return.
+        EventLoopGroupHolder vfpEventLoopGroupHolder = eventLoopGroupHolder;
+        if (BedrockProtocolVersion.bedrockLatest.equals(targetVersion)
+            && (eventLoopGroupHolder.channelCls() == KQueueSocketChannel.class || address instanceof NetherNetInetSocketAddress)) {
+            final EventLoopGroupHolder newEventLoopGroupHolder = EventLoopGroupHolder.remote(false);
+            newEventLoopGroupHolder.viaFabricPlus$setConnecting(eventLoopGroupHolder.viaFabricPlus$isConnecting());
+            vfpEventLoopGroupHolder = newEventLoopGroupHolder;
+        }
+
+        final Bootstrap vfpBootstrap = new Bootstrap().group(vfpEventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
             @Override
             protected void initChannel(final Channel channel) {
                 try {
@@ -496,7 +557,74 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                 // MODIFIED for porting: was VFP MixinConnection_1#injectViaIntoPipeline (@Inject RETURN)
                 ProtocolTranslator.injectViaPipeline(connection, channel);
             }
-        }).channel(eventLoopGroupHolder.channelCls()).connect(address.getAddress(), address.getPort());
+        });
+        // MODIFIED for porting: was VFP bedrock MixinConnection#useRakNetChannelFactory (@WrapOperation on
+        // Bootstrap#channel). Bedrock talks RakNet over UDP, or NetherNet over WebRTC, so the TCP socket channel
+        // class vanilla would install is replaced by the matching channel factory.
+        if (BedrockProtocolVersion.bedrockLatest.equals(targetVersion)) {
+            if (address instanceof NetherNetInetSocketAddress netherNetAddress) {
+                final String authorizationHeader = SaveManager.INSTANCE
+                    .getAccountsSave()
+                    .getBedrockAccount()
+                    .getMinecraftSession()
+                    .getUpToDateUnchecked()
+                    .getAuthorizationHeader();
+                if (netherNetAddress.getNetherNetAddress() instanceof NetherNetJsonRpcAddress) {
+                    vfpBootstrap.channelFactory(NetherNetChannelFactory.client(new PeerConnectionFactory(), new NetherNetXboxRpcSignaling(authorizationHeader)));
+                } else {
+                    vfpBootstrap.channelFactory(NetherNetChannelFactory.client(new PeerConnectionFactory(), new NetherNetXboxSignaling(authorizationHeader)));
+                }
+            } else { // RakNet
+                Class<? extends Channel> vfpChannelType = vfpEventLoopGroupHolder.channelCls();
+                if (vfpChannelType == NioSocketChannel.class) {
+                    vfpChannelType = NioDatagramChannel.class;
+                } else if (vfpChannelType == EpollSocketChannel.class) {
+                    vfpChannelType = EpollDatagramChannel.class;
+                } else {
+                    throw new IllegalStateException("Unsupported channel type for RakNet: " + vfpChannelType);
+                }
+
+                vfpBootstrap.channelFactory(RakChannelFactory.client((Class<? extends DatagramChannel>) vfpChannelType));
+            }
+        } else {
+            vfpBootstrap.channel(vfpEventLoopGroupHolder.channelCls());
+        }
+
+        // MODIFIED for porting: was VFP bedrock MixinConnection#useRakNetPingHandlers (@WrapOperation on
+        // Bootstrap#connect). NetherNet connects to the signalling address instead of an IP endpoint, and a RakNet
+        // ping (the holder is not marked connecting) uses a bound, unconnected datagram channel with the ping
+        // encapsulation codec and the RakNet status protocol in place of the play pipeline.
+        if (BedrockProtocolVersion.bedrockLatest.equals(targetVersion)) {
+            if (address instanceof NetherNetInetSocketAddress netherNetAddress) {
+                return vfpBootstrap.connect(netherNetAddress.getNetherNetAddress())
+                    .addListeners(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE, (ChannelFutureListener) f -> {
+                        if (f.isSuccess()) {
+                            f.channel().pipeline().remove(MessageCodec.NAME);
+                        }
+                    });
+            } else if (!vfpEventLoopGroupHolder.viaFabricPlus$isConnecting()) {
+                // Bedrock edition / RakNet has different handlers for pinging a server
+                return vfpBootstrap.register().syncUninterruptibly().channel().bind(new InetSocketAddress(0))
+                    .addListeners(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE, (ChannelFutureListener) f -> {
+                        if (f.isSuccess()) {
+                            f.channel()
+                                .pipeline()
+                                .replace(
+                                    MessageCodec.NAME,
+                                    RakNetPingEncapsulationCodec.NAME,
+                                    new RakNetPingEncapsulationCodec(new InetSocketAddress(address.getAddress(), address.getPort()))
+                                );
+                            f.channel().pipeline().remove(PacketCodec.NAME);
+                            f.channel().pipeline().remove(HandlerNames.SPLITTER);
+
+                            UserConnection user = ((IConnection) connection).viaFabricPlus$getUserConnection();
+                            user.getProtocolInfo().getPipeline().add(RakNetStatusProtocol.INSTANCE);
+                        }
+                    });
+            }
+        }
+
+        return vfpBootstrap.connect(address.getAddress(), address.getPort());
     }
 
     private static String outboundHandlerName(final boolean configureOutbound) {

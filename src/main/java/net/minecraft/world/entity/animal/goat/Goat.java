@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.animal.goat;
 
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
@@ -59,6 +61,8 @@ public class Goat extends Animal {
     private static final EntityDimensions BABY_DIMENSIONS = EntityDimensions.scalable(0.45F, 0.65F)
         .withEyeHeight(0.59375F)
         .withAttachments(EntityAttachments.builder().attach(EntityAttachment.PASSENGER, 0.0F, 0.53125F, 0.0F));
+    // MODIFIED for porting: was VFP entity.dimensions MixinGoat#viaFabricPlus$dimensions_r26_1 (@Unique constant)
+    private static final EntityDimensions vfpDimensionsR26_1 = EntityDimensions.scalable(0.9F, 1.3F).scale(0.7F);
     public static final float BABY_DEFAULT_X_HEAD_ROT = 22.5F;
     public static final float MAX_ADDED_RAMMING_X_HEAD_ROT = 30.0F;
     private static final float BABY_SCALE = 0.55F;
@@ -167,7 +171,9 @@ public class Goat extends Animal {
 
     @Override
     public float getAgeScale() {
-        return this.isBaby() ? 0.55F : 1.0F;
+        // MODIFIED for porting: was VFP entity.dimensions MixinGoat#dontChangeScale (@Redirect isBaby)
+        // Only >1.21.11 targets shrink baby goats; older ones keep the adult scale.
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby()) ? 0.55F : 1.0F;
     }
 
     @Override
@@ -254,6 +260,13 @@ public class Goat extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
+        // MODIFIED for porting: was VFP entity.dimensions MixinGoat#replaceDimensions (@Inject HEAD cancellable)
+        // On targets <=26.1 baby goats never get BABY_DIMENSIONS - they take the super path, which scales the adult
+        // box by getAgeScale() - and the long-jump box comes from the pre-26.2 constant scaled the same way.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v26_1)) {
+            return pose == Pose.LONG_JUMPING ? vfpDimensionsR26_1.scale(this.getAgeScale()) : super.getDefaultDimensions(pose);
+        }
+
         EntityDimensions entityDimensions = this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
         return pose == Pose.LONG_JUMPING ? entityDimensions.scale(0.7F) : entityDimensions;
     }

@@ -1,6 +1,8 @@
 package net.minecraft.world.inventory;
 
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.recipebook.ServerPlaceRecipe;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -97,11 +99,16 @@ public abstract class AbstractFurnaceMenu extends RecipeBookMenu {
 
                 slot.onQuickCraft(stack, clicked);
             } else if (slotIndex != 1 && slotIndex != 0) {
-                if (this.canSmelt(stack)) {
+                // MODIFIED for porting: was VFP interaction/container_clicking
+                // MixinAbstractFurnaceMenu#disableShiftClickSmeltingSlot / #disableShiftClickFuelSlot (@Redirect
+                // INVOKE canSmelt / isFuel). <=1.2.3 servers never quick-move into the furnace input or fuel
+                // slot, so both predicates are forced false there. Upstream keeps the vanilla call on the left of
+                // the &&, so canSmelt/isFuel still run.
+                if (this.canSmelt(stack) && ProtocolTranslator.getTargetVersion().newerThan(LegacyProtocolVersion.r1_2_1tor1_2_3)) {
                     if (!this.moveItemStackTo(stack, 0, 1, false)) {
                         return ItemStack.EMPTY;
                     }
-                } else if (this.isFuel(stack)) {
+                } else if (this.isFuel(stack) && ProtocolTranslator.getTargetVersion().newerThan(LegacyProtocolVersion.r1_2_1tor1_2_3)) {
                     if (!this.moveItemStackTo(stack, 1, 2, false)) {
                         return ItemStack.EMPTY;
                     }

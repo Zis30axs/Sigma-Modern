@@ -8,6 +8,8 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -68,7 +70,30 @@ public class PistonBaseBlock extends DirectionalBlock {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinPistonBaseBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // 1.1 and older had no thin piston body: an extended piston base was still a full cube for outline and
+        // collision. Light occlusion keeps the 4px body, see getOcclusionShape below.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_1)) {
+            return Shapes.block();
+        }
+
         return state.getValue(EXTENDED) ? SHAPES.get(state.getValue(FACING)) : Shapes.block();
+    }
+
+    // MODIFIED for porting: was VFP block/shape MixinPistonBaseBlock#getOcclusionShape (@Override, added method)
+    // On <= 1.1 getShape above always reports a full cube, so the inherited occlusion shape (which is derived
+    // from getShape) would wrongly occlude light for an extended piston; reinstate the thin body here.
+    @Override
+    protected VoxelShape getOcclusionShape(final BlockState state) {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.r1_1)) {
+            if (state.getValue(EXTENDED)) {
+                return SHAPES.get(state.getValue(FACING));
+            } else {
+                return Shapes.block();
+            }
+        } else {
+            return super.getOcclusionShape(state);
+        }
     }
 
     @Override

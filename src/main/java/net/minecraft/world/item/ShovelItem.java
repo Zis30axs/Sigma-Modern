@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.google.common.collect.Maps;
 import com.google.common.collect.ImmutableMap.Builder;
 import java.util.Map;
@@ -43,7 +45,12 @@ public class ShovelItem extends Item {
         }
 
         Player player = context.getPlayer();
-        BlockState newState = FLATTENABLES.get(blockState.getBlock());
+        // MODIFIED for porting: was VFP item/interaction MixinShovelItem#disablePathAction (@Redirect on the first
+        // Map#get after the FLATTENABLES GETSTATIC). <= 1.8 has no shovel flattening, so the lookup yields null and the
+        // client predicts no sound, block change or tool damage. The campfire dowse branch below stays untouched.
+        BlockState newState = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)
+            ? null
+            : FLATTENABLES.get(blockState.getBlock());
         BlockState updatedState = null;
         if (newState != null && level.getBlockState(pos.above()).isAir()) {
             level.playSound(player, pos, SoundEvents.SHOVEL_FLATTEN, SoundSource.BLOCKS, 1.0F, 1.0F);

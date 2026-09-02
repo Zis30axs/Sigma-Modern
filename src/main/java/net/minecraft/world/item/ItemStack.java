@@ -7,6 +7,12 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.DataResult.Error;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.viaversion.viafabricplus.features.item.r1_14_4_enchantment_tooltip.Enchantments1_14_4;
+import com.viaversion.viafabricplus.injection.access.item.attack_damage.IDisplayDefault;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.util.ItemUtil;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viaversion.protocols.v1_21_4to1_21_5.Protocol1_21_4To1_21_5;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.EncoderException;
 import java.util.List;
@@ -21,6 +27,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponentGetter;
 import net.minecraft.core.component.DataComponentHolder;
@@ -31,6 +38,10 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.component.PatchedDataComponentMap;
 import net.minecraft.core.component.TypedDataComponent;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -40,6 +51,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.RegistryOps;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
@@ -855,9 +867,47 @@ public final class ItemStack
         final Consumer<Component> consumer,
         final TooltipFlag flag
     ) {
+        // MODIFIED for porting: was VFP item/tooltip MixinItemStack#replaceEnchantmentTooltip (@Inject HEAD
+        // cancellable). <= 1.14.4 carries enchantments in the legacy "Enchantments"/"StoredEnchantments" NBT
+        // lists, so those replace the component-driven tooltip lines entirely.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_14_4)) {
+            final CompoundTag tag = ItemUtil.getTagOrNull(this);
+            if (tag != null) {
+                if (type == DataComponents.ENCHANTMENTS) {
+                    this.vfpAppendEnchantments1_14_4("Enchantments", tag, context, consumer);
+                    return;
+                } else if (type == DataComponents.STORED_ENCHANTMENTS) {
+                    this.vfpAppendEnchantments1_14_4("StoredEnchantments", tag, context, consumer);
+                    return;
+                }
+            }
+        }
+
         T component = (T)this.get(type);
         if (component != null && display.shows(type)) {
             component.addToTooltip(context, consumer, flag, this.components);
+        }
+    }
+
+    // MODIFIED for porting: was VFP item/tooltip MixinItemStack#viaFabricPlus$appendEnchantments1_14_4 (@Unique)
+    private void vfpAppendEnchantments1_14_4(final String name, final CompoundTag nbt, final Item.TooltipContext context, final Consumer<Component> tooltip) {
+        final HolderLookup.Provider registryLookup = context.registries();
+        final ListTag enchantments = nbt.getList(name).orElse(null);
+        if (enchantments == null) {
+            return;
+        }
+
+        for (Tag element : enchantments) {
+            final CompoundTag enchantment = (CompoundTag)element;
+            final String id = enchantment.getStringOr("id", "");
+            final Optional<ResourceKey<Enchantment>> value = Enchantments1_14_4.getOrEmpty(id);
+            value.ifPresent(e -> {
+                final int lvl = enchantment.getIntOr("lvl", 0);
+                if (registryLookup != null) {
+                    final Optional<Holder.Reference<Enchantment>> v = registryLookup.lookupOrThrow(Registries.ENCHANTMENT).get(e);
+                    v.ifPresent(reference -> tooltip.accept(Enchantment.getFullname(reference, Mth.clamp(lvl, Short.MIN_VALUE, Short.MAX_VALUE))));
+                }
+            });
         }
     }
 
@@ -881,7 +931,13 @@ public final class ItemStack
         final TooltipFlag tooltipFlag,
         final Consumer<Component> builder
     ) {
-        this.getItem().appendHoverText(this, context, display, builder, tooltipFlag);
+        // MODIFIED for porting: was VFP item/tooltip MixinItemStack#hideAdditionalTooltip (@WrapWithCondition on
+        // Item#appendHoverText). <= 1.21.4 only: ViaVersion stashes the 1.21.5 tooltip_display flags in a backup
+        // tag, and hide_additional_tooltip there suppresses this line.
+        if (this.vfpShowAdditionalTooltip()) {
+            this.getItem().appendHoverText(this, context, display, builder, tooltipFlag);
+        }
+
         this.addToTooltip(DataComponents.TROPICAL_FISH_PATTERN, context, display, builder, tooltipFlag);
         this.addToTooltip(DataComponents.INSTRUMENT, context, display, builder, tooltipFlag);
         this.addToTooltip(DataComponents.MAP_ID, context, display, builder, tooltipFlag);
@@ -959,7 +1015,25 @@ public final class ItemStack
         }
     }
 
+    // MODIFIED for porting: was VFP item/tooltip MixinItemStack#hideAdditionalTooltip (@WrapWithCondition body)
+    private boolean vfpShowAdditionalTooltip() {
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            final CompoundTag tag = ItemUtil.getTagOrNull(this);
+            final CompoundTag backup = tag == null ? null : tag.getCompoundOrEmpty(ItemUtil.vvNbtName(Protocol1_21_4To1_21_5.class, "backup"));
+            return backup == null || !backup.contains("hide_additional_tooltip");
+        } else {
+            return true;
+        }
+    }
+
     private void addAttributeTooltips(final Consumer<Component> consumer, final TooltipDisplay display, final @Nullable Player player) {
+        // MODIFIED for porting: was VFP item/attack_damage MixinItemStack#captureItemEnchantments (@Inject HEAD).
+        // Ungated: hands this stack's enchantments to Display.Default so its apply() can compute the legacy
+        // sharpness bonus.
+        ((IDisplayDefault)ItemAttributeModifiers.Display.attributeModifiers()).viaFabricPlus$setItemEnchantments(
+            EnchantmentHelper.getEnchantmentsForCrafting(this)
+        );
+
         if (display.shows(DataComponents.ATTRIBUTE_MODIFIERS)) {
             for (EquipmentSlotGroup slot : EquipmentSlotGroup.values()) {
                 MutableBoolean first = new MutableBoolean(true);

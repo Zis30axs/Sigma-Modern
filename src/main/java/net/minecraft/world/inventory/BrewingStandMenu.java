@@ -1,6 +1,8 @@
 package net.minecraft.world.inventory;
 
 import java.util.Optional;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.advancements.triggers.CriteriaTriggers;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
@@ -133,7 +135,23 @@ public class BrewingStandMenu extends AbstractContainerMenu {
         }
 
         public static boolean mayPlaceItem(final ItemStack itemStack) {
+            // MODIFIED for porting: was VFP interaction/remove_fuel_slot
+            // MixinBrewingStandMenu_FuelSlot#removeFuelSlot (@Inject HEAD, cancellable)
+            // The blaze powder fuel slot only exists from 1.9 on. Gating the static form also covers
+            // FuelSlot#mayPlace above and BrewingStandMenu#quickMoveStack, which both call it.
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                return false;
+            }
+
             return itemStack.is(ItemTags.BREWING_FUEL);
+        }
+
+        // MODIFIED for porting: was VFP interaction/remove_fuel_slot MixinBrewingStandMenu_FuelSlot#isActive
+        // (@Override, added method)
+        // <=1.8 has no fuel slot, so it must not be rendered or clickable either.
+        @Override
+        public boolean isActive() {
+            return ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_8);
         }
 
         @Override

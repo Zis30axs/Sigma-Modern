@@ -37,6 +37,7 @@ import com.viaversion.viafabricplus.protocoltranslator.netty.NoReadFlowControlHa
 import com.viaversion.viafabricplus.protocoltranslator.netty.ViaFabricPlusDecoder;
 import com.viaversion.viafabricplus.protocoltranslator.protocol.ViaFabricPlusProtocol;
 import com.viaversion.viafabricplus.protocoltranslator.util.NoPacketSendChannel;
+import com.viaversion.viafabricplus.protocoltranslator.impl.viaversion.ViaFabricPlusProtocolPatches;
 import com.viaversion.viaversion.ViaManagerImpl;
 import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.ProtocolInfo;
@@ -313,6 +314,11 @@ public final class ProtocolTranslator {
                     new ViaBedrockPlatformImpl();
                 }
             );
+            // MODIFIED for porting: stands in for the ViaFabricPlus mixins whose target is a ViaVersion
+            // class, which cannot be inlined into a Minecraft source tree. This has to run after
+            // initAndLoad returns - ViaFabricPlusPlatformLoader#load() is called from inside it, while the
+            // protocols' own registerPackets() is still running on the mapping-loader pool.
+            ViaFabricPlusProtocolPatches.apply();
             ProtocolVersion.register(AUTO_DETECT_PROTOCOL);
             changeBedrockProtocolName();
             ViaFabricPlusProtocol.INSTANCE.initialize();

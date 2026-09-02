@@ -1,8 +1,12 @@
 package net.minecraft.client.gui.screens.inventory;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viafabricplus.settings.impl.DebugSettings;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.client.GameNarrator;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
@@ -162,6 +166,24 @@ public class JigsawBlockEditScreen extends Screen {
         );
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> this.onCancel()).bounds(this.width / 2 + 4, 210, 150, 20).build());
         this.updateValidity();
+        // MODIFIED for porting: was VFP screen_changes MixinJigsawBlockEditScreen#disableWidgets (@Inject RETURN).
+        // The widgets that older protocols cannot carry are greyed out: priorities arrived in 1.20.3, the separate
+        // name field and the joint/levels/keep-jigsaws/generate controls in 1.16.
+        if (DebugSettings.INSTANCE.hideModernJigsawScreenFeatures.getValue()) {
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_2)) {
+                this.selectionPriorityEdit.active = false;
+                this.placementPriorityEdit.active = false;
+            }
+
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+                this.nameEdit.active = false;
+                this.jointButton.active = false;
+                int index = this.children().indexOf(this.jointButton);
+                ((AbstractWidget)this.children().get(index + 1)).active = false; // levels slider
+                ((AbstractWidget)this.children().get(index + 2)).active = false; // keep jigsaws toggle
+                ((AbstractWidget)this.children().get(index + 3)).active = false; // generate button
+            }
+        }
     }
 
     @Override
@@ -222,6 +244,13 @@ public class JigsawBlockEditScreen extends Screen {
 
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        // MODIFIED for porting: was VFP screen_changes MixinJigsawBlockEditScreen#copyText (@Inject HEAD).
+        // <= 1.15.2 had no separate name field, so the target value is mirrored into it.
+        if (DebugSettings.INSTANCE.hideModernJigsawScreenFeatures.getValue()
+            && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_15_2)) {
+            this.nameEdit.setValue(this.targetEdit.getValue());
+        }
+
         super.extractRenderState(graphics, mouseX, mouseY, a);
         graphics.text(this.font, POOL_LABEL, this.width / 2 - 153, 10, -6250336);
         this.poolEdit.extractRenderState(graphics, mouseX, mouseY, a);

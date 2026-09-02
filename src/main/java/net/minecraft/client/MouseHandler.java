@@ -394,7 +394,14 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
     }
 
     private void turnPlayer(final double mousea) {
-        double ss = this.minecraft.options.sensitivity().get() * 0.6F + 0.2F;
+        // MODIFIED for porting: was VFP mouse_sensitivity MixinMouseHandler#adjustMouseSensitivity1_13_2 (@WrapOperation ordinal 0 OptionInstance#get)
+        // Targets <=1.13.2 quantise the sensitivity slider to the pre-1.14 142px step, which changes the look delta sent.
+        final double rawSensitivity = this.minecraft.options.sensitivity().get();
+        final double sensitivity = com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator.getTargetVersion()
+                .olderThanOrEqualTo(com.viaversion.viaversion.api.protocol.version.ProtocolVersion.v1_13_2)
+            ? (double)com.viaversion.viafabricplus.features.mouse_sensitivity.MouseSensitivity1_13_2.get1_13SliderValue((float)rawSensitivity).keyFloat()
+            : rawSensitivity;
+        double ss = sensitivity * 0.6F + 0.2F;
         double sensitivityMod = ss * ss * ss;
         double sens = sensitivityMod * 8.0;
         double xo;

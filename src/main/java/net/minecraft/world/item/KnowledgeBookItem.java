@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +29,17 @@ public class KnowledgeBookItem extends Item {
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
         List<ResourceKey<Recipe<?>>> recipeIds = itemStack.getOrDefault(DataComponents.RECIPES, List.of());
-        itemStack.consume(1, player);
+        // MODIFIED for porting: was VFP item/interaction MixinKnowledgeBookItem#removeFullStack (@Redirect on the
+        // ItemStack#consume call). <= 1.20.5 servers delete the whole knowledge book stack, so the client clears the
+        // entire hand slot instead of shrinking by one.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+            if (!player.hasInfiniteMaterials()) {
+                player.setItemInHand(hand, ItemStack.EMPTY);
+            }
+        } else {
+            itemStack.consume(1, player);
+        }
+
         if (recipeIds.isEmpty()) {
             return InteractionResult.FAIL;
         }

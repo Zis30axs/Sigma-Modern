@@ -1,6 +1,8 @@
 package net.minecraft.world.entity.animal.happyghast;
 
 import java.util.List;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -251,7 +253,9 @@ public class HappyGhast extends Animal {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return this.isBaby() ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
+        // MODIFIED for porting: was VFP entity.dimensions MixinHappyGhast#dontChangeScale (@Redirect INVOKE isBaby)
+        // Targets <=26.1 keep the adult box for baby happy ghasts; only >26.1 shrinks it to BABY_DIMENSIONS.
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
     }
 
     @Override

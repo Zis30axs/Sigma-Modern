@@ -3,6 +3,8 @@ package net.minecraft.world.scores;
 import com.google.common.collect.Sets;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -116,7 +118,42 @@ public class PlayerTeam extends Team {
 
     @Override
     public MutableComponent getFormattedName(final Component teamMemberName) {
+        // MODIFIED for porting: was VFP scoreboard MixinPlayerTeam#decorateName1_12_2 (@Inject HEAD, cancellable).
+        // All components were legacy strings prior to 1.13, meaning their styles are not separated but used across the
+        // whole component: the prefix's trailing style carries into the member name and that style into the suffix.
+        // Returning here skips vanilla's applyColor, so the team colour is not re-applied on top.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+            final Style prefixStyle = this.vfpGetLastStyle(this.playerPrefix);
+            final Component nameWithStyle = this.vfpFillStyle(teamMemberName, prefixStyle);
+            final Style nameStyle = this.vfpGetLastStyle(nameWithStyle);
+            return Component.empty()
+                .append(this.playerPrefix)
+                .append(nameWithStyle)
+                .append(this.vfpFillStyle(this.playerSuffix, nameStyle));
+        }
+
         return this.applyColor(Component.empty().append(this.playerPrefix).append(teamMemberName).append(this.playerSuffix));
+    }
+
+    // MODIFIED for porting: was VFP scoreboard MixinPlayerTeam#viaFabricPlus$getLastStyle (@Unique)
+    private Style vfpGetLastStyle(final Component text) {
+        for (int i = text.getSiblings().size() - 1; i >= 0; i--) {
+            final Component sibling = text.getSiblings().get(i);
+            if (sibling.getStyle() != Style.EMPTY) {
+                return sibling.getStyle();
+            }
+        }
+
+        return text.getStyle();
+    }
+
+    // MODIFIED for porting: was VFP scoreboard MixinPlayerTeam#viaFabricPlus$fillStyle (@Unique)
+    private Component vfpFillStyle(final Component text, final Style style) {
+        if (text.getStyle() != Style.EMPTY) {
+            return text;
+        } else {
+            return text.copy().withStyle(style);
+        }
     }
 
     public static MutableComponent formatNameForTeam(final @Nullable Team team, final Component name) {

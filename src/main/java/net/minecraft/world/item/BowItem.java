@@ -1,5 +1,7 @@
 package net.minecraft.world.item;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import net.raphimc.vialegacy.api.LegacyProtocolVersion;
 import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.server.level.ServerLevel;
@@ -83,16 +85,41 @@ public class BowItem extends ProjectileWeaponItem {
 
     @Override
     public int getUseDuration(final ItemStack itemStack, final LivingEntity user) {
+        // MODIFIED for porting: was VFP item/interaction MixinBowItem#makeInstantUsable_Time (@Inject HEAD, cancellable)
+        // <= b1.7.3 bows fired the moment they were used, so there is no draw duration to count down.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_7tob1_7_3)) {
+            return 0;
+        }
+
         return 72000;
     }
 
     @Override
     public ItemUseAnimation getUseAnimation(final ItemStack itemStack) {
+        // MODIFIED for porting: was VFP item/interaction MixinBowItem#makeInstantUsable_Action (@Inject HEAD, cancellable)
+        // No draw animation on <= b1.7.3 either.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_7tob1_7_3)) {
+            return ItemUseAnimation.NONE;
+        }
+
         return ItemUseAnimation.BOW;
     }
 
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
+        // MODIFIED for porting: was VFP item/interaction MixinBowItem#makeInstantUsable (@Inject HEAD, cancellable)
+        // <= b1.7.3 shot instantly instead of starting an item use, so the arrow is consumed client side here and
+        // startUsingItem below is never reached.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(LegacyProtocolVersion.b1_7tob1_7_3)) {
+            final ItemStack arrowStack = player.getProjectile(player.getItemInHand(hand));
+            if (arrowStack.isEmpty()) {
+                return InteractionResult.FAIL;
+            } else {
+                arrowStack.shrink(1);
+                return InteractionResult.PASS;
+            }
+        }
+
         ItemStack itemStack = player.getItemInHand(hand);
         boolean foundProjectile = !player.getProjectile(itemStack).isEmpty();
         if (!player.hasInfiniteMaterials() && !foundProjectile) {

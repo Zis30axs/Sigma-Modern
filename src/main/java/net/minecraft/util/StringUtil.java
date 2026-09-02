@@ -1,5 +1,6 @@
 package net.minecraft.util;
 
+import com.viaversion.viafabricplus.features.limitation.max_chat_length.MaxChatLength;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,7 +57,10 @@ public class StringUtil {
     }
 
     public static String trimChatMessage(final String message) {
-        return truncateStringIfNecessary(message, 256, false);
+        // MODIFIED for porting: was VFP max_chat_length MixinStringUtil#modifyMaxChatLength
+        // (@ModifyExpressionValue trimChatMessage, CONSTANT intValue=256). This is the length the message that goes on
+        // the wire is trimmed to, so it has to follow the target's limit and not vanilla's 256.
+        return truncateStringIfNecessary(message, MaxChatLength.getChatLength(), false);
     }
 
     public static boolean isAllowedChatCharacter(final int ch) {

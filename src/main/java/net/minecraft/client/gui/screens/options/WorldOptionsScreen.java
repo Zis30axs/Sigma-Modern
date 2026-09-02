@@ -1,5 +1,7 @@
 package net.minecraft.client.gui.screens.options;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
@@ -92,6 +94,12 @@ public class WorldOptionsScreen extends Screen implements HasGamemasterPermissio
             }
         }).build();
         this.updateButton(this.gameRulesButton, singleplayerServer, GAMERULES_DISABLED_HARDCORE_TOOLTIP, GAMERULES_DISABLED_TOOLTIP);
+        // MODIFIED for porting: was VFP screen_changes MixinWorldOptionsScreen#disableGameRules (@Inject RETURN).
+        // The in-world game rule editor needs the 1.21.12+ serverbound flow, so the button is dead on older targets.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_11)) {
+            this.gameRulesButton.active = false;
+        }
+
         return this.gameRulesButton;
     }
 

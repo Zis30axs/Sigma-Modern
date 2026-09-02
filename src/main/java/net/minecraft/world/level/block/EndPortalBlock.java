@@ -1,5 +1,7 @@
 package net.minecraft.world.level.block;
 
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.mojang.serialization.MapCodec;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
@@ -32,6 +34,10 @@ import org.jspecify.annotations.Nullable;
 public class EndPortalBlock extends BaseEntityBlock implements Portal {
     public static final MapCodec<EndPortalBlock> CODEC = simpleCodec(EndPortalBlock::new);
     private static final VoxelShape SHAPE = Block.column(16.0, 6.0, 12.0);
+    // MODIFIED for porting: was VFP block/shape MixinEndPortalBlock#viaFabricPlus$shape_r1_8_x and
+    // viaFabricPlus$shape_r1_16_5 (@Unique constants)
+    private static final VoxelShape vfpShapeR1_8X = Block.box(0.0, 0.0, 0.0, 16.0, 1.0, 16.0);
+    private static final VoxelShape vfpShapeR1_16_5 = Block.box(0.0, 0.0, 0.0, 16.0, 12.0, 16.0);
 
     @Override
     public MapCodec<EndPortalBlock> codec() {
@@ -49,6 +55,15 @@ public class EndPortalBlock extends BaseEntityBlock implements Portal {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinEndPortalBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // 1.8 and older drew the end portal as a 1px plate, 1.9 through 1.16.4 as a 12px slab. This feeds collision
+        // too, since BlockBehaviour#getCollisionShape delegates to getShape.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return vfpShapeR1_8X;
+        } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
+            return vfpShapeR1_16_5;
+        }
+
         return SHAPE;
     }
 

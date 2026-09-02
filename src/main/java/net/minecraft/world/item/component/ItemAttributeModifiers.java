@@ -4,6 +4,9 @@ import com.google.common.collect.ImmutableList;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.viaversion.viafabricplus.injection.access.item.attack_damage.IDisplayDefault;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import io.netty.buffer.ByteBuf;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
@@ -30,6 +33,9 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import org.apache.commons.lang3.function.TriConsumer;
 import org.jspecify.annotations.Nullable;
 
@@ -148,10 +154,51 @@ public record ItemAttributeModifiers(List<ItemAttributeModifiers.Entry> modifier
 
         void apply(Consumer<Component> consumer, @Nullable Player player, Holder<Attribute> attribute, AttributeModifier modifier);
 
-        record Default() implements ItemAttributeModifiers.Display {
+        // MODIFIED for porting: was VFP item/attack_damage MixinItemAttributeModifiers_Display_Default
+        // (implements IDisplayDefault)
+        record Default() implements ItemAttributeModifiers.Display, IDisplayDefault {
             private static final ItemAttributeModifiers.Display.Default INSTANCE = new ItemAttributeModifiers.Display.Default();
             private static final MapCodec<ItemAttributeModifiers.Display.Default> CODEC = MapCodec.unit(INSTANCE);
             private static final StreamCodec<RegistryFriendlyByteBuf, ItemAttributeModifiers.Display.Default> STREAM_CODEC = StreamCodec.unit(INSTANCE);
+            // MODIFIED for porting: was VFP item/attack_damage MixinItemAttributeModifiers_Display_Default
+            // @Unique viaFabricPlus$itemEnchantments - written by ItemStack#addAttributeTooltips before apply()
+            // runs. A record cannot declare an instance field, but Default is the singleton INSTANCE above, so
+            // static state is equivalent to upstream's per-instance field.
+            private static @Nullable ItemEnchantments vfpItemEnchantments;
+
+            // MODIFIED for porting: was VFP item/attack_damage MixinItemAttributeModifiers_Display_Default
+            // #viaFabricPlus$setItemEnchantments (accessor interface method)
+            @Override
+            public void viaFabricPlus$setItemEnchantments(final ItemEnchantments itemEnchantments) {
+                vfpItemEnchantments = itemEnchantments;
+            }
+
+            // MODIFIED for porting: was VFP item/attack_damage MixinItemAttributeModifiers_Display_Default
+            // #fixAttackDamageCalculation (@Redirect on Player#getAttributeBaseValue, ordinal 0). <= 1.20.5 had
+            // no attribute-based sharpness bonus, so it is computed from the enchantments here; <= 1.8 showed
+            // only that bonus, without the player's base attack damage.
+            private static double vfpAttackDamageBaseValue(final Player instance, final Holder<Attribute> attribute) {
+                double value = 0.0;
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_20_5)) {
+                    for (Holder<Enchantment> enchantment : vfpItemEnchantments.keySet()) {
+                        if (enchantment.is(Enchantments.SHARPNESS)) {
+                            final int level = vfpItemEnchantments.getLevel(enchantment);
+                            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                                value = level * 1.25F;
+                            } else {
+                                value = 1.0F + (float)Math.max(0, level - 1) * 0.5F;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                    return value;
+                } else {
+                    return instance.getAttributeBaseValue(attribute) + value;
+                }
+            }
 
             @Override
             public ItemAttributeModifiers.Display.Type type() {
@@ -166,7 +213,7 @@ public record ItemAttributeModifiers(List<ItemAttributeModifiers.Entry> modifier
                 boolean displayWithBase = false;
                 if (player != null) {
                     if (modifier.is(Item.BASE_ATTACK_DAMAGE_ID)) {
-                        amount += player.getAttributeBaseValue(Attributes.ATTACK_DAMAGE);
+                        amount += vfpAttackDamageBaseValue(player, Attributes.ATTACK_DAMAGE);
                         displayWithBase = true;
                     } else if (modifier.is(Item.BASE_ATTACK_SPEED_ID)) {
                         amount += player.getAttributeBaseValue(Attributes.ATTACK_SPEED);

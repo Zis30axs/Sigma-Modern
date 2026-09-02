@@ -22,6 +22,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.BlockItemTags;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.ByIdMap;
 import net.minecraft.util.RandomSource;
@@ -101,7 +102,9 @@ public class MushroomCow extends AbstractCow implements Shearable {
     @Override
     public InteractionResult mobInteract(final Player player, final InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
-        if (itemStack.is(Items.BOWL) && !this.isBaby()) {
+        // MODIFIED for porting: was VFP entity.interaction MixinMushroomCow#allowBabyVariant (@Redirect isBaby ordinal 0)
+        // Only >1.21.11 targets refuse to milk a baby mooshroom.
+        if (itemStack.is(Items.BOWL) && !(ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_11) && this.isBaby())) {
             boolean isSuspicious = false;
             ItemStack stew;
             if (this.stewEffects != null) {
@@ -133,9 +136,22 @@ public class MushroomCow extends AbstractCow implements Shearable {
 
             return InteractionResult.SUCCESS;
         } else if (this.getVariant() == MushroomCow.Variant.BROWN && !this.isBaby()) {
+            // MODIFIED for porting: was VFP entity.interaction MixinMushroomCow#checkForItemTags
+            // (@Inject INVOKE getEffectsFromItemStack, cancellable). Targets <=1.21.2 only accepted small flowers
+            // here, not any effect-bearing item.
+            if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)
+                && !itemStack.is(BlockItemTags.SMALL_FLOWERS.item())) {
+                return super.mobInteract(player, hand);
+            }
+
             Optional<SuspiciousStewEffects> effectsFromItemStack = this.getEffectsFromItemStack(itemStack);
             if (effectsFromItemStack.isEmpty()) {
-                return super.mobInteract(player, hand);
+                // MODIFIED for porting: was VFP entity.interaction MixinMushroomCow#directPass
+                // (@Redirect AbstractCow#mobInteract ordinal 0). Targets <=1.21.2 pass here instead of falling
+                // through to the cow interaction.
+                return ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_2)
+                    ? InteractionResult.PASS
+                    : super.mobInteract(player, hand);
             }
 
             if (this.stewEffects != null) {
@@ -246,7 +262,9 @@ public class MushroomCow extends AbstractCow implements Shearable {
 
     @Override
     public EntityDimensions getDefaultDimensions(final Pose pose) {
-        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose); // MODIFIED for porting
+        // MODIFIED for porting: was VFP entity.dimensions MixinMushroomCow#dontChangeScale (@Redirect isBaby)
+        // Only >26.1 targets give baby mooshrooms BABY_DIMENSIONS; older ones take the age-scaled super box.
+        return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v26_1) && this.isBaby()) ? BABY_DIMENSIONS : super.getDefaultDimensions(pose);
     }
 
     public @Nullable MushroomCow getBreedOffspring(final ServerLevel level, final AgeableMob partner) {

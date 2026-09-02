@@ -63,6 +63,9 @@ public class RedStoneWireBlock extends Block {
         }
     });
     private static final float PARTICLE_DENSITY = 0.2F;
+    // MODIFIED for porting: was VFP block/shape MixinRedStoneWireBlock#viaFabricPlus$outline_shape_r1_8_x (@Unique
+    // field) - upstream holds it per instance, but the value never varies, so a constant is equivalent.
+    private static final VoxelShape vfpOutlineShapeR1_8X = Shapes.box(0.0, 0.0, 0.0, 1.0, 0.0625, 1.0);
     private final Function<BlockState, VoxelShape> shapes;
     private final BlockState crossState;
     private final RedstoneWireEvaluator evaluator = new DefaultRedstoneWireEvaluator(this);
@@ -115,6 +118,12 @@ public class RedStoneWireBlock extends Block {
 
     @Override
     protected VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinRedStoneWireBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        // <= 1.8 always drew redstone wire as one flat full-tile 1px slab, independent of the wire's connection state.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+            return vfpOutlineShapeR1_8X;
+        }
+
         return this.shapes.apply(state);
     }
 

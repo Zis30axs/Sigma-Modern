@@ -2,6 +2,8 @@ package net.minecraft.world.level.block;
 
 import com.mojang.serialization.MapCodec;
 import java.util.function.Function;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -39,6 +41,22 @@ public class PitcherCropBlock extends DoublePlantBlock implements BonemealableBl
     private static final int BONEMEAL_INCREASE = 1;
     private static final VoxelShape SHAPE_BULB = Block.column(6.0, -1.0, 3.0);
     private static final VoxelShape SHAPE_CROP = Block.column(10.0, -1.0, 5.0);
+    // MODIFIED for porting: was VFP block/shape MixinPitcherCropBlock @Unique constants
+    // (viaFabricPlus$grown_upper_outline_shape_r1_21_4, viaFabricPlus$grown_lower_outline_shape_r1_21_4,
+    // viaFabricPlus$upper_outline_shapes_r1_21_4, viaFabricPlus$lower_outline_shapes_r1_21_4)
+    // 1.21.4 and older used these fixed tables instead of the per-state generated shapes below.
+    private static final VoxelShape vfpGrownUpperOutlineShapeR1_21_4 = Block.box(3.0, 0.0, 3.0, 13.0, 15.0, 13.0);
+    private static final VoxelShape vfpGrownLowerOutlineShapeR1_21_4 = Block.box(3.0, -1.0, 3.0, 13.0, 16.0, 13.0);
+    private static final VoxelShape[] vfpUpperOutlineShapesR1_21_4 = new VoxelShape[]{
+        Block.box(3.0, 0.0, 3.0, 13.0, 11.0, 13.0), vfpGrownUpperOutlineShapeR1_21_4
+    };
+    private static final VoxelShape[] vfpLowerOutlineShapesR1_21_4 = new VoxelShape[]{
+        SHAPE_BULB,
+        Block.box(3.0, -1.0, 3.0, 13.0, 14.0, 13.0),
+        vfpGrownLowerOutlineShapeR1_21_4,
+        vfpGrownLowerOutlineShapeR1_21_4,
+        vfpGrownLowerOutlineShapeR1_21_4
+    };
     private final Function<BlockState, VoxelShape> shapes = this.makeShapes();
 
     @Override
@@ -70,11 +88,32 @@ public class PitcherCropBlock extends DoublePlantBlock implements BonemealableBl
 
     @Override
     public VoxelShape getShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinPitcherCropBlock#changeOutlineShape (@Inject HEAD, cancellable)
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            final int age = state.getValue(AGE);
+            if (state.getValue(HALF) == DoubleBlockHalf.UPPER) {
+                return vfpUpperOutlineShapesR1_21_4[Math.min(Math.abs(4 - (age + 1)), vfpUpperOutlineShapesR1_21_4.length - 1)];
+            } else {
+                return vfpLowerOutlineShapesR1_21_4[age];
+            }
+        }
+
         return this.shapes.apply(state);
     }
 
     @Override
     public VoxelShape getCollisionShape(final BlockState state, final BlockGetter level, final BlockPos pos, final CollisionContext context) {
+        // MODIFIED for porting: was VFP block/shape MixinPitcherCropBlock#changeBlockStatePropertyPriority (@Inject HEAD, cancellable)
+        // <= 1.21.4 tested AGE before HALF, so a bulb (age 0) collides as SHAPE_BULB on both halves and a grown
+        // upper half falls through to the DoublePlantBlock collision shape instead of being empty.
+        if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
+            if (state.getValue(AGE) == 0) {
+                return SHAPE_BULB;
+            } else {
+                return state.getValue(HALF) == DoubleBlockHalf.LOWER ? SHAPE_CROP : super.getCollisionShape(state, level, pos, context);
+            }
+        }
+
         if (state.getValue(HALF) == DoubleBlockHalf.LOWER) {
             return state.getValue(AGE) == 0 ? SHAPE_BULB : SHAPE_CROP;
         } else {
