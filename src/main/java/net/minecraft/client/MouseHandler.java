@@ -267,7 +267,13 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
     }
 
     // MODIFIED for porting: was VFP execute_inputs_sync MixinMouseHandler#storeEvent
-    // (@Redirect on Minecraft#execute in the setup callbacks)
+    // (@Redirect on Minecraft#execute in the setup callbacks). Upstream names lambda$setup$1 and
+    // lambda$setup$2. Under the lambda naming MC 26.2 is built with, setup's four callbacks desugar to
+    // $0 = cursor-pos outer, $1 = its inner onMove Runnable, $2 = mouse-button outer, $3 = its inner
+    // Runnable - and only $2 contains a Minecraft#execute call, so upstream effectively queues mouse-button
+    // events only ($1 no longer resolves to anything with a call to redirect). Only the button callback is
+    // wrapped here; queueing cursor movement as well would drop GUI hover/drag updates to 20 Hz, because
+    // MouseHandler#handleAccumulatedMovement runs per frame while the drain runs per tick.
     private void vfpStoreScreenEvent(final Runnable runnable) {
         if (this.minecraft.getConnection() != null
             && this.minecraft.gui.screen() != null
@@ -280,7 +286,7 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
 
     public void setup(final Window window) {
         InputConstants.setupMouseCallbacks(
-            window, (window1, xpos, ypos) -> this.vfpStoreScreenEvent(() -> this.onMove(window1, xpos, ypos)), (window1, button, action, mods) -> {
+            window, (window1, xpos, ypos) -> this.minecraft.execute(() -> this.onMove(window1, xpos, ypos)), (window1, button, action, mods) -> {
                 MouseButtonInfo buttonInfo = new MouseButtonInfo(button, mods);
                 this.vfpStoreScreenEvent(() -> this.onButton(window1, buttonInfo, action));
             }, (window1, xoffset, yoffset) -> this.minecraft.execute(() -> this.onScroll(window1, xoffset, yoffset)), (window1, count, namesPtr) -> {

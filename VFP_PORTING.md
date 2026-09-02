@@ -62,8 +62,8 @@ accessor 接口保留为普通接口由目标类实现；入口点改为 bootstr
 ~~ViaFabricPlus 4.6.3 已完整移植到 Sigma-Modern MCP 源码环境。~~
 
 **这个结论是错的，已撤回。** 2026-09-02 做了一次全量逐 hook 审计：上游 368 个 mixin / 726 个 hook，
-当时实际内联的只有约 152 个（20.9%）。参见 **[VFP_AUDIT.md](VFP_AUDIT.md)** —— 那份文件是唯一的账本，
-本文件以下内容仅作历史记录。
+当时实际内联的只有 152 个（20.9%）。同日的收尾工作把覆盖率推到 **660/726 = 90.9%**，MISSING 归零。
+参见 **[VFP_AUDIT.md](VFP_AUDIT.md)** —— 那份文件是唯一的账本，本文件以下内容仅作历史记录。
 
 审计还在“已标记完成”的代码里发现三处缺陷（config-state autoRead 在 netty 线程上是死代码、
 `alwaysSignCommands` 逻辑取反、`dontOpenConfirmationScreens` 门控错误），详见 VFP_AUDIT.md。
