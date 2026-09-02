@@ -24,6 +24,7 @@ package com.viaversion.viafabricplus.util.network;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
@@ -31,10 +32,18 @@ public record DataCustomPayload(FriendlyByteBuf buf) implements CustomPacketPayl
 
     public static final CustomPacketPayload.Type<DataCustomPayload> ID = new CustomPacketPayload.Type<>(Identifier.parse(SyncTasks.PACKET_SYNC_IDENTIFIER));
 
-    public static void init() {
-        PayloadTypeRegistry.clientboundConfiguration().register(DataCustomPayload.ID, CustomPacketPayload.codec((value, buf) -> {
+    // MODIFIED for porting: pulled out of init() so ClientboundCustomPayloadPacket's static codec lists can
+    // reference it directly. Sigma's net.fabricmc PayloadTypeRegistry stand-in has no reader, so the upstream
+    // registration alone would never make this payload decodable.
+    public static final StreamCodec<FriendlyByteBuf, DataCustomPayload> STREAM_CODEC = CustomPacketPayload.codec(
+        (value, buf) -> {
             throw new UnsupportedOperationException("DataCustomPayload is a read-only packet");
-        }, buf -> new DataCustomPayload(new FriendlyByteBuf(Unpooled.copiedBuffer(buf.readSlice(buf.readableBytes()))))));
+        },
+        buf -> new DataCustomPayload(new FriendlyByteBuf(Unpooled.copiedBuffer(buf.readSlice(buf.readableBytes()))))
+    );
+
+    public static void init() {
+        PayloadTypeRegistry.clientboundConfiguration().register(DataCustomPayload.ID, STREAM_CODEC);
     }
 
     @Override

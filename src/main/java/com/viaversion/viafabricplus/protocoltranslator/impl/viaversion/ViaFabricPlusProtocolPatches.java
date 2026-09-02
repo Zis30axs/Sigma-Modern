@@ -23,6 +23,10 @@ package com.viaversion.viafabricplus.protocoltranslator.impl.viaversion;
 
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.features.classic.world_height.WorldHeightSupport;
+import com.viaversion.viafabricplus.injection.access.interaction.r1_18_2_block_ack_emulation.IMultiPlayerGameMode;
+import com.viaversion.viafabricplus.injection.access.networking.packet_handling.IGameTestBlockHighlightRenderer;
+import com.viaversion.viafabricplus.protocoltranslator.translator.BlockStateTranslator;
+import com.viaversion.viafabricplus.util.network.SyncTasks;
 import com.viaversion.viafabricplus.features.limitation.max_chat_length.MaxChatLength;
 import com.viaversion.viafabricplus.settings.impl.DebugSettings;
 import com.viaversion.viafabricplus.util.NotificationUtil;
@@ -42,9 +46,21 @@ import com.viaversion.viaversion.protocols.v1_10to1_11.Protocol1_10To1_11;
 import com.viaversion.viaversion.protocols.v1_15_2to1_16.packet.ClientboundPackets1_16;
 import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.Protocol1_16_1To1_16_2;
 import com.viaversion.viaversion.protocols.v1_16_1to1_16_2.packet.ClientboundPackets1_16_2;
+import com.viaversion.viaversion.protocols.v1_13_2to1_14.Protocol1_13_2To1_14;
+import com.viaversion.viaversion.protocols.v1_13_2to1_14.packet.ServerboundPackets1_14;
+import com.viaversion.viaversion.protocols.v1_12_2to1_13.packet.ServerboundPackets1_13;
 import com.viaversion.viaversion.protocols.v1_16_4to1_17.Protocol1_16_4To1_17;
+import com.viaversion.viaversion.protocols.v1_17_1to1_18.packet.ClientboundPackets1_18;
+import com.viaversion.viaversion.protocols.v1_18_2to1_19.Protocol1_18_2To1_19;
+import com.viaversion.viaversion.protocols.v1_18_2to1_19.packet.ClientboundPackets1_19;
+import com.viaversion.viaversion.protocols.v1_21_5to1_21_6.packet.ClientboundPackets1_21_6;
+import com.viaversion.viaversion.protocols.v1_21_7to1_21_9.Protocol1_21_7To1_21_9;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.world.level.block.state.BlockState;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -129,6 +145,83 @@ public final class ViaFabricPlusProtocolPatches {
         applyConfigStatePacketQueue(protocolManager);
         applyMaxChatLength(protocolManager);
         applyClassicWorldHeight(protocolManager);
+        applySyncTaskProducers(protocolManager);
+    }
+
+    // The three ViaVersion-side producers of ViaFabricPlus' sync-task custom payload. Without them the
+    // SyncTasks transport (already ported, and now actually decodable - see ClientboundCustomPayloadPacket)
+    // has nothing to carry.
+    private static void applySyncTaskProducers(final ProtocolManager protocolManager) {
+        // was VFP features/interaction/r1_18_2_block_ack_emulation/MixinWorldPacketRewriter1_19
+        // #handleLegacyAcknowledgePlayerDigging (@Redirect replacing Protocol#cancelClientbound). ViaVersion
+        // drops the 1.18 block-break acknowledgement; 1.14.4..1.18.2 targets need it to undo a rejected
+        // dig client-side, so it is turned into a sync task instead. override = true displaces Via's cancel.
+        final Protocol1_18_2To1_19 protocol1_18_2To1_19 = protocolManager.getProtocol(Protocol1_18_2To1_19.class);
+        if (protocol1_18_2To1_19 != null) {
+            protocol1_18_2To1_19.registerClientbound(ClientboundPackets1_18.BLOCK_BREAK_ACK, ClientboundPackets1_19.CUSTOM_PAYLOAD, wrapper -> {
+                wrapper.resetReader();
+
+                final String uuid = SyncTasks.executeSyncTask(data -> {
+                    try {
+                        final BlockPos pos = data.readBlockPos();
+                        final BlockState blockState = BlockStateTranslator.via1_18_2toMc(data.readVarInt());
+                        final ServerboundPlayerActionPacket.Action action = data.readEnum(ServerboundPlayerActionPacket.Action.class);
+                        final boolean allGood = data.readBoolean();
+
+                        final IMultiPlayerGameMode gameMode = (IMultiPlayerGameMode)Minecraft.getInstance().gameMode;
+                        gameMode.viaFabricPlus$get1_18_2InteractionManager().handleBlockBreakAck(pos, blockState, action, allGood);
+                    } catch (final Throwable t) {
+                        throw new RuntimeException("Failed to handle BlockBreakAck packet data", t);
+                    }
+                });
+                wrapper.write(Types.STRING, SyncTasks.PACKET_SYNC_IDENTIFIER);
+                wrapper.write(Types.STRING, uuid);
+            }, true);
+        } else {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_18_2To1_19 is not registered, 1.18.2 block break acknowledgements stay dropped");
+        }
+
+        // was VFP features/large_container/MixinItemPacketRewriter1_14#dontResyncInventory (@Inject
+        // registerPackets RETURN). The companion hook in that mixin (#supportLargeContainers) is an @Inject
+        // with @Local captures INSIDE ViaVersion's OPEN_WINDOW lambda and cannot be expressed through the
+        // public API without copying that whole handler; it is recorded as still open in VFP_AUDIT.md.
+        final Protocol1_13_2To1_14 protocol1_13_2To1_14 = protocolManager.getProtocol(Protocol1_13_2To1_14.class);
+        if (protocol1_13_2To1_14 != null) {
+            protocol1_13_2To1_14.registerServerbound(ServerboundPackets1_14.SELECT_TRADE, ServerboundPackets1_13.SELECT_TRADE, null, true);
+        } else {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_13_2To1_14 is not registered, selecting a trade will resync the inventory");
+        }
+
+        // was VFP features/networking/packet_handling/MixinProtocol1_21_7To1_21_9#handleGameTestPayloads
+        // (@Inject registerPackets RETURN). Turns the two game-test debug payloads into sync tasks so the
+        // marker renderer is touched on the main thread. Registered without override, exactly as upstream:
+        // ViaVersion has no clientbound CUSTOM_PAYLOAD handler on this protocol, and a future collision
+        // should be loud rather than silently dropping Via's handler.
+        final Protocol1_21_7To1_21_9 protocol1_21_7To1_21_9 = protocolManager.getProtocol(Protocol1_21_7To1_21_9.class);
+        if (protocol1_21_7To1_21_9 != null) {
+            protocol1_21_7To1_21_9.registerClientbound(ClientboundPackets1_21_6.CUSTOM_PAYLOAD, wrapper -> {
+                final String channel = wrapper.passthrough(Types.STRING);
+                if (channel.equals("minecraft:debug/game_test_add_marker")) {
+                    wrapper.set(Types.STRING, 0, SyncTasks.PACKET_SYNC_IDENTIFIER);
+                    wrapper.write(Types.STRING, SyncTasks.executeSyncTask(buf -> {
+                        final BlockPos pos = buf.readBlockPos();
+                        final int color = buf.readInt();
+                        final String name = buf.readUtf();
+                        final int duration = buf.readInt();
+
+                        final IGameTestBlockHighlightRenderer renderer =
+                            (IGameTestBlockHighlightRenderer)Minecraft.getInstance().levelExtractor.gameTestBlockHighlightRenderer;
+                        renderer.viaFabricPlus$addMarker(pos, color, name, duration);
+                    }));
+                } else if (channel.equals("minecraft:debug/game_test_clear")) {
+                    wrapper.set(Types.STRING, 0, SyncTasks.PACKET_SYNC_IDENTIFIER);
+                    wrapper.write(Types.STRING, SyncTasks.executeSyncTask(
+                        buf -> Minecraft.getInstance().levelExtractor.gameTestBlockHighlightRenderer.clear()));
+                }
+            });
+        } else {
+            ViaFabricPlusImpl.INSTANCE.getLogger().warn("Protocol1_21_7To1_21_9 is not registered, game test debug markers will not render");
+        }
     }
 
     // was VFP features/classic/world_height MixinEntityPacketRewriter1_17#handleClassicWorldHeight,
