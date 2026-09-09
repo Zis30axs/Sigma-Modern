@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module;
 
+import com.mentalfrostbyte.jello.event.EnableAware;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.client.EventModuleToggle;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -41,7 +42,7 @@ import java.util.Optional;
  * announced. Toggling publishes an {@link EventModuleToggle} and whatever cares - the module list, a
  * sound, a notification - subscribes to that.</p>
  */
-public abstract class Module implements SettingHolder, MinecraftInstance {
+public abstract class Module implements SettingHolder, MinecraftInstance, EnableAware {
 
     private final String name;
 
@@ -96,24 +97,65 @@ public abstract class Module implements SettingHolder, MinecraftInstance {
      * Switches the module on or off. This is the only way its state changes: it subscribes or unsubscribes
      * the module, runs {@link #onEnable()} or {@link #onDisable()}, and publishes an
      * {@link EventModuleToggle}. Setting the state it already has does nothing.
+     *
+     * <p>Both directions are transactional. A successful enable leaves the module {@link #isEnabled()},
+     * with {@link #onEnable()} complete and exactly one subscription installed; a failed enable leaves it
+     * not enabled and not subscribed, with any partial setup best-effort rolled back and the original
+     * failure rethrown (a cleanup failure is attached to it as a suppressed exception rather than
+     * replacing it). A disable always leaves the module unsubscribed and {@code enabled == false}, even
+     * if {@link #onDisable()} itself throws - the transition already happened the moment the subscription
+     * was removed, so the failure is a bug in that cleanup, not an incomplete toggle.</p>
      */
     public final void setEnabled(final boolean enabled) {
         if (this.enabled == enabled) {
             return;
         }
 
-        this.enabled = enabled;
-        // Subscribed only while fully on: enable runs onEnable first so a packet event arriving from the
-        // network thread cannot reach a listener mid-setup, and disable unsubscribes before tearing down.
         if (enabled) {
-            this.onEnable();
-            EventBus.register(this);
+            this.enable();
         } else {
-            EventBus.unregister(this);
-            this.onDisable();
+            this.disable();
+        }
+    }
+
+    private void enable() {
+        // Set before onEnable() so a subscription installed a moment later is never mistaken by
+        // EventBus's disabled-subscriber guard (see EventBus#call) for one belonging to a module that
+        // failed to start. onEnable() still runs before register(), so no event can reach this module
+        // while it is mid-setup.
+        this.enabled = true;
+        boolean onEnableCompleted = false;
+        try {
+            this.onEnable();
+            onEnableCompleted = true;
+            EventBus.register(this);
+        } catch (final RuntimeException failure) {
+            this.enabled = false;
+            EventBus.unregister(this); // no-op unless register() above already ran
+            if (onEnableCompleted) {
+                try {
+                    this.onDisable();
+                } catch (final RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            throw failure;
         }
 
         EventBus.call(new EventModuleToggle(this));
+    }
+
+    private void disable() {
+        this.enabled = false;
+        EventBus.unregister(this);
+        try {
+            this.onDisable();
+        } finally {
+            // The module is already off and unsubscribed by this point regardless of onDisable()'s
+            // outcome, so listeners are told the truth even if onDisable() itself throws; the exception
+            // still propagates past this finally block.
+            EventBus.call(new EventModuleToggle(this));
+        }
     }
 
     public final void toggle() {

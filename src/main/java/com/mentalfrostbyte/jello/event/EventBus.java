@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,23 +64,23 @@ public final class EventBus {
         }));
     }
 
-    /** Removes every listener belonging to {@code subscriber}. Unknown objects are ignored. */
+    /**
+     * Removes every listener belonging to {@code subscriber}. Unknown objects are ignored.
+     *
+     * <p>Each event type is updated with a single {@link ConcurrentHashMap#computeIfPresent}, the same
+     * primitive {@link #register(Object)} builds on, so a concurrent {@code register}/{@code unregister}
+     * pair on the same event type can never lose an update the way a plain read-then-{@code setValue}
+     * (or a racing {@code remove(key, value)}) could: whichever of the two remappings runs second always
+     * sees the result of the first.</p>
+     */
     public static void unregister(final Object subscriber) {
-        for (Map.Entry<Class<? extends Event>, Subscription[]> entry : SUBSCRIPTIONS.entrySet()) {
-            Subscription[] current = entry.getValue();
-            Subscription[] remaining = Arrays.stream(current)
-                    .filter(subscription -> subscription.subscriber() != subscriber)
-                    .toArray(Subscription[]::new);
-
-            if (remaining.length == current.length) {
-                continue;
-            }
-
-            if (remaining.length == 0) {
-                SUBSCRIPTIONS.remove(entry.getKey(), current);
-            } else {
-                entry.setValue(remaining);
-            }
+        for (Class<? extends Event> eventType : SUBSCRIPTIONS.keySet()) {
+            SUBSCRIPTIONS.computeIfPresent(eventType, (type, current) -> {
+                Subscription[] remaining = Arrays.stream(current)
+                        .filter(subscription -> subscription.subscriber() != subscriber)
+                        .toArray(Subscription[]::new);
+                return remaining.length == 0 ? null : remaining;
+            });
         }
     }
 
@@ -91,6 +92,13 @@ public final class EventBus {
      * <p>A listener that throws is logged and skipped; the remaining listeners still run. That is
      * deliberate: a broken module must not take the game down or silently drop the vanilla body of
      * whichever method fired the event.</p>
+     *
+     * <p>Dispatch iterates a snapshot array, so a subscriber that was disabled after the snapshot was
+     * taken - e.g. a module toggled off on the game thread while this call started from a Netty thread
+     * with an older array already in hand - could otherwise still receive the event. Each subscription
+     * carries an {@link EnableAware#isEnabled()} check (true for an ordinary subscriber) taken at
+     * invocation time, so a subscriber that has since disabled itself is skipped even from a stale
+     * snapshot.</p>
      */
     public static <T extends Event> T call(final T event) {
         Subscription[] subscriptions = SUBSCRIPTIONS.get(event.getClass());
@@ -99,6 +107,10 @@ public final class EventBus {
         }
 
         for (Subscription subscription : subscriptions) {
+            if (!subscription.active().getAsBoolean()) {
+                continue;
+            }
+
             try {
                 subscription.method().invoke(subscription.subscriber(), event);
             } catch (InvocationTargetException failure) {
@@ -116,6 +128,7 @@ public final class EventBus {
     private static Map<Class<? extends Event>, List<Subscription>> collect(final Object subscriber) {
         Map<Class<? extends Event>, List<Subscription>> found = new HashMap<>();
         Set<String> alreadyBound = new HashSet<>();
+        BooleanSupplier active = subscriber instanceof EnableAware aware ? aware::isEnabled : () -> true;
 
         for (Class<?> type = subscriber.getClass(); type != null && type != Object.class; type = type.getSuperclass()) {
             for (Method method : type.getDeclaredMethods()) {
@@ -145,13 +158,13 @@ public final class EventBus {
                 @SuppressWarnings("unchecked")
                 Class<? extends Event> eventType = (Class<? extends Event>) parameters[0];
                 found.computeIfAbsent(eventType, ignored -> new ArrayList<>())
-                        .add(new Subscription(subscriber, method, target.value()));
+                        .add(new Subscription(subscriber, method, target.value(), active));
             }
         }
 
         return found;
     }
 
-    private record Subscription(Object subscriber, Method method, EventPriority priority) {
+    private record Subscription(Object subscriber, Method method, EventPriority priority, BooleanSupplier active) {
     }
 }
