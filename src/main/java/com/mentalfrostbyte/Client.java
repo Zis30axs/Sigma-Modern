@@ -55,44 +55,87 @@ public class Client implements MinecraftInstance {
         return INSTANCE;
     }
 
-    /** Called once from {@code Minecraft.onGameLoadFinished}. */
+    /**
+     * Called once from {@code Minecraft.onGameLoadFinished}.
+     *
+     * <p>{@code started} only becomes {@code true} once every step below has completed - it means
+     * "startup finished", not "startup began". If any step throws, {@link #rollbackFailedStart(Throwable)}
+     * unregisters the global handlers and disables whatever modules {@link ModuleConfig#read} had already
+     * switched on, then the original failure is rethrown so it is not silently lost. {@code started}
+     * stays {@code false}, which is what makes a later retry of this method legitimate instead of a no-op.</p>
+     */
     public void start() {
         if (this.started) {
             return;
         }
 
-        this.started = true;
         logger.info("Starting {} {} for Minecraft {}", NAME, FULL_VERSION, mc.getLaunchedVersion());
-        this.config = JsonFileUtil.read(this.getConfigFile());
-        this.accountManager.load();
-        boolean hasClientMode = this.config.has("clientMode");
-        this.clientModeManager.read(this.config);
+        try {
+            this.config = JsonFileUtil.read(this.getConfigFile());
+            this.accountManager.load();
+            boolean hasClientMode = this.config.has("clientMode");
+            this.clientModeManager.read(this.config);
 
-        if (!this.modulesRegistered) {
-            this.moduleManager.registerAll();
-            this.modulesRegistered = true;
+            if (!this.modulesRegistered) {
+                this.moduleManager.registerAll();
+                this.modulesRegistered = true;
+            }
+            ModuleConfig.read(this.config, this.moduleManager);
+            this.applyDebugClientModeIfRequested();
+            if (Boolean.getBoolean("sigma.debug.logMode")) {
+                logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
+            }
+            EventBus.register(this.keybindHandler);
+            EventBus.register(this.mainMenuRedirectHandler);
+
+            // The mode is a title-screen presentation choice, not an in-game ClickGUI setting. A saved
+            // mode goes straight to its main menu; a fresh config chooses once before any Sigma main
+            // menu appears.
+            if (mc.gui.screen() instanceof TitleScreen) {
+                if (hasClientMode) {
+                    MainMenuRouter.openSelected();
+                } else {
+                    logger.info("Opening first-run client mode selection");
+                    mc.gui.setScreen(new ModeSelectScreen(null, true));
+                }
+            }
+
+            this.openDebugGuiIfRequested();
+        } catch (final RuntimeException failure) {
+            logger.error("Startup failed, rolling back", failure);
+            this.rollbackFailedStart();
+            throw failure;
         }
-        ModuleConfig.read(this.config, this.moduleManager);
-        this.applyDebugClientModeIfRequested();
-        if (Boolean.getBoolean("sigma.debug.logMode")) {
-            logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
-        }
-        EventBus.register(this.keybindHandler);
-        EventBus.register(this.mainMenuRedirectHandler);
+
+        this.started = true;
         logger.info("Started with {} modules.", this.moduleManager.all().size());
+    }
 
-        // The mode is a title-screen presentation choice, not an in-game ClickGUI setting. A saved mode
-        // goes straight to its main menu; a fresh config chooses once before any Sigma main menu appears.
-        if (mc.gui.screen() instanceof TitleScreen) {
-            if (hasClientMode) {
-                MainMenuRouter.openSelected();
-            } else {
-                logger.info("Opening first-run client mode selection");
-                mc.gui.setScreen(new ModeSelectScreen(null, true));
+    /**
+     * Best-effort cleanup after a failed {@link #start()}: unregisters the two global handlers
+     * (unregistering an object that was never registered is a no-op) and disables any module that
+     * {@link ModuleConfig#read} had already switched on before the failure. One module's cleanup failing
+     * must not stop the rest, so each is isolated and logged rather than left enabled.
+     *
+     * <p>{@code modulesRegistered} is deliberately left as-is: the module instances themselves stay valid
+     * and registered in {@link ModuleManager} even after a failed startup, so a retry does not re-run
+     * {@link ModuleManager#registerAll()} and cannot hit a duplicate-registration error from that. The one
+     * case this does not cover - {@code registerAll()} itself throwing partway through, from a duplicate
+     * class or name in the hardcoded list - is a programming error rather than a runtime condition, and
+     * is deliberately not retryable; fixing the list is the correct response, not a rollback.</p>
+     */
+    private void rollbackFailedStart() {
+        EventBus.unregister(this.mainMenuRedirectHandler);
+        EventBus.unregister(this.keybindHandler);
+        for (Module module : this.moduleManager.all()) {
+            if (module.isEnabled()) {
+                try {
+                    module.setEnabled(false);
+                } catch (final RuntimeException cleanupFailure) {
+                    logger.error("Could not disable {} while rolling back a failed startup", module.getName(), cleanupFailure);
+                }
             }
         }
-
-        this.openDebugGuiIfRequested();
     }
 
     private void applyDebugClientModeIfRequested() {
@@ -137,23 +180,60 @@ public class Client implements MinecraftInstance {
         logger.warn("Sigma debug: unknown GUI mode '{}'", requested);
     }
 
-    /** Called once while the game is tearing down, before the window goes away. */
+    /**
+     * Called once while the game is tearing down, before the window goes away.
+     *
+     * <p>A broken module or a config save failure must not stop the rest of teardown: every enabled
+     * module gets an isolated attempt at {@link Module#setEnabled(boolean)}, the global handlers are
+     * always unregistered, and {@code started} is always cleared in a {@code finally} so a second call
+     * to this method - or a later {@link #start()} - sees a consistent, defined state regardless of what
+     * failed. Every failure is logged; the first one is rethrown once cleanup is complete, with any
+     * further failures attached to it as suppressed, so a caller that cares can still see something went
+     * wrong without that visibility coming at the cost of incomplete teardown.</p>
+     */
     public void shutdown() {
         if (!this.started) {
             return;
         }
 
         logger.info("Shutting down...");
-        this.saveConfig();
-        EventBus.unregister(this.mainMenuRedirectHandler);
-        EventBus.unregister(this.keybindHandler);
-        for (Module module : this.moduleManager.all()) {
-            if (module.isEnabled()) {
-                module.setEnabled(false);
-            }
+        RuntimeException failure = null;
+        try {
+            this.saveConfig();
+        } catch (final RuntimeException saveFailure) {
+            // Config save failing must not block teardown - the log is the only trace if nothing below
+            // also fails.
+            logger.error("Could not save the config while shutting down", saveFailure);
+            failure = saveFailure;
         }
-        this.started = false;
-        logger.info("Done.");
+
+        try {
+            EventBus.unregister(this.mainMenuRedirectHandler);
+            EventBus.unregister(this.keybindHandler);
+
+            for (Module module : this.moduleManager.all()) {
+                if (!module.isEnabled()) {
+                    continue;
+                }
+                try {
+                    module.setEnabled(false);
+                } catch (final RuntimeException moduleFailure) {
+                    logger.error("Could not disable {} while shutting down", module.getName(), moduleFailure);
+                    if (failure == null) {
+                        failure = moduleFailure;
+                    } else {
+                        failure.addSuppressed(moduleFailure);
+                    }
+                }
+            }
+        } finally {
+            this.started = false;
+            logger.info("Done.");
+        }
+
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     public boolean isStarted() {
