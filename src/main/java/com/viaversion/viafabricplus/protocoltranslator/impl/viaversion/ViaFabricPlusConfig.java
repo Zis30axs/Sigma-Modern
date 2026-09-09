@@ -117,4 +117,18 @@ public final class ViaFabricPlusConfig extends AbstractViaConfig {
         return false;
     }
 
+    // MODIFIED for porting: ViaVersion's own <= 1.8 boss-bar block (EntityTracker1_9#handleEntityData) is switched
+    // off here and re-implemented in LegacyBossBarPatches with the upstream MixinEntityTracker1_9 / MixinCommonBoss
+    // redirects applied (raw health ratio, NaN -> 0, no [0, 1] precondition). That re-implementation is gated on
+    // the user's actual bossbar-patch setting through isBossbarPatchRequested(), so the option keeps its meaning.
+    // isBossbarPatch() is read nowhere else in ViaVersion, ViaBackwards or ViaLegacy (grep over their sources).
+    @Override
+    public boolean isBossbarPatch() {
+        return false;
+    }
+
+    public boolean isBossbarPatchRequested() {
+        return super.isBossbarPatch();
+    }
+
 }

@@ -21,6 +21,7 @@
 
 package com.viaversion.viafabricplus.protocoltranslator.impl.viaversion;
 
+import com.viaversion.viaversion.protocols.v1_14_4to1_15.Protocol1_14_4To1_15;
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.features.classic.world_height.WorldHeightSupport;
 import com.viaversion.viafabricplus.injection.access.interaction.r1_18_2_block_ack_emulation.IMultiPlayerGameMode;
@@ -136,6 +137,7 @@ public final class ViaFabricPlusProtocolPatches {
             Protocol1_8To1_9.class,
             Protocol1_11_1To1_12.class,
             Protocol1_12_2To1_13.class,
+            Protocol1_14_4To1_15.class,
             Protocolc0_30cpeToc0_28_30.class);
 
         // was VFP features/movement/packet/MixinEntityPacketRewriter1_21_2#dontCancelIdlePacket
@@ -182,6 +184,8 @@ public final class ViaFabricPlusProtocolPatches {
         applyGroup("Protocol1_12_2To1_13Patches", Protocol1_12_2To1_13Patches::apply);
         applyGroup("ClassicCpeExtensionPatches", ClassicCpeExtensionPatches::apply);
         applyGroup("LibraryFieldAccessPatches", LibraryFieldAccessPatches::apply);
+        applyGroup("EntityDataFilterPatches", EntityDataFilterPatches::apply);
+        applyGroup("LegacyBossBarPatches", LegacyBossBarPatches::apply);
     }
 
     private static void applyGroup(final String name, final Runnable group) {

@@ -21,6 +21,16 @@
 
 package com.viaversion.viafabricplus.protocoltranslator.impl.viaversion;
 
+import java.util.Set;
+import com.viaversion.viaversion.protocols.v1_12_2to1_13.provider.blockentities.CommandBlockHandler;
+import com.viaversion.viaversion.protocols.v1_12_2to1_13.provider.blockentities.BannerHandler;
+import com.viaversion.viaversion.protocols.v1_12_2to1_13.provider.BlockEntityProvider;
+import com.viaversion.viaversion.api.type.types.version.Types1_13;
+import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
+import com.viaversion.viaversion.api.minecraft.BlockPosition;
+import com.viaversion.viaversion.api.connection.UserConnection;
+import com.viaversion.nbt.tag.StringTag;
+import com.viaversion.nbt.tag.CompoundTag;
 import com.viaversion.viafabricplus.ViaFabricPlusImpl;
 import com.viaversion.viafabricplus.features.world.footstep_particle.FootStepParticle1_12_2;
 import com.viaversion.viafabricplus.util.network.SyncTasks;
@@ -124,6 +134,8 @@ public final class Protocol1_12_2To1_13Patches {
 
         applyFootStepParticle(protocol);
         applyLegacyTextSections(protocol);
+        applyLegacyCustomNameSections(protocol);
+        applyLegacyBlockEntityNameSections(protocol);
     }
 
     // was VFP features/world/footstep_particle MixinParticleIdMappings1_13#replaceFootStepId (@ModifyArg on the
@@ -232,12 +244,16 @@ public final class Protocol1_12_2To1_13Patches {
     // bodies (Protocol1_12_2To1_13.java:401-419 and :421-470) with legacyToJson swapped for the 4-arg form.
     // replaceClientbound keeps the registered mapped type, so packet ids stay correct.
     //
-    // Scope note: the other ComponentUtil callers - item display name and lore (ItemPacketRewriter1_13:299,
-    // ItemPacketRewriter1_14:213), entity custom names (EntityPacketRewriter1_13:207), banner / command block /
-    // sign names (BlockEntityProvider and its handlers) and ConfigSection - sit inside ViaVersion's item,
-    // entity-data and block-entity rewriters and keep the empty-section-skipping behaviour. That costs nothing
-    // visible: skipEmpty only decides whether zero-length styled siblings are emitted, and those render as
-    // nothing. It matters solely to code that inspects component structure, and the one such reader in this
+    // Scope note: the redirect is global upstream, so every ComponentUtil caller is affected there. Rebuilt here:
+    // these two scoreboard packets, entity custom names (applyLegacyCustomNameSections) and block-entity names
+    // (applyLegacyBlockEntityNameSections). Still on ViaVersion's skipEmpty = true path: item display names and
+    // lore (ItemPacketRewriter1_13:299, ItemPacketRewriter1_14:213, plus ViaBackwards' LegacyBlockItemRewriter,
+    // BlockItemPacketRewriter1_13 and BlockItemPacketRewriter1_14 callers) - those conversions happen inside
+    // ItemRewriter#handleItemToClient, whose instance is a private final field captured by the packet handlers at
+    // registration, so there is no public way to swap it and no later point at which the legacy string still
+    // exists - and ConfigSection, which parses Via's own config file and is not on the packet path. That costs
+    // nothing visible: skipEmpty only decides whether zero-length styled siblings are emitted, and those render
+    // as nothing. It matters solely to code that inspects component structure, and the one such reader in this
     // tree is PlayerTeam#vfpGetLastStyle over the team prefix - which is fed by the two packets above.
     private static void applyLegacyTextSections(final Protocol1_12_2To1_13 protocol) {
         protocol.replaceClientbound(ClientboundPackets1_12_1.SET_OBJECTIVE, wrapper -> {
@@ -299,10 +315,100 @@ public final class Protocol1_12_2To1_13Patches {
         });
     }
 
+    // Same MixinComponentUtil redirect, seen from ComponentUtil#legacyToJson's caller at EntityPacketRewriter1_13:205-211:
+    // the filter().index(2) handler that turns a 1.12.2 legacy custom name into a 1.13 optional component. The
+    // filter is swapped in place (EntityDataFilterPatches#replaceFilter) for a copy of that handler with the
+    // 4-arg conversion, so the position in the filter chain - after registerEntityDataTypeHandler and the
+    // index-0 swimming fix, before the per-type filters - is unchanged.
+    private static void applyLegacyCustomNameSections(final Protocol1_12_2To1_13 protocol) {
+        EntityDataFilterPatches.replaceFilter(protocol.getEntityRewriter(), "legacy custom name sections (MixinComponentUtil)",
+            filter -> filter.type() == null && filter.index() == 2 && filter.dataType() == null,
+            (event, data) -> {
+                if (data.getValue() != null && !((String) data.getValue()).isEmpty()) {
+                    data.setTypeAndValue(Types1_13.ENTITY_DATA_TYPES.optionalComponentType, legacyToJson((String) data.getValue()));
+                } else {
+                    data.setTypeAndValue(Types1_13.ENTITY_DATA_TYPES.optionalComponentType, null);
+                }
+            });
+    }
+
+    // Same MixinComponentUtil redirect, seen from the three ComponentUtil#legacyToJsonString callers under
+    // provider/: BannerHandler:74, CommandBlockHandler:42 and the shared CustomName lambda in the
+    // BlockEntityProvider constructor (:51-56, for chest / dispenser / dropper / enchanting_table / furnace /
+    // hopper / shulker_box). The provider is looked up through Via.getManager().getProviders() on every use
+    // (WorldPacketRewriter1_13:113 and :429), so a subclass installed with use() takes over immediately.
+    private static void applyLegacyBlockEntityNameSections(final Protocol1_12_2To1_13 protocol) {
+        Via.getManager().getProviders().use(BlockEntityProvider.class, new LegacyNameSectionsBlockEntityProvider(protocol));
+    }
+
+    // BlockEntityProvider whose CustomName conversions keep empty styled sections. Only the three handlers that
+    // convert a CustomName are handled here; every other block entity goes through the inherited transform. The
+    // banner and command block handlers are ViaVersion's own instances, run first so their block-id / LastOutput
+    // work is untouched, and the name they produced is then replaced by the 4-arg conversion of the legacy string
+    // saved beforehand - but only if they converted it at all (BannerHandler returns early, name untouched, when
+    // the position holds no banner).
+    private static final class LegacyNameSectionsBlockEntityProvider extends BlockEntityProvider {
+
+        private static final Set<String> CUSTOM_NAME_ONLY = Set.of(
+            "minecraft:chest", "minecraft:dispenser", "minecraft:dropper", "minecraft:enchanting_table",
+            "minecraft:furnace", "minecraft:hopper", "minecraft:shulker_box");
+
+        private final BannerHandler bannerHandler = new BannerHandler();
+        private final CommandBlockHandler commandBlockHandler;
+
+        private LegacyNameSectionsBlockEntityProvider(final Protocol1_12_2To1_13 protocol) {
+            super(protocol);
+            this.commandBlockHandler = new CommandBlockHandler(protocol);
+        }
+
+        @Override
+        public int transform(final UserConnection user, final BlockPosition position, final CompoundTag tag, final boolean sendUpdate) {
+            final StringTag idTag = tag.getStringTag("id");
+            if (idTag == null) {
+                return -1;
+            }
+
+            final String id = idTag.getValue();
+            final int newBlock;
+            if (CUSTOM_NAME_ONLY.contains(id)) {
+                final StringTag name = tag.getStringTag("CustomName");
+                if (name != null) {
+                    name.setValue(legacyToJsonString(name.getValue()));
+                }
+                newBlock = -1;
+            } else if (id.equals("minecraft:banner") || id.equals("minecraft:command_block")) {
+                final StringTag name = tag.getStringTag("CustomName");
+                final String legacyName = name != null ? name.getValue() : null;
+                newBlock = (id.equals("minecraft:banner") ? bannerHandler : commandBlockHandler).transform(user, tag);
+                if (legacyName != null && !legacyName.equals(name.getValue())) {
+                    name.setValue(legacyToJsonString(legacyName));
+                }
+            } else {
+                return super.transform(user, position, tag, sendUpdate);
+            }
+
+            // BlockEntityProvider#transform tail (:88-92) and its private sendBlockChange (:97-103)
+            if (sendUpdate && newBlock != -1) {
+                final PacketWrapper wrapper = PacketWrapper.create(ClientboundPackets1_13.BLOCK_UPDATE, null, user);
+                wrapper.write(Types.BLOCK_POSITION1_8, position);
+                wrapper.write(Types.VAR_INT, newBlock);
+                wrapper.send(Protocol1_12_2To1_13.class);
+            }
+            return newBlock;
+        }
+    }
+
     // ComponentUtil#legacyToJson with the redirect already applied: skipEmpty = false keeps formatting-only
     // sections, so a trailing style survives the legacy -> JSON conversion as an empty styled sibling.
     private static JsonElement legacyToJson(final String message) {
         return SerializerVersion.V1_12.toJson(
+            StringFormat.vanilla().fromString(message, ColorHandling.RESET, DeserializerUnknownHandling.WHITE, false)
+        );
+    }
+
+    // ComponentUtil#legacyToJsonString(String) (= legacyToJsonString(message, false)) with the same redirect applied.
+    private static String legacyToJsonString(final String message) {
+        return SerializerVersion.V1_12.toString(
             StringFormat.vanilla().fromString(message, ColorHandling.RESET, DeserializerUnknownHandling.WHITE, false)
         );
     }
