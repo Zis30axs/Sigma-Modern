@@ -9,5 +9,6 @@ package com.mentalfrostbyte.jello.gui;
 public enum ClientMode {
     JELLO,
     CLASSIC,
-    NO_ADDONS
+    NO_ADDONS,
+    SIGMA_MODERN
 }

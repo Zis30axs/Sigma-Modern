@@ -117,7 +117,12 @@ public class Checkbox extends AbstractButton {
         }
 
         int boxSize = getBoxSize(font);
+        // MODIFIED for porting: SigmaModern draws the box as its own glass with a vector check.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.checkbox(graphics, this.getX(), this.getY(), boxSize, this.selected, this.isFocused(), this.alpha);
+        } else {
         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, this.getX(), this.getY(), boxSize, boxSize, ARGB.white(this.alpha));
+        }
         int textX = this.getX() + boxSize + 4;
         int textY = this.getY() + boxSize / 2 - this.textWidget.getHeight() / 2;
         this.textWidget.setPosition(textX, textY);

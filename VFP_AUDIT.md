@@ -233,6 +233,18 @@
 | `MixinManageServerScreen.java` | `net.minecraft.client.gui.screens.ManageServerScreen` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/gui/screens/ManageServerScreen.java` |
 | `MixinServerSelectionList_OnlineServerEntry.java` | `net.minecraft.client.gui.screens.multiplayer.ServerSelectionList$OnlineServerEnt` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/gui/screens/multiplayer/ServerSelectionList.java` |
 
+> **SigmaModern 改动说明（不改变上表状态）**：`JoinMultiplayerScreen` 与 `ServerSelectionList$OnlineServerEntry`
+> 被重构以便 `ModernServersScreen` 复用，所有 VFP 代码与 `MODIFIED for porting` 标记原样保留，只是位置移动：
+> `init()` 里的按钮 lambda 拆成 `joinSelected/openDirectJoin/openAddServer/openEditSelected/confirmDeleteSelected`；
+> `repositionElements()` 里的 VFP 协议按钮块拆成 `placeViaFabricPlusButton()`（`ModernServersScreen` 不调用它，
+> 改用页眉里的版本 chip，且同样遵守 `multiplayerScreenButtonOrientation` 的 Off）；`OnlineServerEntry.extractContent`
+> 把 VFP 相关的 MOTD / 图标 / 状态先算成局部值，再交给原版绘制或 Modern 行绘制，两个 tooltip 体拆成
+> `extractStatusIconTooltip` / `extractPlayersTooltip`（内容不变，仍受 `vfpDisableServerPinging` 与
+> `showAdvertisedServerVersion` 门控）；图标上传因此提前到绘制之前。`GeneralSettings.setOrientation` 的两个顶部
+> 位置在 SigmaModern 的自绘标题栏安装时下移 `ModernWindowFrame.reservedTop()`，避免与窗口控制按钮重叠。
+> `PerServerVersionScreen` 新增 `selectionConsumer()` / `selectionSupplier()` 两个访问器（无行为变化），供 SigmaModern
+> 的版本选择界面以相同回调接管；`ProtocolSelectionScreen` 未改动，由路由按类替换。
+
 ### `core/integration` — 19/19 hook, COMPLETE 7, REPLACED 3
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |

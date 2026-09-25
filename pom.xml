@@ -12,6 +12,10 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
+        <!-- Where Maven builds. IntelliJ runs the client from target/classes, and a full recompile clears that
+             folder first, so a build into it while the game runs can pull classes out from under the game
+             (NoClassDefFoundError). Builds that run beside a playing game pass -Dsigma.buildDirectory=<elsewhere>. -->
+        <sigma.buildDirectory>${project.basedir}/target</sigma.buildDirectory>
     </properties>
 
     <repositories>
@@ -50,6 +54,30 @@
       Explicit transitive entries are intentionally retained to pin the working versions.
     -->
     <dependencies>
+        <!-- Modern-only Skia rasterization; matches this distribution's Windows amd64 natives. -->
+        <dependency>
+            <groupId>io.github.humbleui</groupId>
+            <artifactId>skija-shared</artifactId>
+            <version>0.143.17</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.humbleui</groupId>
+            <artifactId>skija-windows-x64</artifactId>
+            <version>0.143.17</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- MP3 decoding for the music player's streaming backend (LGPL). -->
+        <dependency>
+            <groupId>javazoom</groupId>
+            <artifactId>jlayer</artifactId>
+            <version>1.0.1</version>
+        </dependency>
+        <!-- QR codes for the music player's NetEase login (Apache-2.0). -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
         <!-- ViaFabricPlus protocol stack (mapping-independent pure-Java libraries) -->
         <dependency>
             <groupId>com.github.oryxel1</groupId>
@@ -674,6 +702,7 @@
     </dependencies>
 
     <build>
+        <directory>${sigma.buildDirectory}</directory>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -688,11 +717,8 @@
                     <compilerArgs><arg>-nowarn</arg></compilerArgs>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.2</version>
-            </plugin>
+
+
         </plugins>
         <resources>
             <resource>

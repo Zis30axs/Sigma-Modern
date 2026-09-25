@@ -15,6 +15,7 @@ public final class MainMenuRouter {
             case JELLO -> new JelloMainMenuScreen();
             case CLASSIC -> new ClassicMainMenuScreen();
             case NO_ADDONS -> new NoAddonsMainMenuScreen();
+            case SIGMA_MODERN -> new com.mentalfrostbyte.jello.gui.modern.ModernMainMenuScreen();
         };
     }
 

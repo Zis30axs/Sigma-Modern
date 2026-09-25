@@ -417,8 +417,13 @@ public class EditBox extends AbstractWidget implements IEditBox {
     public void extractWidgetRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
         if (this.isVisible()) {
             if (this.isBordered()) {
+                // MODIFIED for porting: SigmaModern draws bordered text fields as its own glass.
+                if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+                    com.mentalfrostbyte.jello.gui.modern.ModernSkin.field(graphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.isActive(), this.isFocused());
+                } else {
                 Identifier sprite = SPRITES.get(this.isActive(), this.isFocused());
                 graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, this.getX(), this.getY(), this.getWidth(), this.getHeight());
+                }
             }
 
             int color = this.isEditable ? this.textColor : this.textColorUneditable;

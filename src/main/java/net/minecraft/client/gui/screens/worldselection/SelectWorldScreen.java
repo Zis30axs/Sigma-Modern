@@ -162,6 +162,11 @@ public class SelectWorldScreen extends Screen {
         this.minecraft.gui.setScreen(this.lastScreen);
     }
 
+    // MODIFIED for porting: SigmaModern - lets ModernScreens rebuild this screen around the same parent.
+    public Screen getLastScreen() {
+        return this.lastScreen;
+    }
+
     public void updateButtonStatus(final @Nullable LevelSummary summary) {
         if (this.playWorldButton != null && this.editButton != null && this.recreateButton != null && this.deleteButton != null) {
             if (summary == null) {

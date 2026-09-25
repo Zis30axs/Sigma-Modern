@@ -52,6 +52,15 @@ public final class PerServerVersionScreen extends VFPScreen {
         this.setupSubtitle(Component.translatable("force_version.viafabricplus.title"));
     }
 
+    // MODIFIED for porting: SigmaModern - lets ModernScreens present this picker with the same callbacks.
+    public Consumer<ProtocolVersion> selectionConsumer() {
+        return this.selectionConsumer;
+    }
+
+    public Supplier<ProtocolVersion> selectionSupplier() {
+        return this.selectionSupplier;
+    }
+
     @Override
     protected void init() {
         super.init();

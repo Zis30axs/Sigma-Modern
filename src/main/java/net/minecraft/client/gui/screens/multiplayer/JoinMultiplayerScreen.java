@@ -56,6 +56,32 @@ public class JoinMultiplayerScreen extends Screen {
     @Override
     protected void init() {
         this.layout.addTitleHeader(this.title, this.font);
+        this.initServerModel();
+        this.serverSelectionList = this.layout
+            .addToContents(new ServerSelectionList(this, this.minecraft, this.width, this.layout.getContentHeight(), this.layout.getHeaderHeight(), 36));
+        this.serverSelectionList.updateOnlineServers(this.servers);
+        LinearLayout footer = this.layout.addToFooter(LinearLayout.vertical().spacing(4));
+        footer.defaultCellSetting().alignHorizontallyCenter();
+        LinearLayout topFooterButtons = footer.addChild(LinearLayout.horizontal().spacing(4));
+        LinearLayout bottomFooterButtons = footer.addChild(LinearLayout.horizontal().spacing(4));
+        // MODIFIED for porting: SigmaModern - each button's action moved into a protected method (unchanged
+        // bodies) so ModernServersScreen can offer the same actions from its own layout.
+        this.selectButton = topFooterButtons.addChild(Button.builder(Component.translatable("selectServer.select"), button -> this.joinSelected()).width(100).build());
+        topFooterButtons.addChild(Button.builder(Component.translatable("selectServer.direct"), button -> this.openDirectJoin()).width(100).build());
+        topFooterButtons.addChild(Button.builder(Component.translatable("selectServer.add"), button -> this.openAddServer()).width(100).build());
+        this.editButton = bottomFooterButtons.addChild(Button.builder(Component.translatable("selectServer.edit"), button -> this.openEditSelected()).width(74).build());
+        this.deleteButton = bottomFooterButtons.addChild(Button.builder(Component.translatable("selectServer.delete"), button -> this.confirmDeleteSelected()).width(74).build());
+        bottomFooterButtons.addChild(Button.builder(Component.translatable("selectServer.refresh"), button -> this.refreshServerList()).width(74).build());
+        bottomFooterButtons.addChild(Button.builder(CommonComponents.GUI_BACK, button -> this.onClose()).width(74).build());
+        JoinMultiplayerScreen var4 = this;
+        this.layout.visitWidgets(x$0 -> var4.addRenderableWidget(x$0));
+        this.repositionElements();
+        this.onSelectedChange();
+    }
+
+    // MODIFIED for porting: SigmaModern - the saved-server list and LAN discovery setup, split out of init()
+    // so ModernServersScreen shares it exactly.
+    protected final void initServerModel() {
         this.servers = new ServerList(this.minecraft);
         this.servers.load();
         this.lanServerList = new LanServerDetection.LanServerList();
@@ -66,80 +92,51 @@ public class JoinMultiplayerScreen extends Screen {
         } catch (Exception e) {
             LOGGER.warn("Unable to start LAN server detection: {}", e.getMessage());
         }
+    }
 
-        this.serverSelectionList = this.layout
-            .addToContents(new ServerSelectionList(this, this.minecraft, this.width, this.layout.getContentHeight(), this.layout.getHeaderHeight(), 36));
-        this.serverSelectionList.updateOnlineServers(this.servers);
-        LinearLayout footer = this.layout.addToFooter(LinearLayout.vertical().spacing(4));
-        footer.defaultCellSetting().alignHorizontallyCenter();
-        LinearLayout topFooterButtons = footer.addChild(LinearLayout.horizontal().spacing(4));
-        LinearLayout bottomFooterButtons = footer.addChild(LinearLayout.horizontal().spacing(4));
-        this.selectButton = topFooterButtons.addChild(Button.builder(Component.translatable("selectServer.select"), button -> {
-            ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
-            if (entry != null) {
-                entry.join();
+    protected void joinSelected() {
+        ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
+        if (entry != null) {
+            entry.join();
+        }
+    }
+
+    protected void openDirectJoin() {
+        this.editingServer = new ServerData(I18n.get("selectServer.defaultName"), "", ServerData.Type.OTHER);
+        this.minecraft.gui.setScreen(new DirectJoinServerScreen(this, this::directJoinCallback, this.editingServer));
+    }
+
+    protected void openAddServer() {
+        this.editingServer = new ServerData("", "", ServerData.Type.OTHER);
+        this.minecraft
+            .gui
+            .setScreen(new ManageServerScreen(this, Component.translatable("manageServer.add.title"), this::addServerCallback, this.editingServer));
+    }
+
+    protected void openEditSelected() {
+        ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
+        if (entry instanceof ServerSelectionList.OnlineServerEntry onlineServerEntry) {
+            ServerData current = onlineServerEntry.getServerData();
+            this.editingServer = new ServerData(current.name, current.ip, ServerData.Type.OTHER);
+            this.editingServer.copyFrom(current);
+            this.minecraft
+                .gui
+                .setScreen(new ManageServerScreen(this, Component.translatable("manageServer.edit.title"), this::editServerCallback, this.editingServer));
+        }
+    }
+
+    protected void confirmDeleteSelected() {
+        ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
+        if (entry instanceof ServerSelectionList.OnlineServerEntry onlineServerEntry) {
+            String serverName = onlineServerEntry.getServerData().name;
+            if (serverName != null) {
+                Component title = Component.translatable("selectServer.deleteQuestion");
+                Component warning = Component.translatable("selectServer.deleteWarning", serverName);
+                Component yes = Component.translatable("selectServer.deleteButton");
+                Component no = CommonComponents.GUI_CANCEL;
+                this.minecraft.gui.setScreen(new ConfirmScreen(this::deleteCallback, title, warning, yes, no));
             }
-        }).width(100).build());
-        topFooterButtons.addChild(Button.builder(Component.translatable("selectServer.direct"), button -> {
-            this.editingServer = new ServerData(I18n.get("selectServer.defaultName"), "", ServerData.Type.OTHER);
-            this.minecraft.gui.setScreen(new DirectJoinServerScreen(this, this::directJoinCallback, this.editingServer));
-        }).width(100).build());
-        topFooterButtons.addChild(
-            Button.builder(
-                    Component.translatable("selectServer.add"),
-                    button -> {
-                        this.editingServer = new ServerData("", "", ServerData.Type.OTHER);
-                        this.minecraft
-                            .gui
-                            .setScreen(
-                                new ManageServerScreen(this, Component.translatable("manageServer.add.title"), this::addServerCallback, this.editingServer)
-                            );
-                    }
-                )
-                .width(100)
-                .build()
-        );
-        this.editButton = bottomFooterButtons.addChild(
-            Button.builder(
-                    Component.translatable("selectServer.edit"),
-                    button -> {
-                        ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
-                        if (entry instanceof ServerSelectionList.OnlineServerEntry onlineServerEntry) {
-                            ServerData current = onlineServerEntry.getServerData();
-                            this.editingServer = new ServerData(current.name, current.ip, ServerData.Type.OTHER);
-                            this.editingServer.copyFrom(current);
-                            this.minecraft
-                                .gui
-                                .setScreen(
-                                    new ManageServerScreen(
-                                        this, Component.translatable("manageServer.edit.title"), this::editServerCallback, this.editingServer
-                                    )
-                                );
-                        }
-                    }
-                )
-                .width(74)
-                .build()
-        );
-        this.deleteButton = bottomFooterButtons.addChild(Button.builder(Component.translatable("selectServer.delete"), button -> {
-            ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
-            if (entry instanceof ServerSelectionList.OnlineServerEntry onlineServerEntry) {
-                String serverName = onlineServerEntry.getServerData().name;
-                if (serverName != null) {
-                    Component title = Component.translatable("selectServer.deleteQuestion");
-                    Component warning = Component.translatable("selectServer.deleteWarning", serverName);
-                    Component yes = Component.translatable("selectServer.deleteButton");
-                    Component no = CommonComponents.GUI_CANCEL;
-                    this.minecraft.gui.setScreen(new ConfirmScreen(this::deleteCallback, title, warning, yes, no));
-                }
-            }
-        }).width(74).build());
-        bottomFooterButtons.addChild(Button.builder(Component.translatable("selectServer.refresh"), button -> this.refreshServerList()).width(74).build());
-        bottomFooterButtons.addChild(Button.builder(CommonComponents.GUI_BACK, button -> this.onClose()).width(74).build());
-        JoinMultiplayerScreen var4 = this;
-        this.layout.visitWidgets(x$0 -> var4.addRenderableWidget(x$0));
-        this.repositionElements();
-        this.onSelectedChange();
+        }
     }
 
     @Override
@@ -148,6 +145,12 @@ public class JoinMultiplayerScreen extends Screen {
         if (this.serverSelectionList != null) {
             this.serverSelectionList.updateSize(this.width, this.layout);
         }
+        this.placeViaFabricPlusButton();
+    }
+
+    // MODIFIED for porting: SigmaModern - the ViaFabricPlus block below was split out of repositionElements()
+    // unchanged, so ModernServersScreen can lay out its own list without inheriting the vanilla layout.
+    protected void placeViaFabricPlusButton() {
         // MODIFIED for porting: ViaFabricPlus core/gui MixinJoinMultiplayerScreen#addProtocolSelectionButton (@Inject RETURN)
         final int viaFabricPlus$buttonPosition = GeneralSettings.INSTANCE.multiplayerScreenButtonOrientation.getIndex();
         if (viaFabricPlus$buttonPosition != 0) { // Off
@@ -160,6 +163,11 @@ public class JoinMultiplayerScreen extends Screen {
             }
             GeneralSettings.setOrientation(this.viaFabricPlus$button::setPosition, viaFabricPlus$buttonPosition, width, height);
         }
+    }
+
+    // MODIFIED for porting: SigmaModern - lets ModernScreens rebuild this screen around the same parent.
+    public Screen getLastScreen() {
+        return this.lastScreen;
     }
 
     @Override
@@ -189,7 +197,7 @@ public class JoinMultiplayerScreen extends Screen {
         this.serverSelectionList.removed();
     }
 
-    private void refreshServerList() {
+    protected void refreshServerList() {
         this.minecraft.gui.setScreen(new JoinMultiplayerScreen(this.lastScreen));
     }
 

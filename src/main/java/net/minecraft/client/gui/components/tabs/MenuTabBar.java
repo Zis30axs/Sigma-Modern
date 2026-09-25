@@ -38,6 +38,12 @@ public class MenuTabBar extends TabNavigationBar {
 
     @Override
     protected void extractWidgetRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        // MODIFIED for porting: SigmaModern has no dirt-era header rule; the tabs alone mark the bar.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            super.extractWidgetRenderState(graphics, mouseX, mouseY, a);
+            return;
+        }
+
         graphics.blit(
             RenderPipelines.GUI_TEXTURED,
             Screen.HEADER_SEPARATOR,
@@ -127,13 +133,21 @@ public class MenuTabBar extends TabNavigationBar {
 
         @Override
         protected void extractWidgetRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+            // MODIFIED for porting: SigmaModern draws tabs as glass pills with an ice underline for the selected one.
+            boolean modern = com.mentalfrostbyte.jello.gui.modern.ModernSkin.active();
+            if (modern) {
+                com.mentalfrostbyte.jello.gui.modern.ModernSkin.tab(graphics, this.getX(), this.getY(), this.width, this.height, this.isSelected(), this.isHoveredOrFocused(), this.active);
+            } else {
             graphics.blitSprite(
                 RenderPipelines.GUI_TEXTURED, SPRITES.get(this.isSelected(), this.isHoveredOrFocused()), this.getX(), this.getY(), this.width, this.height
             );
+            }
             Font font = Minecraft.getInstance().font;
-            int underlineColor = this.active ? -1 : -6250336;
+            int underlineColor = modern ? (this.active ? 0xFF7FE3FF : 0xFF6F8FA4) : this.active ? -1 : -6250336;
             if (this.isSelected()) {
-                this.renderMenuBackground(graphics, this.getX() + 2, this.getY() + 2, this.getRight() - 2, this.getBottom());
+                if (!modern) {
+                    this.renderMenuBackground(graphics, this.getX() + 2, this.getY() + 2, this.getRight() - 2, this.getBottom());
+                }
                 this.renderFocusUnderline(graphics, font, underlineColor);
             }
 

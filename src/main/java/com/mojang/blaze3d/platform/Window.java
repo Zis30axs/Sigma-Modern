@@ -71,6 +71,9 @@ public final class Window implements AutoCloseable {
     private CursorType currentCursor = CursorType.DEFAULT;
     private final boolean exclusiveFullscreen;
     private final GpuBackend backend;
+    // MODIFIED for porting: remembered so SigmaModern's custom caption (which replaces the OS title bar)
+    // can draw the current title; GLFW itself offers no portable getter.
+    private String title;
 
     public Window(
         final WindowEventHandler eventHandler,
@@ -102,6 +105,7 @@ public final class Window implements AutoCloseable {
         this.windowedWidth = this.width = allowedWindowMinSize(displayData.width());
         this.windowedHeight = this.height = allowedWindowMinSize(displayData.height());
         this.handle = this.createWindow(backend, this.width, this.height, title, this.fullscreen && initialMonitor != null ? initialMonitor.monitor() : 0L);
+        this.title = title;
         this.backend = backend;
         if (initialMonitor != null) {
             VideoMode mode = initialMonitor.getPreferredVidMode(this.fullscreen ? this.preferredFullscreenVideoMode : Optional.empty());
@@ -269,6 +273,8 @@ public final class Window implements AutoCloseable {
     @Override
     public void close() {
         RenderSystem.assertOnRenderThread();
+        // MODIFIED for porting: remove the native frame callback before GLFW destroys the window.
+        com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.close();
         Callbacks.glfwFreeCallbacks(this.handle);
         GLFW.glfwSetErrorCallback(null);
         this.defaultErrorCallback.close();
@@ -393,6 +399,8 @@ public final class Window implements AutoCloseable {
     }
 
     public void updateFullscreenIfChanged() {
+        // MODIFIED for porting: SigmaModern owns client-area window chrome only in windowed mode.
+        com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.update(this);
         if (this.fullscreen != this.actuallyFullscreen) {
             this.actuallyFullscreen = this.fullscreen;
 
@@ -504,7 +512,13 @@ public final class Window implements AutoCloseable {
     }
 
     public void setTitle(final String title) {
+        this.title = title;
         GLFW.glfwSetWindowTitle(this.handle, title);
+    }
+
+    // MODIFIED for porting: see the title field.
+    public String getTitle() {
+        return this.title;
     }
 
     public long handle() {
