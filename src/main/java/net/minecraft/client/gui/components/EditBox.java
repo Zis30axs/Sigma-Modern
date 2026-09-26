@@ -377,7 +377,10 @@ public class EditBox extends AbstractWidget implements IEditBox {
 
     @Override
     public boolean preeditUpdated(final @Nullable PreeditEvent event) {
-        this.preeditOverlay = event != null ? new IMEPreeditOverlay(event, this.font, 9 + 1) : null;
+        // MODIFIED for porting: the IME's composition is drawn by vanilla, so a box measuring in the ModernChat module's
+        // Anthropic Serif metrics hands it the vanilla font those metrics sit on.
+        Font overlayFont = this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont modern ? modern.vanilla() : this.font;
+        this.preeditOverlay = event != null ? new IMEPreeditOverlay(event, overlayFont, 9 + 1) : null;
         return true;
     }
 
@@ -415,6 +418,19 @@ public class EditBox extends AbstractWidget implements IEditBox {
 
     @Override
     public void extractWidgetRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        // MODIFIED for porting: a box laid out in the ModernChat module's Anthropic Serif metrics (its chat input) is drawn in
+        // that face too, from the same values vanilla draws with below.
+        if (this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont modern) {
+            if (this.isVisible()) {
+                com.mentalfrostbyte.jello.gui.modern.ModernChat.input(
+                    graphics, this, modern, this.value, this.displayPos, this.cursorPos, this.highlightPos, this.suggestion, this.isEditable,
+                    this::applyFormat, this.preeditOverlay
+                );
+            }
+
+            return;
+        }
+
         if (this.isVisible()) {
             if (this.isBordered()) {
                 // MODIFIED for porting: SigmaModern draws bordered text fields as its own glass.

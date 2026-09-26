@@ -58,12 +58,22 @@ public class ChatScreen extends Screen {
     @Override
     protected void init() {
         this.historyPos = this.minecraft.gui.hud.getChat().getRecentChat().size();
-        this.input = new EditBox(this.minecraft.fontFilterFishy, 4, this.height - 12, this.width - 4, 12, Component.translatable("chat.editBox")) {
+        // MODIFIED for porting: with the ModernChat module on, the input measures (and so draws) in Anthropic Serif
+        // and sits in its rounded bar; the command suggestions measure in the same face, at its fixed popup size.
+        boolean modern = com.mentalfrostbyte.jello.gui.modern.ModernChat.active();
+        this.input = new EditBox(
+            modern ? com.mentalfrostbyte.jello.gui.modern.ModernChat.inputFont() : this.minecraft.fontFilterFishy,
+            4, this.height - 12, this.width - 4, 12, Component.translatable("chat.editBox")
+        ) {
             @Override
             protected MutableComponent createNarrationMessage() {
                 return super.createNarrationMessage().append(ChatScreen.this.commandSuggestions.getNarrationMessage());
             }
         };
+        if (modern) {
+            com.mentalfrostbyte.jello.gui.modern.ModernChat.placeInput(this.input, this.width, this.height);
+        }
+
         this.input.setMaxLength(256);
         this.input.setBordered(false);
         // MODIFIED for porting: was VFP legacy_tab_completion MixinChatScreen#moveSetTextDown
@@ -77,7 +87,9 @@ public class ChatScreen extends Screen {
         this.input.addFormatter(this::formatChat);
         this.input.setCanLoseFocus(false);
         this.addRenderableWidget(this.input);
-        this.commandSuggestions = new CommandSuggestions(this.minecraft, this, this.input, this.font, false, false, 1, 10, true, -805306368);
+        this.commandSuggestions = new CommandSuggestions(
+            this.minecraft, this, this.input, modern ? com.mentalfrostbyte.jello.gui.modern.ModernChat.popupFont() : this.font, false, false, 1, 10, true, -805306368
+        );
         this.commandSuggestions.setAllowHiding(false);
         this.commandSuggestions.setAllowSuggestions(false);
         ChatAbilities chatAbilities = this.minecraft.player.chatAbilities();
@@ -229,10 +241,20 @@ public class ChatScreen extends Screen {
 
         if (event.button() == 0) {
             int screenHeight = this.minecraft.getWindow().getGuiScaledHeight();
+            Style clicked;
+            // MODIFIED for porting: the ModernChat module lays lines out in Anthropic Serif, so they are hit-tested in it.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernChat.active()) {
+                com.mentalfrostbyte.jello.gui.modern.ModernChat.ClickFinder finder = new com.mentalfrostbyte.jello.gui.modern.ModernChat.ClickFinder(
+                    (int)event.x(), (int)event.y(), this.insertionClickMode()
+                );
+                this.minecraft.gui.hud.getChat().captureClickableText(finder, screenHeight, this.minecraft.gui.hud.getGuiTicks(), this.displayMode);
+                clicked = finder.result();
+            } else {
             ActiveTextCollector.ClickableStyleFinder finder = new ActiveTextCollector.ClickableStyleFinder(this.getFont(), (int)event.x(), (int)event.y())
                 .includeInsertions(this.insertionClickMode());
             this.minecraft.gui.hud.getChat().captureClickableText(finder, screenHeight, this.minecraft.gui.hud.getGuiTicks(), this.displayMode);
-            Style clicked = finder.result();
+            clicked = finder.result();
+            }
             if (clicked != null && this.handleComponentClicked(clicked, this.insertionClickMode())) {
                 this.initial = this.input.getValue();
                 return true;
@@ -308,7 +330,12 @@ public class ChatScreen extends Screen {
 
     @Override
     public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        // MODIFIED for porting: the ModernChat module's input is an ice-glass bar that unfurls as the chat opens.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernChat.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernChat.inputBar(graphics, this.input);
+        } else {
         graphics.fill(2, this.height - 14, this.width - 2, this.height - 2, this.minecraft.options.getBackgroundColor(Integer.MIN_VALUE));
+        }
         this.minecraft
             .gui
             .hud

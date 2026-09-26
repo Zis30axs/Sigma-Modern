@@ -184,7 +184,10 @@ public class CommandSuggestions {
                 int x = Mth.clamp(
                     this.input.getScreenX(suggestions.getRange().getStart()), 0, this.input.getScreenX(0) + this.input.getInnerWidth() - maxSuggestionWidth
                 );
-                int y = this.anchorToBottom ? this.screen.height - 12 : 72;
+                // MODIFIED for porting: the ModernChat module's input bar is taller than vanilla's 12px strip.
+                int y = this.anchorToBottom
+                    ? this.screen.height - (this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont ? com.mentalfrostbyte.jello.gui.modern.ModernChat.suggestionsAnchor() : 12)
+                    : 72;
                 this.suggestions = new CommandSuggestions.SuggestionsList(x, y, maxSuggestionWidth, this.sortSuggestions(suggestions), immediateNarration);
             }
         }
@@ -495,6 +498,12 @@ public class CommandSuggestions {
     }
 
     public void extractUsage(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: the ModernChat module shows the usage hints on a glass card above its input bar.
+        if (this.anchorToBottom && this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont) {
+            com.mentalfrostbyte.jello.gui.modern.ModernChat.usage(graphics, this.commandUsage, this.commandUsagePosition, this.commandUsageWidth, this.screen.height);
+            return;
+        }
+
         int y = 0;
 
         for (FormattedCharSequence line : this.commandUsage) {
@@ -547,7 +556,14 @@ public class CommandSuggestions {
                 this.lastMouse = new Vec2(mouseX, mouseY);
             }
 
-            if (limited) {
+            // MODIFIED for porting: the ModernChat module draws the list as a glass card with Anthropic Serif rows; selection,
+            // hover, clicks and tooltips below stay vanilla's.
+            boolean modern = CommandSuggestions.this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont;
+            if (modern) {
+                com.mentalfrostbyte.jello.gui.modern.ModernChat.suggestionsBackground(
+                    graphics, this.rect.getX(), this.rect.getY(), this.rect.getWidth(), this.rect.getHeight(), hasNext, hasPrevious
+                );
+            } else if (limited) {
                 graphics.fill(
                     this.rect.getX(), this.rect.getY() - 1, this.rect.getX() + this.rect.getWidth(), this.rect.getY(), CommandSuggestions.this.fillColor
                 );
@@ -585,6 +601,7 @@ public class CommandSuggestions {
 
             for (int i = 0; i < limit; i++) {
                 Suggestion suggestion = this.suggestionList.get(i + this.offset);
+                if (!modern) {
                 graphics.fill(
                     this.rect.getX(),
                     this.rect.getY() + 12 * i,
@@ -592,6 +609,7 @@ public class CommandSuggestions {
                     this.rect.getY() + 12 * i + 12,
                     CommandSuggestions.this.fillColor
                 );
+                }
                 if (mouseX > this.rect.getX()
                     && mouseX < this.rect.getX() + this.rect.getWidth()
                     && mouseY > this.rect.getY() + 12 * i
@@ -603,6 +621,11 @@ public class CommandSuggestions {
                     hovered = true;
                 }
 
+                if (modern) {
+                    com.mentalfrostbyte.jello.gui.modern.ModernChat.suggestion(
+                        graphics, suggestion, this.rect.getX(), this.rect.getY() + 12 * i, this.rect.getWidth(), i + this.offset == this.current
+                    );
+                } else {
                 graphics.text(
                     CommandSuggestions.this.font,
                     suggestion.getText(),
@@ -610,12 +633,17 @@ public class CommandSuggestions {
                     this.rect.getY() + 2 + 12 * i,
                     i + this.offset == this.current ? -256 : -5592406
                 );
+                }
             }
 
             if (hovered) {
                 Message tooltip = this.suggestionList.get(this.current).getTooltip();
                 if (tooltip != null) {
-                    graphics.setTooltipForNextFrame(CommandSuggestions.this.font, ComponentUtils.fromMessage(tooltip), mouseX, mouseY);
+                    // MODIFIED for porting: tooltips stay in vanilla's font under the ModernChat module's serif metrics.
+                    Font tooltipFont = CommandSuggestions.this.font instanceof com.mentalfrostbyte.jello.gui.modern.ModernChatFont serif
+                        ? serif.vanilla()
+                        : CommandSuggestions.this.font;
+                    graphics.setTooltipForNextFrame(tooltipFont, ComponentUtils.fromMessage(tooltip), mouseX, mouseY);
                 }
             }
 

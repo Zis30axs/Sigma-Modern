@@ -676,6 +676,15 @@
 | `MixinChatScreen.java` | `net.minecraft.client.gui.screens.ChatScreen` | 4 | 4 | COMPLETE | P3 | `net/minecraft/client/gui/screens/ChatScreen.java` |
 | `MixinCommandSuggestions.java` | `net.minecraft.client.gui.components.CommandSuggestions` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/gui/components/CommandSuggestions.java` |
 
+> **ModernChat 模块改动说明（不改变上表状态）**：`ChatScreen`、`CommandSuggestions`、`EditBox`（及 `ChatComponent`）
+> 新增了 ModernChat 模块（聊天栏皮肤，模块关闭时完全走原版）的 `MODIFIED for porting` 分支（`gui.modern.ModernChat` /
+> `ModernChatFont`），只增不删：与
+> `git show HEAD:` 逐行比对，这四个类原有的 VFP 标记行全部保留，被替换的原版语句都只是包进了 `ModernChat.active()`
+> 或 `font instanceof ModernChatFont` 条件分支。`ChatScreen.init` 中 legacy_tab_completion 的两段 `setValue`、
+> max_chat_length 的 `setMaxLength` 替换，其顺序与位置不变（输入框只是在构造后立即由 `ModernChat.placeInput` 重新定位）；
+> `onEdited` / `vfpKeepTabComplete`、`CommandSuggestions.formatChat` / `vfpCancelTabComplete` / `extractRenderState`
+> 头部的 `clearMessages` 未改动；`EditBox` 的 classic4j 禁用字符 hook 未改动。Modern 模式下仅绘制与版式不同。
+
 ### `features/limitation/allow_negative_amplifier` — 1/1 hook, COMPLETE 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |

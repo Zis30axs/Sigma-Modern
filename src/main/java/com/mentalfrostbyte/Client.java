@@ -48,9 +48,10 @@ public class Client implements MinecraftInstance {
     private final com.mentalfrostbyte.jello.music.MusicPlayer musicPlayer;
     // Feeds module toggles to SigmaModern's in-game island; it only records them, drawing decides what shows.
     private final Object islandActivity = new com.mentalfrostbyte.jello.gui.modern.ModernIsland.ActivityListener();
-    // The music's effects settings, and whether the player's head is under water (the audio muffles itself then).
+    // Main-thread environment snapshots; the music decoding thread applies the local audio effects.
     private final com.mentalfrostbyte.jello.music.MusicEffects musicEffects = new com.mentalfrostbyte.jello.music.MusicEffects();
-    private final Object musicSubmerged = new com.mentalfrostbyte.jello.gui.modern.ModernMusicFx.SubmergedListener(this.musicEffects);
+    private final com.mentalfrostbyte.jello.music.MusicEnvironmentListener musicEnvironment =
+        new com.mentalfrostbyte.jello.music.MusicEnvironmentListener(this.musicEffects);
 
     private JsonObject config = new JsonObject();
     private boolean modulesRegistered;
@@ -58,6 +59,13 @@ public class Client implements MinecraftInstance {
     // -1 means "no screenshot pending"; set by -Dsigma.debug.screenshotAfterFrames so the capture happens
     // a few real frames after the debug GUI opens, instead of the still-blank frame open() runs on.
     private int screenshotFramesRemaining = -1;
+    // Further captures after the first, when screenshotAfterFrames lists several frame counts ("6,40,90"): each
+    // is counted from the arming point and saved as sigma-debug-<frames>.png, so one launch covers an animation.
+    private final java.util.ArrayDeque<Integer> screenshotSchedule = new java.util.ArrayDeque<>();
+    private int screenshotFrame;
+    private boolean screenshotSeries;
+    // -Dsigma.debug.chatCloseAfterFrames=<n>: close the chat n frames after the arming point, to capture it folding away.
+    private int chatCloseCountdown = -1;
     // -Dsigma.debug.openGuiInWorld: open the ClickGUI once a world has loaded (e.g. after --quickPlaySingleplayer),
     // so it can be checked over a real world rather than only over the no-world background.
     private boolean openGuiInWorldPending = Boolean.getBoolean("sigma.debug.openGuiInWorld");
@@ -127,6 +135,8 @@ public class Client implements MinecraftInstance {
             this.musicLibrary.read(this.config);
             this.musicEffects.read(this.config);
             this.applyDebugClientModeIfRequested();
+            // After that save on purpose: these are for captures and shouldn't reach the user's config.
+            this.applyDebugModulesIfRequested();
             if (Boolean.getBoolean("sigma.debug.logMode")) {
                 logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
             }
@@ -134,7 +144,7 @@ public class Client implements MinecraftInstance {
             EventBus.register(this.mainMenuRedirectHandler);
             EventBus.register(this.musicPlayer);
             EventBus.register(this.islandActivity);
-            EventBus.register(this.musicSubmerged);
+            EventBus.register(this.musicEnvironment);
             // -Dsigma.debug.musicPreview: start the (silent) player a third of the way in, so captures show it playing.
             if (Boolean.getBoolean("sigma.debug.musicPreview")) {
                 this.musicPlayer.play();
@@ -192,7 +202,8 @@ public class Client implements MinecraftInstance {
      */
     private void rollbackFailedStart() {
         EventBus.unregister(this.islandActivity);
-        EventBus.unregister(this.musicSubmerged);
+        EventBus.unregister(this.musicEnvironment);
+        this.musicEnvironment.reset();
         EventBus.unregister(this.musicPlayer);
         this.musicPlayer.pause();
         EventBus.unregister(this.mainMenuRedirectHandler);
@@ -204,6 +215,38 @@ public class Client implements MinecraftInstance {
                 } catch (final RuntimeException cleanupFailure) {
                     logger.error("Could not disable {} while rolling back a failed startup", module.getName(), cleanupFailure);
                 }
+            }
+        }
+    }
+
+    /**
+     * {@code -Dsigma.debug.enableModules=A,B} switches modules on and {@code -Dsigma.debug.settings=Module/Setting=value;...}
+     * sets their settings, for captures. Nothing here saves; but the config is still written on a normal exit or when
+     * a ClickGUI closes, so a run that does either keeps them - force-close captures that use these.
+     */
+    private void applyDebugModulesIfRequested() {
+        String enable = System.getProperty("sigma.debug.enableModules");
+        if (enable != null) {
+            for (String name : enable.split(",")) {
+                if (name.isBlank()) continue;
+                this.moduleManager.find(name.strip()).ifPresentOrElse(module -> {
+                    module.setEnabled(true);
+                    logger.info("Sigma debug: enabled {}", module.getName());
+                }, () -> logger.warn("Sigma debug: no module named '{}'", name.strip()));
+            }
+        }
+
+        String settings = System.getProperty("sigma.debug.settings");
+        if (settings != null) {
+            for (String entry : settings.split(";")) {
+                int slash = entry.indexOf('/'), equals = entry.indexOf('=');
+                if (slash < 0 || equals < slash) continue;
+                String moduleName = entry.substring(0, slash).strip(), settingName = entry.substring(slash + 1, equals).strip();
+                String value = entry.substring(equals + 1).strip();
+                boolean applied = this.moduleManager.find(moduleName).flatMap(module -> module.setting(settingName))
+                    .map(setting -> setting.fromJson(com.google.gson.JsonParser.parseString(value)))
+                    .orElse(false);
+                logger.info("Sigma debug: {} {}/{} = {}", applied ? "set" : "could not set", moduleName, settingName, value);
             }
         }
     }
@@ -275,6 +318,26 @@ public class Client implements MinecraftInstance {
             return false;
         }
 
+        // CHAT opens the chat over a few sample lines (-Dsigma.debug.chatInput pre-fills the input, -Dsigma.debug.chatType
+        // then types into it as a key press would, which is what brings up command suggestions; -Dsigma.debug.chatLines=<n>
+        // adds n more lines). CHAT_HUD only adds the lines, for the unfocused chat. Both need a world.
+        String target = requested.trim().toUpperCase(java.util.Locale.ROOT);
+        if (target.equals("CHAT") || target.equals("CHAT_HUD")) {
+            if (mc.player == null) {
+                logger.warn("Sigma debug: {} needs a world (use it with openGuiInWorld)", target);
+                return false;
+            }
+            this.addDebugChatLines();
+            if (target.equals("CHAT")) {
+                net.minecraft.client.gui.screens.ChatScreen chatScreen = new net.minecraft.client.gui.screens.ChatScreen(System.getProperty("sigma.debug.chatInput", ""), false);
+                mc.gui.setScreen(chatScreen);
+                String typed = System.getProperty("sigma.debug.chatType");
+                if (typed != null && !typed.isEmpty()) chatScreen.insertText(typed, false);
+            }
+            logger.info("Sigma debug: opened {}", target);
+            return true;
+        }
+
         net.minecraft.client.gui.screens.Screen options = new net.minecraft.client.gui.screens.options.OptionsScreen(parent, mc.options, mc.level != null);
         net.minecraft.client.gui.screens.Screen screen = switch (requested.trim().toUpperCase(java.util.Locale.ROOT)) {
             case "WORLDS" -> new net.minecraft.client.gui.screens.worldselection.SelectWorldScreen(parent);
@@ -294,6 +357,37 @@ public class Client implements MinecraftInstance {
         mc.gui.setScreen(screen);
         logger.info("Sigma debug: opened {} as {}", requested, mc.gui.screen().getClass().getSimpleName());
         return true;
+    }
+
+    /** Sample chat lines covering what a chat skin has to handle: colors, bold, a link, a wrapping line, Chinese. */
+    private void addDebugChatLines() {
+        net.minecraft.client.gui.components.ChatComponent chat = mc.gui.hud.getChat();
+        for (int i = 1; i <= Integer.getInteger("sigma.debug.chatLines", 0); i++) {
+            chat.addPlayerMessage(net.minecraft.network.chat.Component.literal("<Steve> earlier message " + i), null, null);
+        }
+        chat.addClientSystemMessage(net.minecraft.network.chat.Component.literal("Welcome back. This world was last played today."));
+        chat.addPlayerMessage(
+            net.minecraft.network.chat.Component.literal("<Steve> ")
+                .append(net.minecraft.network.chat.Component.literal("anyone up for the nether tonight?").withStyle(net.minecraft.ChatFormatting.WHITE)),
+            null, null
+        );
+        chat.addPlayerMessage(
+            net.minecraft.network.chat.Component.literal("[Server] ").withStyle(net.minecraft.ChatFormatting.GOLD, net.minecraft.ChatFormatting.BOLD)
+                .append(net.minecraft.network.chat.Component.literal("Restart in ").withStyle(style -> style.withBold(false).withColor(net.minecraft.ChatFormatting.YELLOW)))
+                .append(net.minecraft.network.chat.Component.literal("5 minutes").withStyle(style -> style.withBold(false).withColor(net.minecraft.ChatFormatting.RED)))
+                .append(net.minecraft.network.chat.Component.literal(". Read the ").withStyle(style -> style.withBold(false).withColor(net.minecraft.ChatFormatting.YELLOW)))
+                .append(net.minecraft.network.chat.Component.literal("changelog").withStyle(style -> style.withBold(false).withUnderlined(true)
+                    .withColor(net.minecraft.ChatFormatting.AQUA)
+                    .withClickEvent(new net.minecraft.network.chat.ClickEvent.OpenUrl(java.net.URI.create("https://example.com/changelog")))
+                    .withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(net.minecraft.network.chat.Component.literal("Opens the changelog"))))),
+            null, null
+        );
+        chat.addPlayerMessage(net.minecraft.network.chat.Component.literal(
+            "<Alex> a long line to see the wrap: we fenced the wheat farm, moved the villagers into the new hall, and the iron farm is finally running at full speed."
+        ), null, null);
+        chat.addPlayerMessage(net.minecraft.network.chat.Component.literal("<小明> 你好！今晚一起去下界吗？我带了两组金苹果。"), null, null);
+        chat.addPlayerMessage(net.minecraft.network.chat.Component.literal("<Steve> ")
+            .append(net.minecraft.network.chat.Component.literal("sure, bring pickaxes").withStyle(net.minecraft.ChatFormatting.ITALIC, net.minecraft.ChatFormatting.GRAY)), null, null);
     }
 
     /**
@@ -345,16 +439,24 @@ public class Client implements MinecraftInstance {
             });
             this.armDebugScreenshot();
         }
+        if (this.chatCloseCountdown > 0 && --this.chatCloseCountdown == 0) {
+            mc.execute(() -> {
+                if (mc.gui.screen() instanceof net.minecraft.client.gui.screens.ChatScreen) mc.gui.setScreen(null);
+            });
+        }
         if (this.screenshotFramesRemaining < 0) {
             return;
         }
+        this.screenshotFrame++;
         if (this.screenshotFramesRemaining > 0) {
             this.screenshotFramesRemaining--;
             return;
         }
-        this.screenshotFramesRemaining = -1;
+        String name = this.screenshotSeries ? "sigma-debug-" + (this.screenshotFrame - 1) + ".png" : "sigma-debug.png";
+        Integer next = this.screenshotSchedule.poll();
+        this.screenshotFramesRemaining = next == null ? -1 : next - this.screenshotFrame;
         net.minecraft.client.Screenshot.grab(
-            mc.gameDirectory, "sigma-debug.png", mc.gameRenderer.mainRenderTarget(), 1,
+            mc.gameDirectory, name, mc.gameRenderer.mainRenderTarget(), 1,
             message -> logger.info("Sigma debug: {}", message.getString())
         );
     }
@@ -362,7 +464,14 @@ public class Client implements MinecraftInstance {
     private void armDebugScreenshot() {
         String screenshotAfter = System.getProperty("sigma.debug.screenshotAfterFrames");
         if (screenshotAfter != null && !screenshotAfter.isBlank()) {
-            this.screenshotFramesRemaining = Integer.parseInt(screenshotAfter.trim());
+            java.util.List<Integer> frames = java.util.Arrays.stream(screenshotAfter.split(","))
+                .map(String::trim).filter(part -> !part.isEmpty()).map(Integer::parseInt).sorted().toList();
+            this.screenshotSeries = frames.size() > 1;
+            this.screenshotSchedule.clear();
+            this.screenshotSchedule.addAll(frames.subList(1, frames.size()));
+            this.screenshotFrame = 0;
+            this.screenshotFramesRemaining = frames.getFirst();
+            this.chatCloseCountdown = Integer.getInteger("sigma.debug.chatCloseAfterFrames", -1);
         }
     }
 
@@ -395,7 +504,8 @@ public class Client implements MinecraftInstance {
 
         try {
             EventBus.unregister(this.islandActivity);
-            EventBus.unregister(this.musicSubmerged);
+            EventBus.unregister(this.musicEnvironment);
+            this.musicEnvironment.reset();
             EventBus.unregister(this.musicPlayer);
             // Stops the audio line and the download/decode threads.
             this.musicPlayer.close();

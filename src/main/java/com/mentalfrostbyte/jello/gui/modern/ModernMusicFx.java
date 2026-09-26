@@ -1,17 +1,12 @@
 package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.event.EventTarget;
-import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.music.AudioAnalyzer;
 import com.mentalfrostbyte.jello.music.MusicEffects;
 import com.mentalfrostbyte.jello.music.MusicPlayer;
 import com.mentalfrostbyte.jello.music.Spectrum;
 import java.util.Random;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.tags.FluidTags;
 
 /**
  * SigmaModern's in-game music visuals, drawn under the rest of the HUD (the hotbar and hearts stay on top):
@@ -36,22 +31,6 @@ public final class ModernMusicFx {
     private static int live;
 
     private ModernMusicFx() {}
-
-    /** Tells the music whether the player's head is in water or lava, every tick (and "no" without a player). */
-    public static final class SubmergedListener {
-        private final MusicEffects effects;
-
-        public SubmergedListener(MusicEffects effects) {
-            this.effects = effects;
-        }
-
-        @EventTarget
-        public void onTick(EventTick event) {
-            if (!event.isPre()) return;
-            LocalPlayer player = Minecraft.getInstance().player;
-            this.effects.setSubmerged(player != null && (player.isEyeInFluid(FluidTags.WATER) || player.isEyeInFluid(FluidTags.LAVA)));
-        }
-    }
 
     static void render(GuiGraphicsExtractor g) {
         Client client = Client.getInstance();

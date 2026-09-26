@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module;
 
+import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
@@ -38,6 +39,7 @@ public final class ModuleManager {
         this.register(new CustomTitle());
         this.register(new Fullbright());
         this.register(new LowFire());
+        this.register(new ModernChat());
         this.register(new NoHurtCam());
         this.register(new Weather());
     }

@@ -6,10 +6,12 @@ import net.minecraft.client.renderer.RenderPipelines;
 
 import net.minecraft.resources.Identifier;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.IOException;
 import io.github.humbleui.skija.Data;
 import io.github.humbleui.skija.Font;
 import io.github.humbleui.skija.FontEdging;
+import io.github.humbleui.skija.FontFeature;
 import io.github.humbleui.skija.FontHinting;
 import io.github.humbleui.skija.FontMgr;
 import io.github.humbleui.skija.Paint;
@@ -17,6 +19,7 @@ import io.github.humbleui.skija.TextBlob;
 import io.github.humbleui.skija.TextLine;
 import io.github.humbleui.skija.Typeface;
 import io.github.humbleui.skija.shaper.Shaper;
+import io.github.humbleui.skija.shaper.ShapingOptions;
 import io.github.humbleui.types.Rect;
 import java.text.BreakIterator;
 import java.util.ArrayList;
@@ -26,14 +29,28 @@ import java.util.Map;
 
 /** Modern-only text shaping and coverage rasterization, independent of Minecraft's font atlas. */
 final class ModernFontRenderer implements AutoCloseable {
-    private static final float SIZE = 11;
+    /** The size Modern text is drawn at; the chat scales from it. */
+    static final float SIZE = 11;
     private static final float BASELINE = 9;
 
     private static final int MAX_LAYOUTS = 512;
     private static final long CACHE_BYTES = 32L * 1024 * 1024;
+    /**
+     * Shaping for text laid out one character at a time (the chat, whose wrapping, caret and click targets
+     * come from per-character advances): without kerning or ligatures a shaped run is exactly as wide as its
+     * characters' {@link #advance}s added up, so what is drawn lines up with what vanilla's layout measured.
+     */
+    static final ShapingOptions PLAIN = ShapingOptions.DEFAULT.withFeatures(new FontFeature[] {
+        new FontFeature("kern", false), new FontFeature("liga", false), new FontFeature("clig", false), new FontFeature("calt", false)
+    });
+
     private final Typeface face;
     private final Font font;
     private final Shaper shaper = Shaper.make();
+    private final ShapingOptions shaping;
+    // Kept apart from the layout cache: single-character measurements would otherwise evict real runs.
+    private final Int2FloatOpenHashMap advances = new Int2FloatOpenHashMap();
+    private final it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap coverage = new it.unimi.dsi.fastutil.ints.Int2BooleanOpenHashMap();
 
     private final Map<String, TextLine> layouts = new LinkedHashMap<>(64, 0.75F, true);
     private final Map<Key, Run> textures = new LinkedHashMap<>(64, 0.75F, true);
@@ -54,6 +71,16 @@ final class ModernFontRenderer implements AutoCloseable {
 
     /** {@code resource} is a static TTF instance cut from Anthropic Serif; see SIGMA_MODERN.md "Typography". */
     ModernFontRenderer(String resource) {
+        this(resource, false, false, ShapingOptions.DEFAULT);
+    }
+
+    /**
+     * {@code bold} and {@code italic} are synthesized (stroke emboldening, a slant) - neither changes a
+     * glyph's advance, so all four variants share one set of metrics.
+     */
+    ModernFontRenderer(String resource, boolean bold, boolean italic, ShapingOptions shaping) {
+        this.shaping = shaping;
+        this.advances.defaultReturnValue(Float.NaN);
         try (var stream = ModernFontRenderer.class.getResourceAsStream(resource)) {
             if (stream == null) throw new IOException("Missing bundled font " + resource);
             try (Data data = Data.makeFromBytes(stream.readAllBytes())) {
@@ -61,7 +88,8 @@ final class ModernFontRenderer implements AutoCloseable {
             }
             if (this.face == null) throw new IOException("Invalid bundled font " + resource);
             this.font = new Font(this.face, SIZE).setEdging(FontEdging.ANTI_ALIAS)
-                .setSubpixel(true).setMetricsLinear(true).setHinting(FontHinting.NONE);
+                .setSubpixel(true).setMetricsLinear(true).setHinting(FontHinting.NONE)
+                .setEmboldened(bold).setSkewX(italic ? -0.2F : 0F);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot load Modern's font", e);
         }
@@ -70,13 +98,40 @@ final class ModernFontRenderer implements AutoCloseable {
     private TextLine layout(String text) {
         TextLine cached = this.layouts.get(text);
         if (cached != null) return cached;
-        TextLine result = this.shaper.shapeLine(text, this.font);
+        TextLine result = this.shaper.shapeLine(text, this.font, this.shaping);
         this.layouts.put(text, result);
         if (this.layouts.size() > MAX_LAYOUTS) this.layouts.remove(this.layouts.keySet().iterator().next()).close();
         return result;
     }
     int width(String text) {
         return text.isEmpty() ? 0 : (int)Math.ceil(layout(text).getWidth());
+    }
+
+    /** The unrounded shaped width. */
+    float measure(String text) {
+        return text.isEmpty() ? 0F : layout(text).getWidth();
+    }
+
+    /**
+     * True when the bundled face itself has {@code codepoint}; false when a system font stands in. A run that
+     * mixes the two can shape the characters at the seam (a space after Chinese, say) in the other font than
+     * they measure in alone, so text placed by {@link #advance} is drawn in runs that don't.
+     */
+    boolean covers(int codepoint) {
+        // Asked per character per frame by the chat; one native lookup per character is enough.
+        return this.coverage.computeIfAbsent(codepoint, (int cp) -> this.font.getUTF32Glyph(cp) != 0);
+    }
+
+    /** One character's advance, system-font fallback included (a Chinese character measures in the face that draws it). */
+    float advance(int codepoint) {
+        float cached = this.advances.get(codepoint);
+        if (!Float.isNaN(cached)) return cached;
+        float width;
+        try (TextLine line = this.shaper.shapeLine(Character.toString(codepoint), this.font, this.shaping)) {
+            width = line.getWidth();
+        }
+        this.advances.put(codepoint, width);
+        return width;
     }
 
     String fit(String text, int width) {
@@ -118,6 +173,17 @@ final class ModernFontRenderer implements AutoCloseable {
         run.lastFrame = this.frame;
         if (shadow) blit(g, run, x + 1, y + 1, (color & 0xFF000000) | ((color & 0x00FCFCFC) >>> 2));
         blit(g, run, x, y, color);
+    }
+
+    /** Draws at a sub-pixel position, for runs placed by summed advances. */
+    void draw(GuiGraphicsExtractor g, String text, float x, float y, int color, boolean shadow) {
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(x, y);
+            draw(g, text, 0, 0, color, shadow);
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
     private Run upload(String text, int density) {

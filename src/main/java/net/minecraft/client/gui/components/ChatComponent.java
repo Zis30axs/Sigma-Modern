@@ -75,6 +75,9 @@ public class ChatComponent {
     private @Nullable ChatScreen preservedScreen;
     private final List<ChatComponent.DelayedMessageDeletion> messageDeletionQueue = new ArrayList<>();
     private Predicate<GuiMessage> visibleMessageFilter = var0 -> true;
+    // MODIFIED for porting: lines are wrapped in the metrics of the font that draws them (Anthropic Serif at the
+    // ModernChat module's size, or vanilla's when that is 0), so they are re-wrapped when the module or its size changes.
+    private float wrappedModernScale;
 
     public ChatComponent(final Minecraft minecraft) {
         this.minecraft = minecraft;
@@ -119,9 +122,19 @@ public class ChatComponent {
         final ChatComponent.DisplayMode displayMode,
         final boolean changeCursorOnInsertions
     ) {
+        // MODIFIED for porting: the ModernChat module sets the chat in Anthropic Serif on its own glass panel.
+        float modernScale = com.mentalfrostbyte.jello.gui.modern.ModernChat.wrapScale();
+        boolean modern = modernScale > 0.0F;
+        if (modernScale != this.wrappedModernScale) {
+            this.wrappedModernScale = modernScale;
+            this.rescaleChat();
+        }
+
         graphics.pose().pushMatrix();
         this.extractRenderState(
-            displayMode.foreground
+            modern
+                ? com.mentalfrostbyte.jello.gui.modern.ModernChat.painter(graphics, mouseX, mouseY, displayMode.foreground, changeCursorOnInsertions)
+                : displayMode.foreground
                 ? new ChatComponent.DrawingFocusedGraphicsAccess(graphics, font, mouseX, mouseY, changeCursorOnInsertions)
                 : new ChatComponent.DrawingBackgroundGraphicsAccess(graphics),
             graphics.guiHeight(),
@@ -140,6 +153,16 @@ public class ChatComponent {
     private void extractRenderState(
         final ChatComponent.ChatGraphicsAccess graphics, final int screenHeight, final int ticks, final ChatComponent.DisplayMode displayMode
     ) {
+        // MODIFIED for porting: the ModernChat module lays the lines out on its own panel, for drawing and for clicks alike -
+        // including while the chat is empty, so its input bar can still fold away after the screen closes.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernChat.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernChat.layout(
+                graphics, this.trimmedMessages, this.chatScrollbarPos, this.newMessageSinceScroll, screenHeight, ticks, displayMode,
+                QUEUE_EXPAND_TEXT_STYLE, RESTRICTED_CHAT_MESSAGE, RESTRICTED_CHAT_MESSAGE_WITH_HOVER
+            );
+            return;
+        }
+
         boolean isForeground = displayMode.foreground;
         boolean isRestricted = displayMode.showRestrictedPrompt;
         int total = this.trimmedMessages.size();
@@ -285,7 +308,10 @@ public class ChatComponent {
 
     private void addMessageToDisplayQueue(final GuiMessage message) {
         int maxWidth = Mth.floor(this.getWidth() / this.getScale());
-        List<FormattedCharSequence> lines = message.splitLines(this.minecraft.font, maxWidth);
+        // MODIFIED for porting: wrapped in Anthropic Serif metrics while the ModernChat module draws the chat.
+        List<FormattedCharSequence> lines = message.splitLines(
+            this.wrappedModernScale > 0.0F ? com.mentalfrostbyte.jello.gui.modern.ModernChat.font() : this.minecraft.font, maxWidth
+        );
         boolean chatting = this.isChatFocused();
 
         for (int i = 0; i < lines.size(); i++) {
@@ -439,6 +465,11 @@ public class ChatComponent {
     }
 
     private int getLineHeight() {
+        // MODIFIED for porting: the ModernChat module's serif lines are taller; paging and scrolling follow its pitch.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernChat.active()) {
+            return com.mentalfrostbyte.jello.gui.modern.ModernChat.lineHeight(this.minecraft.options.chatLineSpacing().get());
+        }
+
         return (int)(9.0 * (this.minecraft.options.chatLineSpacing().get() + 1.0));
     }
 

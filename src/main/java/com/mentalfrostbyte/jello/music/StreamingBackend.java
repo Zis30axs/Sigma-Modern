@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Plays MP3 streams: a {@link Resolver} turns a track into a URL (on a worker thread), the bytes are downloaded
  * into memory while a second thread decodes them with JLayer and writes 16-bit PCM to a Java Sound
- * {@link SourceDataLine}. On the way the samples go through the under-water filter ({@link Muffle}, as
+ * {@link SourceDataLine}. On the way the samples go through the environment processor ({@link EnvironmentAudioProcessor}, as
  * {@link MusicEffects} asks), then an {@link AudioAnalyzer} for visuals, then the volume - the player's volume times
  * the game's master volume, so muting the game mutes this too, and the visuals keep moving when muted.
  *
@@ -181,8 +181,9 @@ public final class StreamingBackend implements MusicBackend {
         volatile float sampleRate = 44_100F;
         // Created with the line, once the stream's rate and channels are known.
         volatile @Nullable AudioAnalyzer analyzer;
-        private @Nullable Muffle muffle;
+        private @Nullable EnvironmentAudioProcessor effectsProcessor;
         private float[] work = new float[0];
+        private byte[] output = new byte[0];
 
         Session(int id, Track track) {
             this.id = id;
@@ -264,6 +265,8 @@ public final class StreamingBackend implements MusicBackend {
                         this.baseMs = Math.round(positionMs);
                         AudioAnalyzer analyzer = this.analyzer;
                         if (analyzer != null) analyzer.reset();
+                        EnvironmentAudioProcessor processor = this.effectsProcessor;
+                        if (processor != null) processor.reset(StreamingBackend.this.effects.audioTarget());
                         this.lineFrameBase = line == null ? 0L : line.getLongFramePosition();
                         this.ended = false;
                         continue;
@@ -372,7 +375,7 @@ public final class StreamingBackend implements MusicBackend {
                 this.sampleRate = rate;
                 this.lineFrameBase = line.getLongFramePosition();
                 // Starts where the game is: a track begun under water begins muffled.
-                this.muffle = new Muffle(channels, StreamingBackend.this.effects.muffleTarget());
+                this.effectsProcessor = new EnvironmentAudioProcessor(channels, rate, StreamingBackend.this.effects.audioTarget());
                 this.analyzer = new AudioAnalyzer(rate);
                 this.line = line;
                 LOGGER.info("Sigma music: playing '{}' ({} Hz, {} ch{})", this.track.title(), rate, channels, this.previewMs > 0L ? ", preview" : "");
@@ -384,18 +387,19 @@ public final class StreamingBackend implements MusicBackend {
             if (this.work.length < count) this.work = new float[count];
             float[] work = this.work;
             for (int i = 0; i < count; i++) work[i] = pcm[i] / 32768F;
-            Muffle muffle = this.muffle;
-            if (muffle != null) muffle.process(work, count, channels, this.sampleRate, StreamingBackend.this.effects.muffleTarget());
+            EnvironmentAudioProcessor processor = this.effectsProcessor;
+            if (processor != null) processor.process(work, count, StreamingBackend.this.effects.audioTarget());
             AudioAnalyzer analyzer = this.analyzer;
             if (analyzer != null) analyzer.feed(work, count, channels, startMs);
             float gain = (float)Math.max(0.0, Math.min(1.0, StreamingBackend.this.volume * StreamingBackend.this.masterVolume.getAsDouble()));
-            byte[] bytes = new byte[count * 2];
+            if (this.output.length < count * 2) this.output = new byte[count * 2];
+            byte[] bytes = this.output;
             for (int i = 0; i < count; i++) {
                 int value = Math.max(-32768, Math.min(32767, Math.round(work[i] * 32767F * gain)));
                 bytes[i * 2] = (byte)value;
                 bytes[i * 2 + 1] = (byte)(value >> 8);
             }
-            line.write(bytes, 0, bytes.length);
+            line.write(bytes, 0, count * 2);
         }
 
         long positionMs() {

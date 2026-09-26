@@ -1281,6 +1281,18 @@ public class GuiGraphicsExtractor {
         this.preeditOverlay = preeditOverlay;
     }
 
+    // MODIFIED for porting: SigmaModern draws chat text itself and reports the style under the mouse here, with
+    // the same effect as RenderingTextCollector#accept(Style) - the hover tooltip and pointing-hand cursor below.
+    public void hoveredTextStyle(final Style style, final boolean allowCursorChanges) {
+        if (style.getHoverEvent() != null) {
+            this.hoveredTextStyle = style;
+        }
+
+        if (allowCursorChanges && style.getClickEvent() != null) {
+            this.clickableTextStyle = style;
+        }
+    }
+
     public void extractDeferredElements(final int mouseX, final int mouseY, final float a) {
         if (this.hoveredTextStyle != null) {
             this.componentHoverEffect(this.minecraft.font, this.hoveredTextStyle, mouseX, mouseY);

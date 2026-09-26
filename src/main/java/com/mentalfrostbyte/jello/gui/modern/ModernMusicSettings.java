@@ -19,7 +19,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
  * With what the current track's lyrics are, so a choice can be seen working. Which channel lyrics come from is
  * chosen in search's advanced options; this page says which it is.
  *
- * <p>Its second tab is the effects ({@link MusicEffects}): the under-water sound, the spectrum along the bottom
+ * <p>Its second tab is the effects ({@link MusicEffects}): environment sound, the spectrum along the bottom
  * of the screen, beat particles, and tinting the island with the cover's colour. Choices are saved with the Sigma
  * config.</p>
  */
@@ -31,6 +31,8 @@ final class ModernMusicSettings {
     private long lastFrame;
     private float dt;
     private int dragging = -1;
+    private static final int WATER = 0, LAVA = 1, SPACE = 2, WEATHER = 3, SPECTRUM = 4, COVER = 5;
+    private static final int ENVIRONMENT = 0, HEIGHT = 1, INTENSITY = 2, OPACITY = 3;
 
     private static ModernMusicView.Box tabs(ModernMusicView.Box c) {
         return new ModernMusicView.Box(c.x() + c.w() - 100, c.y() - 1, 100, 17);
@@ -38,39 +40,81 @@ final class ModernMusicSettings {
 
     /**
      * Where everything on the effects tab goes (scrolled by {@link #fxScroll}), the same numbers for drawing, clicks
-     * and drags: rows 0-2 are the switches (under water, spectrum, cover colour), then the spectrum's three dials
-     * (height, intensity, opacity) sit under its switch, and the particles' choice comes last.
+     * and drags: environment switches and strength first, then the spectrum with its three dials, cover colour,
+     * and particles. Hit testing shares the drawing viewport, including in a short window.
      */
-    private record FxLayout(int top, int[] rowY, ModernMusicView.Box[] switches, int[] sliderY, ModernMusicView.Box[] sliders,
-                            int particlesY, ModernMusicView.Box particles, int length) {}
+    record FxLayout(ModernMusicView.Box viewport, int[] rowY, ModernMusicView.Box[] switches, int[] sliderY, ModernMusicView.Box[] sliders,
+                    int particlesY, ModernMusicView.Box particles, int length) {
+        boolean visible(ModernMusicView.Box box) {
+            return this.viewport.h() > 0 && box.x() < this.viewport.x() + this.viewport.w() && box.x() + box.w() > this.viewport.x()
+                && box.y() < this.viewport.y() + this.viewport.h() && box.y() + box.h() > this.viewport.y();
+        }
+
+        int dialAt(double mx, double my) {
+            if (!this.viewport.contains(mx, my)) return -1;
+            for (int i = 0; i < this.sliders.length; i++) {
+                ModernMusicView.Box bar = this.sliders[i];
+                if (visible(bar) && my >= this.sliderY[i] && my < bar.y() + bar.h() + 2
+                    && mx >= bar.x() - 4 && mx < bar.x() + bar.w() + 4) return i;
+            }
+            return -1;
+        }
+
+        int switchAt(double mx, double my) {
+            if (!this.viewport.contains(mx, my)) return -1;
+            for (int i = 0; i < this.switches.length; i++) {
+                ModernMusicView.Box s = this.switches[i];
+                if (visible(s) && (s.contains(mx, my) || my >= this.rowY[i] && my < this.rowY[i] + 12)) return i;
+            }
+            return -1;
+        }
+
+        int particleAt(double mx, double my) {
+            return this.viewport.contains(mx, my) ? segmentAt(this.particles, 3, mx, my) : -1;
+        }
+    }
 
     private static FxLayout fxLayout(ModernMusicView.Box c) {
-        int top = c.y() + 22, y = top + 4 - Math.round(fxScroll), start = y;
-        int[] rowY = new int[3], sliderY = new int[3];
-        ModernMusicView.Box[] switches = new ModernMusicView.Box[3], sliders = new ModernMusicView.Box[3];
-        rowY[0] = y;
-        y += 36;
-        rowY[1] = y;
+        return fxLayout(c, fxScroll);
+    }
+
+    static FxLayout fxLayout(ModernMusicView.Box c, float scroll) {
+        int top = c.y() + 22, y = top + 4 - Math.round(scroll), start = y;
+        int[] rowY = new int[6], sliderY = new int[4];
+        ModernMusicView.Box[] switches = new ModernMusicView.Box[6], sliders = new ModernMusicView.Box[4];
+        for (int i = WATER; i <= WEATHER; i++) {
+            rowY[i] = y;
+            y += 36;
+        }
+        sliderY[ENVIRONMENT] = y;
+        sliders[ENVIRONMENT] = new ModernMusicView.Box(c.x() + 6, y + 10, Math.max(1, c.w() - 12), 11);
+        y += 30;
+        rowY[SPECTRUM] = y;
         y += 32;
-        for (int i = 0; i < 3; i++) {
+        for (int i = HEIGHT; i <= OPACITY; i++) {
             sliderY[i] = y;
-            sliders[i] = new ModernMusicView.Box(c.x() + 6, y + 10, c.w() - 12, 11);
+            sliders[i] = new ModernMusicView.Box(c.x() + 6, y + 10, Math.max(1, c.w() - 12), 11);
             y += 24;
         }
         y += 6;
-        rowY[2] = y;
+        rowY[COVER] = y;
         y += 36;
-        for (int i = 0; i < 3; i++) switches[i] = new ModernMusicView.Box(c.x() + c.w() - 28, rowY[i] + 3, 28, 14);
+        for (int i = 0; i < switches.length; i++) switches[i] = new ModernMusicView.Box(c.x() + c.w() - 28, rowY[i] + 3, 28, 14);
         int particlesY = y;
         ModernMusicView.Box particles = new ModernMusicView.Box(c.x(), y + 14, c.w(), 18);
         y += 50;
-        return new FxLayout(top, rowY, switches, sliderY, sliders, particlesY, particles, y - start);
+        return new FxLayout(new ModernMusicView.Box(c.x(), top, c.w(), Math.max(0, c.h() - 22)),
+            rowY, switches, sliderY, sliders, particlesY, particles, y - start + 4);
     }
 
     private static void clampScroll(ModernMusicView.Box c) {
-        FxLayout l = fxLayout(new ModernMusicView.Box(c.x(), c.y(), c.w(), c.h()));
-        float max = Math.max(0, l.length() + Math.round(fxScroll) - (c.y() + c.h() - l.top() - 4));
-        fxScroll = Math.max(0F, Math.min(fxScroll, max));
+        fxScroll = clampedScroll(c, fxScroll);
+    }
+
+    static float clampedScroll(ModernMusicView.Box c, float scroll) {
+        FxLayout l = fxLayout(c, 0F);
+        float max = Math.max(0, l.length() - l.viewport().h());
+        return Float.isFinite(scroll) ? Math.max(0F, Math.min(scroll, max)) : 0F;
     }
     /** In {@link LyricsService.Mode} order. */
     private static String[] modeLabels() {
@@ -121,20 +165,28 @@ final class ModernMusicSettings {
     private void drawEffects(GuiGraphicsExtractor g, ModernMusicView.Box c, int mx, int my) {
         MusicEffects fx = Client.getInstance().getMusicEffects();
         FxLayout l = fxLayout(c);
-        fxRow(g, c, l, 0, ModernText.t("Under water", "水下音效"),
-            ModernText.t("Music goes muffled while your head is in water or lava (only for you).", "头部没入水或岩浆时音乐变得沉闷（仅本地）"), fx.underwaterSound());
-        fxRow(g, c, l, 1, ModernText.t("Spectrum", "底部频谱"),
+        fxRow(g, c, l, WATER, ModernText.t("Under water", "水下音效"),
+            ModernText.t("Music goes muffled while your head is in water (only for you).", "头部没入水中时音乐变得沉闷（仅本地）"), fx.underwaterSound());
+        fxRow(g, c, l, LAVA, ModernText.t("Lava", "岩浆音效"),
+            ModernText.t("A deeper, quieter sound while your head is in lava.", "头部没入岩浆时，音乐更厚重、低沉"), fx.lavaSound());
+        fxRow(g, c, l, SPACE, ModernText.t("Space reverb", "空间混响"),
+            ModernText.t("A light echo in rooms and caves, shaped by the nearby space.", "在室内和洞穴中，随周围空间加入轻微混响"), fx.spaceSound());
+        fxRow(g, c, l, WEATHER, ModernText.t("Weather tone", "天气音色"),
+            ModernText.t("Rain and snow soften the music while you are out in the open.", "露天遇到雨雪时，音乐音色更柔和"), fx.weatherSound());
+        slider(g, l, ENVIRONMENT, mx, my, ModernText.t("Environment strength", "环境音效总强度"),
+            Math.round(fx.environmentStrength() * 100F) + "%", fx.environmentStrength());
+        fxRow(g, c, l, SPECTRUM, ModernText.t("Spectrum", "底部频谱"),
             ModernText.t("Bars along the bottom of the screen, moving with the music.", "游戏中屏幕底部随音乐跳动的频谱条"), fx.spectrum());
         // The spectrum's dials; faint while it's off.
         try (var dials = ModernStyle.alphaScope(fx.spectrum() ? 1F : 0.45F)) {
-            slider(g, l, 0, mx, my, ModernText.t("Height", "高度"), Math.round(fx.spectrumHeight() * 100F) + "%",
+            slider(g, l, HEIGHT, mx, my, ModernText.t("Height", "高度"), Math.round(fx.spectrumHeight() * 100F) + "%",
                 (fx.spectrumHeight() - MusicEffects.MIN_HEIGHT) / (MusicEffects.MAX_HEIGHT - MusicEffects.MIN_HEIGHT));
-            slider(g, l, 1, mx, my, ModernText.t("Intensity", "强度"), String.format(java.util.Locale.ROOT, "%.1f×", fx.spectrumIntensity()),
+            slider(g, l, INTENSITY, mx, my, ModernText.t("Intensity", "强度"), String.format(java.util.Locale.ROOT, "%.1f×", fx.spectrumIntensity()),
                 (fx.spectrumIntensity() - MusicEffects.MIN_INTENSITY) / (MusicEffects.MAX_INTENSITY - MusicEffects.MIN_INTENSITY));
-            slider(g, l, 2, mx, my, ModernText.t("Opacity", "不透明度"), Math.round(fx.spectrumOpacity() * 100F) + "%",
+            slider(g, l, OPACITY, mx, my, ModernText.t("Opacity", "不透明度"), Math.round(fx.spectrumOpacity() * 100F) + "%",
                 (fx.spectrumOpacity() - MusicEffects.MIN_OPACITY) / (MusicEffects.MAX_OPACITY - MusicEffects.MIN_OPACITY));
         }
-        fxRow(g, c, l, 2, ModernText.t("Cover colour", "封面取色"),
+        fxRow(g, c, l, COVER, ModernText.t("Cover colour", "封面取色"),
             ModernText.t("Tints the island, the spectrum and the sparks with the album cover.", "按专辑封面的颜色染色灵动岛、频谱和粒子"), fx.islandColor());
         float y = l.particlesY();
         ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernText.t("Beat particles", "节奏粒子"), c.x(), y + 2F, 0.86F, 0xFFE3F0F8);
@@ -149,14 +201,14 @@ final class ModernMusicSettings {
             c.x(), y + 38F, 0.66F, 0xFF9DB6C9);
     }
 
-    /** One of the spectrum's dials: its name, its value, and the player's own slider below them. */
+    /** One dial: its name, its value, and the player's own slider below them. */
     private void slider(GuiGraphicsExtractor g, FxLayout l, int i, int mx, int my, String label, String value, float fraction) {
         ModernMusicView.Box bar = l.sliders()[i];
         float y = l.sliderY()[i];
         ModernTypography.draw(g, ModernTypography.Face.TEXT, label, bar.x(), y, 0.76F, 0xFFC9DCEA);
         ModernTypography.draw(g, ModernTypography.Face.TEXT, value,
             bar.x() + bar.w() - ModernTypography.width(ModernTypography.Face.TEXT, value, 0.76F), y, 0.76F, 0xFFE3F0F8);
-        boolean hot = this.dragging == i || bar.contains(mx, my);
+        boolean hot = this.dragging == i || l.dialAt(mx, my) == i;
         float lit = this.anim.getOrDefault("dial" + i, 0F);
         lit = ModernStyle.smooth(lit, hot ? 1F : 0F, this.dt, 14F);
         this.anim.put("dial" + i, lit);
@@ -252,35 +304,35 @@ final class ModernMusicSettings {
         if (button != 0) return;
         int tab = segmentAt(tabs(c), 2, mx, my);
         if (tab >= 0) {
+            mouseReleased();
             effectsTab = tab == 1;
             return;
         }
         if (effectsTab) {
+            clampScroll(c);
             MusicEffects fx = Client.getInstance().getMusicEffects();
             FxLayout l = fxLayout(c);
-            if (my < l.top()) return;
-            for (int i = 0; i < 3; i++) {
-                ModernMusicView.Box bar = l.sliders()[i];
-                if (my >= l.sliderY()[i] && my < bar.y() + bar.h() + 2 && mx >= bar.x() - 4 && mx < bar.x() + bar.w() + 4) {
-                    this.dragging = i;
-                    dial(fx, i, bar, mx);
-                    return;
-                }
+            int dial = l.dialAt(mx, my);
+            if (dial >= 0) {
+                this.dragging = dial;
+                dial(fx, dial, l.sliders()[dial], mx);
+                return;
             }
             // A row's label counts as well as its switch.
-            for (int row = 0; row < 3; row++) {
-                ModernMusicView.Box s = l.switches()[row];
-                boolean hit = s.contains(mx, my) || (my >= l.rowY()[row] && my < l.rowY()[row] + 12 && mx >= c.x() && mx < c.x() + c.w());
-                if (!hit) continue;
+            int row = l.switchAt(mx, my);
+            if (row >= 0) {
                 switch (row) {
-                    case 0 -> fx.setUnderwaterSound(!fx.underwaterSound());
-                    case 1 -> fx.setSpectrum(!fx.spectrum());
-                    default -> fx.setIslandColor(!fx.islandColor());
+                    case WATER -> fx.setUnderwaterSound(!fx.underwaterSound());
+                    case LAVA -> fx.setLavaSound(!fx.lavaSound());
+                    case SPACE -> fx.setSpaceSound(!fx.spaceSound());
+                    case WEATHER -> fx.setWeatherSound(!fx.weatherSound());
+                    case SPECTRUM -> fx.setSpectrum(!fx.spectrum());
+                    case COVER -> fx.setIslandColor(!fx.islandColor());
                 }
                 Client.getInstance().saveConfig();
                 return;
             }
-            int picked = segmentAt(l.particles(), 3, mx, my);
+            int picked = l.particleAt(mx, my);
             if (picked >= 0) {
                 fx.setParticles(MusicEffects.Particles.values()[picked]);
                 Client.getInstance().saveConfig();
@@ -296,20 +348,28 @@ final class ModernMusicSettings {
         Client.getInstance().saveConfig();
     }
 
-    /** Sets dial {@code i} (height, intensity, opacity) from where the pointer is along its bar. */
+    /** Sets dial {@code i} (environment, height, intensity, opacity) from the pointer along its bar. */
     private static void dial(MusicEffects fx, int i, ModernMusicView.Box bar, double mx) {
         float f = (float)Math.max(0.0, Math.min(1.0, (mx - bar.x()) / Math.max(1, bar.w())));
         switch (i) {
-            case 0 -> fx.setSpectrumHeight(MusicEffects.MIN_HEIGHT + f * (MusicEffects.MAX_HEIGHT - MusicEffects.MIN_HEIGHT));
-            case 1 -> fx.setSpectrumIntensity(Math.round((MusicEffects.MIN_INTENSITY + f * (MusicEffects.MAX_INTENSITY - MusicEffects.MIN_INTENSITY)) * 10F) / 10F);
-            default -> fx.setSpectrumOpacity(MusicEffects.MIN_OPACITY + f * (MusicEffects.MAX_OPACITY - MusicEffects.MIN_OPACITY));
+            case ENVIRONMENT -> fx.setEnvironmentStrength(Math.round(f * 100F) / 100F);
+            case HEIGHT -> fx.setSpectrumHeight(MusicEffects.MIN_HEIGHT + f * (MusicEffects.MAX_HEIGHT - MusicEffects.MIN_HEIGHT));
+            case INTENSITY -> fx.setSpectrumIntensity(Math.round((MusicEffects.MIN_INTENSITY + f * (MusicEffects.MAX_INTENSITY - MusicEffects.MIN_INTENSITY)) * 10F) / 10F);
+            case OPACITY -> fx.setSpectrumOpacity(MusicEffects.MIN_OPACITY + f * (MusicEffects.MAX_OPACITY - MusicEffects.MIN_OPACITY));
         }
     }
 
     /** A dial being dragged follows the pointer; true while one is. */
     boolean mouseDragged(ModernMusicView.Box c, double mx, double my) {
         if (this.dragging < 0 || !effectsTab) return false;
-        dial(Client.getInstance().getMusicEffects(), this.dragging, fxLayout(c).sliders()[this.dragging], mx);
+        clampScroll(c);
+        FxLayout l = fxLayout(c);
+        ModernMusicView.Box bar = l.sliders()[this.dragging];
+        if (!l.visible(bar)) {
+            mouseReleased();
+            return false;
+        }
+        if (Double.isFinite(mx)) dial(Client.getInstance().getMusicEffects(), this.dragging, bar, mx);
         return true;
     }
 
@@ -322,7 +382,7 @@ final class ModernMusicSettings {
 
     /** The effects tab scrolls when the window is too short for it. */
     void mouseScrolled(ModernMusicView.Box c, double amount) {
-        if (!effectsTab) return;
+        if (!effectsTab || this.dragging >= 0 || !Double.isFinite(amount)) return;
         fxScroll -= (float)amount * 18F;
         clampScroll(c);
     }

@@ -11,6 +11,9 @@ final class Muffle {
 
     private final double[] x1, x2, y1, y2;
     private float amount;
+    private boolean initialized;
+    private double b0, b1, b2, a1, a2;
+    private double lastGain = 1.0, lastBlend;
 
     Muffle(int channels, float startAmount) {
         this.x1 = new double[channels];
@@ -18,6 +21,7 @@ final class Muffle {
         this.y1 = new double[channels];
         this.y2 = new double[channels];
         this.amount = startAmount;
+        this.lastBlend = startAmount > 0F ? 1.0 : 0.0;
     }
 
     float amount() {
@@ -32,32 +36,67 @@ final class Muffle {
         if (target == 0F && this.amount < 0.002F) {
             // Fully open: pass the audio through untouched, and start from rest next time.
             this.amount = 0F;
-            java.util.Arrays.fill(this.x1, 0.0);
-            java.util.Arrays.fill(this.x2, 0.0);
-            java.util.Arrays.fill(this.y1, 0.0);
-            java.util.Arrays.fill(this.y2, 0.0);
+            reset();
             return;
         }
         double cutoff = Math.exp(Math.log(OPEN_HZ) + (Math.log(UNDER_HZ) - Math.log(OPEN_HZ)) * this.amount);
+        filter(samples, count, channels, sampleRate, cutoff, 1.0 - 0.3 * this.amount, 1.0);
+    }
+
+    /** Parameterized low-pass. The caller smooths the target; coefficients and wet gain ramp within each block. */
+    void filter(float[] samples, int count, int channels, float sampleRate, double cutoff, double gain, double blend) {
+        int frames = count / channels;
+        if (frames == 0) return;
         cutoff = Math.min(cutoff, sampleRate * 0.45);
         // RBJ cookbook low-pass, Q = 1/sqrt(2).
         double w0 = 2.0 * Math.PI * cutoff / sampleRate, cos = Math.cos(w0), alpha = Math.sin(w0) / (2.0 * Math.sqrt(0.5));
         double a0 = 1.0 + alpha;
         double b0 = (1.0 - cos) / 2.0 / a0, b1 = (1.0 - cos) / a0, b2 = b0, a1 = -2.0 * cos / a0, a2 = (1.0 - alpha) / a0;
-        double gain = 1.0 - 0.3 * this.amount;
+        if (!this.initialized) {
+            this.b0 = b0;
+            this.b1 = b1;
+            this.b2 = b2;
+            this.a1 = a1;
+            this.a2 = a2;
+            this.initialized = true;
+        }
         for (int f = 0; f < frames; f++) {
+            double t = (f + 1.0) / frames;
+            double cb0 = this.b0 + (b0 - this.b0) * t, cb1 = this.b1 + (b1 - this.b1) * t;
+            double cb2 = this.b2 + (b2 - this.b2) * t, ca1 = this.a1 + (a1 - this.a1) * t;
+            double ca2 = this.a2 + (a2 - this.a2) * t;
+            double level = this.lastGain + (gain - this.lastGain) * t;
+            double wet = this.lastBlend + (blend - this.lastBlend) * t;
             for (int c = 0; c < channels; c++) {
                 int i = f * channels + c;
                 double x = samples[i];
-                double y = b0 * x + b1 * this.x1[c] + b2 * this.x2[c] - a1 * this.y1[c] - a2 * this.y2[c];
+                double y = cb0 * x + cb1 * this.x1[c] + cb2 * this.x2[c] - ca1 * this.y1[c] - ca2 * this.y2[c];
                 // Flush denormals: a decaying tail must not slow the decoder to a crawl.
                 if (Math.abs(y) < 1e-20) y = 0.0;
                 this.x2[c] = this.x1[c];
                 this.x1[c] = x;
                 this.y2[c] = this.y1[c];
                 this.y1[c] = y;
-                samples[i] = (float)(y * gain);
+                samples[i] = (float)(x + (y * level - x) * wet);
             }
         }
+        this.b0 = b0;
+        this.b1 = b1;
+        this.b2 = b2;
+        this.a1 = a1;
+        this.a2 = a2;
+        this.lastGain = gain;
+        this.lastBlend = blend;
+    }
+
+    /** Called on seeks and when completely bypassed, always on the decoding thread. */
+    void reset() {
+        java.util.Arrays.fill(this.x1, 0.0);
+        java.util.Arrays.fill(this.x2, 0.0);
+        java.util.Arrays.fill(this.y1, 0.0);
+        java.util.Arrays.fill(this.y2, 0.0);
+        this.initialized = false;
+        this.lastGain = 1.0;
+        this.lastBlend = 0.0;
     }
 }
