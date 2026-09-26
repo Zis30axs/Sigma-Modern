@@ -15,6 +15,7 @@ import com.mentalfrostbyte.jello.event.EventState;
 import com.mentalfrostbyte.jello.event.impl.player.EventLivingUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookEditScreen;
@@ -973,6 +974,8 @@ public class LocalPlayer extends AbstractClientPlayer
         }
 
         this.input.tick();
+        // Sigma hook: the keys held this tick, before anything reads them; a module may press jump or sneak.
+        this.input.keyPresses = EventBus.call(new EventMovementInput(this.input.keyPresses)).getInput();
         this.minecraft.getTutorial().onInput(this.input);
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
         // (@Inject after Tutorial#onInput in aiStep). <= 1.21.4 applied the movement speed factors to the

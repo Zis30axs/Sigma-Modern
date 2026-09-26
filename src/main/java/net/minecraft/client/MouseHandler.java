@@ -109,6 +109,12 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                     if (pressed) {
                         screen.afterMouseAction();
 
+                        // Sigma hook: the suspect list's drawer is resident over every screen, so it is offered
+                        // the press first; it only takes it on its own tab or window.
+                        if (com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.mouseClicked(xm, ym, buttonInfo.button())) {
+                            return;
+                        }
+
                         try {
                             long currentTime = Util.getMillis();
                             boolean doubleClick = this.lastClick != null
@@ -129,6 +135,11 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                             throw new ReportedException(report);
                         }
                     } else {
+                        // Sigma hook: the end of a drag on the suspect list's drawer.
+                        if (com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.mouseReleased()) {
+                            return;
+                        }
+
                         try {
                             if (screen.mouseReleased(event)) {
                                 return;
@@ -217,7 +228,11 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                 if (this.minecraft.gui.screen() != null) {
                     double xm = this.getScaledXPos(this.minecraft.getWindow());
                     double ym = this.getScaledYPos(this.minecraft.getWindow());
-                    this.minecraft.gui.screen().mouseScrolled(xm, ym, scaledXOffset, scaledYOffset);
+                    // Sigma hook: the wheel over the suspect list's drawer scrolls it, not the screen behind.
+                    if (!com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.mouseScrolled(xm, ym, scaledYOffset)) {
+                        this.minecraft.gui.screen().mouseScrolled(xm, ym, scaledXOffset, scaledYOffset);
+                    }
+
                     this.minecraft.gui.screen().afterMouseAction();
                 } else if (this.minecraft.player != null) {
                     Vector2i wheelXY = this.scrollWheelHandler.onMouseScroll(scaledXOffset, scaledYOffset);
@@ -361,7 +376,10 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                     double dy = getScaledYPos(window, this.accumulatedDY);
 
                     try {
-                        screen.mouseDragged(new MouseButtonEvent(xm, ym, this.activeButton), dx, dy);
+                        // Sigma hook: a drag that started on the suspect list's drawer stays the drawer's.
+                        if (!com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.mouseDragged(xm, ym)) {
+                            screen.mouseDragged(new MouseButtonEvent(xm, ym, this.activeButton), dx, dy);
+                        }
                     } catch (Throwable t) {
                         CrashReport report = CrashReport.forThrowable(t, "mouseDragged event handler");
                         screen.fillCrashDetails(report);

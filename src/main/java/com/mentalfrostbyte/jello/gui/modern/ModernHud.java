@@ -12,7 +12,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 /**
  * SigmaModern's always-on in-game HUD decorations: an enabled-module list, a WASD keystroke display and the
  * music "dynamic island" ({@link ModernIsland}), which shows the music player's state and flashes module
- * toggles made in game.
+ * toggles made in game, and the suspect list's drawer ({@link ModernSuspectDrawer}) while it is left out.
  *
  * <p>These are pure overlay chrome: they never read from or write to module/setting state beyond
  * {@link Module#isEnabled()}, and only draw while the real gameplay HUD would (no screen open).</p>
@@ -30,6 +30,7 @@ public final class ModernHud {
         drawEnabledList(g, mc);
         drawKeystrokes(g, mc.options);
         ModernIsland.render(g);
+        ModernSuspectDrawer.renderHud(g);
     }
 
     /** The music visuals, under everything else on the HUD; called first thing in {@code Hud}'s pass. */

@@ -180,6 +180,9 @@ public class Gui {
                 // requested one), then its transparent caption controls, both above every screen.
                 com.mentalfrostbyte.jello.gui.modern.ModernTransitions.render(graphics);
                 com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.render(graphics);
+                // Sigma hook: the suspect list's drawer, resident over every screen while a world is loaded (a
+                // no-op unless the SuspectList module is on under SigmaModern).
+                com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.renderOverScreen(graphics, xMouse, yMouse);
             } catch (Throwable t) {
                 CrashReport report = CrashReport.forThrowable(t, "Rendering screen");
                 CrashReportCategory category = report.addCategory("Screen render details");

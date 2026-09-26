@@ -69,6 +69,13 @@ public class Client implements MinecraftInstance {
     // -Dsigma.debug.openGuiInWorld: open the ClickGUI once a world has loaded (e.g. after --quickPlaySingleplayer),
     // so it can be checked over a real world rather than only over the no-world background.
     private boolean openGuiInWorldPending = Boolean.getBoolean("sigma.debug.openGuiInWorld");
+    // What -Dsigma.debug.enableModules / -Dsigma.debug.settings changed, so saving writes the user's own values instead.
+    private final java.util.List<DebugOverride> debugOverrides = new java.util.ArrayList<>();
+
+    /** One value a debug flag set: {@code setting} is null for the module's on/off state. */
+    private record DebugOverride(String module, @org.jspecify.annotations.Nullable String setting,
+                                 com.google.gson.JsonElement saved, com.google.gson.JsonElement applied) {
+    }
 
     private Client() {
         this.directory = mc.gameDirectory.toPath().resolve("sigma5");
@@ -221,8 +228,9 @@ public class Client implements MinecraftInstance {
 
     /**
      * {@code -Dsigma.debug.enableModules=A,B} switches modules on and {@code -Dsigma.debug.settings=Module/Setting=value;...}
-     * sets their settings, for captures. Nothing here saves; but the config is still written on a normal exit or when
-     * a ClickGUI closes, so a run that does either keeps them - force-close captures that use these.
+     * sets their settings, for captures. They never reach the user's config: the config is written on a normal exit,
+     * when a ClickGUI closes and from the music settings, and each of those writes keeps the value the file had for
+     * anything these set (see {@link #keepDebugOverridesOutOf}) - unless the user changed it themselves meanwhile.
      */
     private void applyDebugModulesIfRequested() {
         String enable = System.getProperty("sigma.debug.enableModules");
@@ -230,7 +238,9 @@ public class Client implements MinecraftInstance {
             for (String name : enable.split(",")) {
                 if (name.isBlank()) continue;
                 this.moduleManager.find(name.strip()).ifPresentOrElse(module -> {
+                    com.google.gson.JsonElement saved = new com.google.gson.JsonPrimitive(module.isEnabled());
                     module.setEnabled(true);
+                    this.debugOverrides.add(new DebugOverride(module.getName(), null, saved, new com.google.gson.JsonPrimitive(module.isEnabled())));
                     logger.info("Sigma debug: enabled {}", module.getName());
                 }, () -> logger.warn("Sigma debug: no module named '{}'", name.strip()));
             }
@@ -243,10 +253,32 @@ public class Client implements MinecraftInstance {
                 if (slash < 0 || equals < slash) continue;
                 String moduleName = entry.substring(0, slash).strip(), settingName = entry.substring(slash + 1, equals).strip();
                 String value = entry.substring(equals + 1).strip();
-                boolean applied = this.moduleManager.find(moduleName).flatMap(module -> module.setting(settingName))
-                    .map(setting -> setting.fromJson(com.google.gson.JsonParser.parseString(value)))
-                    .orElse(false);
+                boolean applied = this.moduleManager.find(moduleName).flatMap(module -> module.setting(settingName).map(setting -> {
+                    com.google.gson.JsonElement saved = setting.toJson();
+                    if (!setting.fromJson(com.google.gson.JsonParser.parseString(value))) return false;
+                    this.debugOverrides.add(new DebugOverride(module.getName(), setting.getName(), saved, setting.toJson()));
+                    return true;
+                })).orElse(false);
                 logger.info("Sigma debug: {} {}/{} = {}", applied ? "set" : "could not set", moduleName, settingName, value);
+            }
+        }
+    }
+
+    /**
+     * Puts back, in the {@code modules} section just written to {@code root}, the value each debug override replaced -
+     * where the value is still the one the override set; one the user has changed since is theirs and is kept.
+     */
+    private void keepDebugOverridesOutOf(final JsonObject root) {
+        if (this.debugOverrides.isEmpty() || !(root.get("modules") instanceof JsonObject modules)) {
+            return;
+        }
+        for (DebugOverride override : this.debugOverrides) {
+            if (!(modules.get(override.module()) instanceof JsonObject module)) continue;
+            JsonObject holder = override.setting() == null ? module
+                : module.get("settings") instanceof JsonObject settings ? settings : null;
+            String key = override.setting() == null ? "enabled" : override.setting();
+            if (holder != null && override.applied().equals(holder.get(key))) {
+                holder.add(key, override.saved());
             }
         }
     }
@@ -334,6 +366,24 @@ public class Client implements MinecraftInstance {
                 String typed = System.getProperty("sigma.debug.chatType");
                 if (typed != null && !typed.isEmpty()) chatScreen.insertText(typed, false);
             }
+            logger.info("Sigma debug: opened {}", target);
+            return true;
+        }
+
+        // SUSPECTS / SUSPECTS_HUD switch AntiCheat and SuspectList on, put a made-up cheater in front of the player and
+        // run the real detector over a made-up trajectory (see AntiCheatDemo). SUSPECTS also pulls the list's drawer
+        // out (over the game, since nothing is open); SUSPECTS_HUD leaves it shut, for the name tag and the chat
+        // alerts. Both need a world.
+        if (target.equals("SUSPECTS") || target.equals("SUSPECTS_HUD")) {
+            if (mc.player == null) {
+                logger.warn("Sigma debug: {} needs a world (use it with openGuiInWorld)", target);
+                return false;
+            }
+            com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat antiCheat = this.moduleManager.get(com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat.class);
+            antiCheat.setEnabled(true);
+            this.moduleManager.get(com.mentalfrostbyte.jello.module.impl.gui.SuspectList.class).setEnabled(true);
+            com.mentalfrostbyte.jello.anticheat.client.AntiCheatDemo.seed(antiCheat);
+            com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.setOpenNow(target.equals("SUSPECTS"));
             logger.info("Sigma debug: opened {}", target);
             return true;
         }
@@ -544,6 +594,7 @@ public class Client implements MinecraftInstance {
 
     public void saveConfig() {
         ModuleConfig.write(this.config, this.moduleManager);
+        this.keepDebugOverridesOutOf(this.config);
         this.clientModeManager.write(this.config);
         this.musicPlayer.write(this.config);
         this.musicLibrary.write(this.config);

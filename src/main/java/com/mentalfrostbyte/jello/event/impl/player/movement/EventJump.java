@@ -3,10 +3,15 @@ package com.mentalfrostbyte.jello.event.impl.player.movement;
 import com.mentalfrostbyte.jello.event.CancellableEvent;
 
 /**
- * Fired when the local player jumps off the ground, before the upward impulse is applied.
+ * Fired twice when the local player jumps off the ground.
  *
- * <p>Both fields are writable: {@link #setJumpPower(float)} changes the height, {@link #setYaw(float)}
- * changes the direction of the sprint boost that vanilla adds on top. Cancelling suppresses the jump.</p>
+ * <p>{@link com.mentalfrostbyte.jello.event.EventState#PRE PRE}, before the upward impulse is applied: both
+ * fields are writable - {@link #setJumpPower(float)} changes the height, {@link #setYaw(float)} changes the
+ * direction of the sprint boost vanilla adds on top - and cancelling suppresses the jump.</p>
+ *
+ * <p>{@link com.mentalfrostbyte.jello.event.EventState#POST POST}, once the impulse is in the player's velocity
+ * (only if a jump actually happened): the fields are what was used, and a listener that wants to shape the jump
+ * sets the player's velocity directly. Cancelling a POST does nothing.</p>
  */
 public class EventJump extends CancellableEvent {
 
