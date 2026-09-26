@@ -132,6 +132,12 @@ The **ArrayList** module (Interface category) is the list of switched-on modules
 - **Text Shadow** (default on).
 - **Animations** (default on): a switched-on module slides in from the screen edge. A switched-off one slides out and fades in its old slot while the lines around it ease into their new places. After a gap in drawing (a screen was open) the list snaps into place instead of replaying what changed meanwhile.
 
+## TabGUI
+
+The **TabGUI** module (Interface category, off by default) is Sigma's keyboard menu: the module categories on a dark glass panel in the top-left corner, driven with the arrow keys in game. Up/Down pick a category (held, they repeat), Right or Enter opens its modules on a second panel beside the highlighted row, Up/Down pick a module, Right or Enter switches it (never on key repeat), and Left goes back. Only categories with a module in them are offered, and the TabGUI doesn't offer itself. A category row shows a lit dot while anything in it is on; a module row shows a status dot (lit while on) and, under **Keybinds**, its key. The highlight is the hotbar's selected-slot glow; it glides between rows and the module panel slides open under **Animations**. **Background** (0–1, default 0.6) sets the glass; below 0.35 the text gets a shadow instead.
+
+`TabGui` holds the menu itself - which categories and modules, where the selection is, what each key does (`press`) - and `gui.modern.ModernTabGui` draws it. A key only moves the menu while a presentation has drawn it in the last 250 ms (`markShown`), so outside SigmaModern, or while the F3 debug text (which starts in the same corner) hides it, the arrows do nothing to it. A key that a vanilla key mapping or a module keybind already uses is left to them, and the menu never cancels a key, so someone who walks with the arrow keys keeps walking. A top-left ArrayList hangs under the TabGUI while it shows.
+
 ## Chat
 
 The **ModernChat** module (Interface category, off by default) restyles the chat in Anthropic Serif, on the same dark ice glass as the rest of Modern. It isn't tied to the SigmaModern presentation: the module holds the switch and the numbers, and `gui.modern.ModernChat` does the drawing from hooks that ask `Modules.enabled` for it. Switched off, the next frame is vanilla's chat again, re-wrapped in vanilla's font. Its settings:
