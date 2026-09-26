@@ -94,6 +94,16 @@ public abstract class Module implements SettingHolder, MinecraftInstance, Enable
     }
 
     /**
+     * Whether the module is on when the config has nothing to say about it: a fresh install, or a config
+     * written before the module existed. Almost every module starts off. One that took over something the
+     * client always did - the module list - starts on, so turning a feature into a module does not take it
+     * away from anyone. The config's own on/off state, once there is one, always wins.
+     */
+    public boolean isEnabledByDefault() {
+        return false;
+    }
+
+    /**
      * Switches the module on or off. This is the only way its state changes: it subscribes or unsubscribes
      * the module, runs {@link #onEnable()} or {@link #onDisable()}, and publishes an
      * {@link EventModuleToggle}. Setting the state it already has does nothing.

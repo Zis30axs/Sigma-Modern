@@ -290,7 +290,7 @@ public class Hud {
 
         // Sigma hook: after the vanilla HUD, so client overlays draw on top of it.
         EventBus.call(new EventRender2D(EventState.POST, graphics, deltaTracker));
-        // MODIFIED for porting: SigmaModern's always-on HUD decorations (enabled-module list, keystrokes,
+        // MODIFIED for porting: SigmaModern's HUD decorations (the ArrayList module's list, keystrokes,
         // dynamic island), drawn last so they sit above both the vanilla HUD and any module overlay.
         com.mentalfrostbyte.jello.gui.modern.ModernHud.render(graphics);
     }
