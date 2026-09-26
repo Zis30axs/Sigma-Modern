@@ -70,7 +70,7 @@ final class ModernTabGui {
 
         int selected = Math.floorMod(tab.selectedCategory(), categories.size());
         int catW = 0;
-        for (ModuleCategory category : categories) catW = Math.max(catW, ModernTypography.width(category.getDisplayName()));
+        for (ModuleCategory category : categories) catW = Math.max(catW, ModernTypography.width(ModernText.category(category)));
         catW += PAD_X * 2 + DOT + 8;
         int x = MARGIN, y = ModernHud.BRAND_BOTTOM;
         panel(g, tab, x, y, catW, height(categories.size()));
@@ -81,7 +81,7 @@ final class ModernTabGui {
         for (int i = 0; i < categories.size(); i++) {
             ModuleCategory category = categories.get(i);
             int rowY = y + PAD_Y + i * ROW_H;
-            ModernTypography.draw(g, category.getDisplayName(), x + PAD_X, rowY + 3, i == selected ? 0xFFFFFFFF : ModernStyle.TEXT, shadow);
+            ModernTypography.draw(g, ModernText.category(category), x + PAD_X, rowY + 3, i == selected ? 0xFFFFFFFF : ModernStyle.TEXT, shadow);
             // A lit dot where something in the category is on.
             if (tab.modules(category).stream().anyMatch(Module::isEnabled)) {
                 ModernStyle.statusDot(g, x + catW - PAD_X - DOT, rowY + (ROW_H - DOT) / 2, DOT, ModernStyle.GLOW, true);

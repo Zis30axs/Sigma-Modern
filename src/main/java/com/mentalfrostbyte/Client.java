@@ -40,6 +40,8 @@ public class Client implements MinecraftInstance {
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
     private final ClientModeManager clientModeManager = new ClientModeManager();
+    // The language of the client's own text; the game's keeps following its own setting.
+    private final com.mentalfrostbyte.jello.lang.Translations translations = new com.mentalfrostbyte.jello.lang.Translations();
     private final PresentationManager presentationManager = new PresentationManager(this.clientModeManager);
     // NetEase Cloud Music (streams, search, charts) with QQ Music for word-timed lyrics. -Dsigma.debug.musicOffline
     // keeps the built-in demo list on a silent, time-keeping backend instead: no network, deterministic for tests.
@@ -132,6 +134,7 @@ public class Client implements MinecraftInstance {
             this.accountManager.load();
             boolean hasClientMode = this.config.has("clientMode");
             this.clientModeManager.read(this.config);
+            this.translations.read(this.config);
 
             if (!this.modulesRegistered) {
                 this.moduleManager.registerAll();
@@ -596,6 +599,7 @@ public class Client implements MinecraftInstance {
         ModuleConfig.write(this.config, this.moduleManager);
         this.keepDebugOverridesOutOf(this.config);
         this.clientModeManager.write(this.config);
+        this.translations.write(this.config);
         this.musicPlayer.write(this.config);
         this.musicLibrary.write(this.config);
         this.musicEffects.write(this.config);
@@ -604,6 +608,10 @@ public class Client implements MinecraftInstance {
         } catch (IOException failure) {
             logger.error("Could not save the config", failure);
         }
+    }
+
+    public com.mentalfrostbyte.jello.lang.Translations getTranslations() {
+        return this.translations;
     }
 
     public ModuleManager getModuleManager() {
