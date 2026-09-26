@@ -186,10 +186,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 hits.add(new Hit(contentX, y, contentW, 30, "empty", null, null));
                 y += 30;
             } else {
-                for (Module module : pool) {
-                    hits.add(new Hit(contentX, y, contentW, ROW_H, module, module, null));
-                    y += ROW_H;
+                int cols = tileColumns(contentW), tileW = (contentW - TILE_GAP * (cols - 1)) / cols;
+                for (int i = 0; i < pool.size(); i++) {
+                    Module module = pool.get(i);
+                    hits.add(new Hit(contentX + (i % cols) * (tileW + TILE_GAP), y + (i / cols) * (TILE_H + TILE_GAP), tileW, TILE_H, module, module, null));
                 }
+                y += (pool.size() + cols - 1) / cols * (TILE_H + TILE_GAP);
             }
         }
         this.contentHeight = y + this.scroll - (panelY() + HEADER_H + subheaderHeight());
@@ -348,6 +350,13 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         return this.music.isTyping();
     }
 
+    /** Test seam for {@code GuiScreenInteractionSmoke}: a module's tile as {@code {x, y, w, h}}, or null when it isn't shown. */
+    public int[] moduleBounds(Module module) {
+        if (this.view != View.CATEGORY && this.view != View.SEARCH) return null;
+        for (Hit h : rows()) if (h.module() == module && h.setting() == null) return new int[]{h.x(), h.y(), h.w(), h.h()};
+        return null;
+    }
+
     /** Test seam: whether the ClickGUI itself is on its category view (not its own search or a module's detail). */
     public boolean isOnCategoryView() {
         return this.view == View.CATEGORY;
@@ -476,29 +485,70 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         ModernTypography.draw(g, ModernTypography.fit(shown, w - 24), x + 12, y + 9, color, false);
     }
 
+    // --- module tiles ---------------------------------------------------------------------------------------
+
+    private static final int TILE_H = 46, TILE_GAP = 8, TILE_MIN_W = 170;
+    // The tile under the mouse this frame; the footer tells what it does.
+    private Module hoveredModule;
+
+    /** As many columns as fit tiles at least TILE_MIN_W wide: two beside the sidebar, three in the full-width search. */
+    private static int tileColumns(int width) {
+        return Math.max(1, (width + TILE_GAP) / (TILE_MIN_W + TILE_GAP));
+    }
+
+    /** What a tile's second line says: the module's mode while it's on (or just "On"), else "Off". */
+    private static String tileState(Module m) {
+        if (!m.isEnabled()) return ModernText.tr("clickgui.tile.off");
+        for (Setting<?> setting : m.settings()) {
+            if (setting instanceof EnumSetting<?> choice) return EnumSetting.label(choice.get());
+        }
+        return ModernText.tr("clickgui.tile.on");
+    }
+
     private void drawRows(GuiGraphicsExtractor g, List<Hit> hits, int mx, int my) {
+        this.hoveredModule = null;
         if (hits.size() == 1 && "empty".equals(hits.get(0).key())) {
             Hit h = hits.get(0);
             String message = ModernText.tr(this.view == View.SEARCH ? "clickgui.empty.search" : "clickgui.empty.category");
             ModernTypography.draw(g, message, h.x(), h.y() + 6, ModernStyle.INK_MUTED, false);
             return;
         }
+        boolean hoverable = my >= visibleContentTop() && my < panelY() + Math.round(this.panelHeight) - FOOTER_H;
         for (Hit h : hits) {
             Module m = h.module();
-            boolean hoverable = my >= visibleContentTop() && my < panelY() + Math.round(this.panelHeight) - FOOTER_H;
-            float target = hoverable && ModernStyle.inside(mx, my, h.x(), h.y(), h.w(), h.h()) ? 1 : 0;
-            float hover = animate(m, target);
-            int rowAlpha = Math.round(hover * 22) + (m.isEnabled() ? 26 : 0);
-            if (rowAlpha > 0) ModernStyle.rounded(g, h.x() + 2, h.y() + 1, h.w() - 4, h.h() - 3, 6, rowAlpha << 24 | 0x3D9DDC);
-            if (m.isEnabled()) ModernStyle.rounded(g, h.x() + 3, h.y() + 8, 2, h.h() - 16, 1, ModernStyle.BLUE);
-            int nameColor = m.isEnabled() ? ModernStyle.BLUE : ModernStyle.INK;
-            ModernTypography.draw(g, ModernTypography.fit(m.getName(), h.w() - 70), h.x() + 12, h.y() + 6, nameColor, false);
-            String desc = ModernTypography.fit(m.getDescription(), h.w() - 70);
-            if (!desc.isEmpty()) ModernTypography.draw(g, desc, h.x() + 12, h.y() + 22, ModernStyle.INK_MUTED, false);
-            float on = animate("row-on-" + m, m.isEnabled() ? 1 : 0);
-            ModernStyle.toggle(g, h.x() + h.w() - 50, h.y() + h.h() / 2 - 8, 28, 16, on);
-            ModernTypography.draw(g, "›", h.x() + h.w() - 18, h.y() + h.h() / 2 - 4, ModernStyle.INK_MUTED, false);
+            boolean over = hoverable && ModernStyle.inside(mx, my, h.x(), h.y(), h.w(), h.h());
+            if (over) this.hoveredModule = m;
+            drawTile(g, h, m, animate(m, over ? 1 : 0), animate("row-on-" + m, m.isEnabled() ? 1 : 0));
         }
+    }
+
+    /**
+     * A module as a control-centre tile: the whole tile is its switch and lights up while it's on. Its name, its state
+     * (mode, or on/off) on a second line, its key when it has one, and a › that opens its page.
+     */
+    private void drawTile(GuiGraphicsExtractor g, Hit h, Module m, float hover, float on) {
+        int x = h.x(), y = h.y(), w = h.w(), th = h.h();
+        if (on > 0.01F) ModernStyle.halo(g, x, y, w, th, 9, ModernStyle.GLOW, 0.35F * on);
+        ModernStyle.rounded(g, x, y, w, th, 9, ModernStyle.mix(ModernStyle.mix(0x1A243746, 0x2E3D9DDC, hover), ModernStyle.BLUE, on));
+        if (on > 0.01F) ModernStyle.roundedGradient(g, x, y, w, th, 9, y, y + th, ModernTypography.fade(0x2EFFFFFF, on), 0x00FFFFFF);
+
+        int bx = x + w - 22, by = y + 8;
+        ModernStyle.rounded(g, bx, by, 15, 15, 5, ModernStyle.mix(0x14243746, 0x26FFFFFF, on));
+        ModernTypography.draw(g, "›", bx + 5, by + 3, ModernStyle.mix(ModernStyle.INK_MUTED, 0xFFFFFFFF, on), false);
+        int right = bx - 5;
+        int nameColor = ModernStyle.mix(ModernStyle.INK, 0xFFFFFFFF, on);
+        if (m.getKeybind().isBound()) {
+            String key = m.getKeybind().key().getDisplayName().getString();
+            int kw = Math.round(ModernTypography.width(ModernTypography.Face.TEXT, key, 0.78F)) + 10;
+            ModernStyle.rounded(g, right - kw, y + 9, kw, 13, 4, ModernStyle.mix(PILL, 0x33FFFFFF, on));
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, key, right - kw + 5, y + 11.2F, 0.78F, nameColor);
+            right -= kw + 4;
+        }
+        ModernTypography.draw(g, ModernTypography.fit(m.getName(), right - x - 15), x + 11, y + 9, nameColor, false);
+        boolean binding = this.interactions.isBinding(m);
+        String state = binding ? ModernText.tr("clickgui.detail.binding") : tileState(m);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.wrap(ModernTypography.Face.TEXT, state, 0.82F, w - 22, 1).getFirst(),
+            x + 11, y + 25, 0.82F, binding ? ModernStyle.mix(ModernStyle.BLUE, 0xFFFFFFFF, on) : ModernStyle.mix(ModernStyle.INK_MUTED, 0xCCEAF6FF, on));
     }
 
     // --- module detail: a compact inspector ------------------------------------------------------------
@@ -754,6 +804,19 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private void drawFooter(GuiGraphicsExtractor g, int panelX, int panelY, int panelW, int panelH) {
         int y = panelY + panelH - FOOTER_H;
         ModernStyle.fill(g, panelX + 1, y, panelX + panelW - 1, y + 1, 0x1EBFEEFF);
+        Module hovered = this.hoveredModule;
+        if (hovered != null && (this.view == View.CATEGORY || this.view == View.SEARCH)) {
+            // Over a tile, the footer says what that module does - its description lives here, not on the tile.
+            ModernStyle.statusDot(g, panelX + PAD, y + 9, 6, ModernStyle.BLUE, hovered.isEnabled());
+            int textX = panelX + PAD + 12, room = panelW - PAD * 2 - 12;
+            String name = ModernTypography.fit(hovered.getName(), room);
+            ModernTypography.draw(g, name, textX, y + 6, ModernStyle.INK, false);
+            int nameW = ModernTypography.width(name);
+            if (!hovered.getDescription().isBlank() && room - nameW > 40) {
+                ModernTypography.draw(g, ModernTypography.fit("  ·  " + hovered.getDescription(), room - nameW), textX + nameW, y + 6, ModernStyle.INK_MUTED, false);
+            }
+            return;
+        }
         int enabled = (int)this.modules.all().stream().filter(Module::isEnabled).count();
         ModernStyle.statusDot(g, panelX + PAD, y + 9, 6, ModernStyle.BLUE, true);
         ModernTypography.draw(g, ModernText.tr("clickgui.footer.enabled", enabled), panelX + PAD + 12, y + 6, ModernStyle.INK_MUTED, false);
@@ -891,7 +954,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             if (this.view == View.DETAIL) return handleDetailClick(h, e);
             if (h.module() != null) {
                 if (e.button() == 2) { this.interactions.startBind(h.module()); return true; }
-                if (e.button() == 1 || e.x() >= h.x() + h.w() - 24) openDetail(h.module());
+                if (e.button() == 1 || e.x() >= h.x() + h.w() - 26) openDetail(h.module());
                 else h.module().toggle();
                 return true;
             }
@@ -1068,13 +1131,17 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
      * Debug-only: jumps to a named view so {@code -Dsigma.debug.screenshotAfterFrames} can capture a view
      * other than whatever {@code GuiScreenInteractionSmoke} happens to leave the screen on. Read by
      * {@link com.mentalfrostbyte.Client#openDebugGuiIfRequested} when {@code -Dsigma.debug.modernPreviewView}
-     * is set to {@code DETAIL} (or {@code DETAIL:<module>}, or {@code DETAIL:<module>:<setting>} to open a choice's
+     * is set to {@code CATEGORY:<category>}, {@code DETAIL} (or {@code DETAIL:<module>}, or {@code DETAIL:<module>:<setting>} to open a choice's
      * dropdown too), {@code SEARCH}, {@code LANGUAGE}, {@code MUSIC} (pulls the music window out) or {@code INGAME} (closes the screen, for the in-game HUD);
      * any other value is ignored.
      */
     public void debugPreview(String view) {
         String[] parts = view.split(":");
-        if ("DETAIL".equalsIgnoreCase(parts[0])) {
+        if ("CATEGORY".equalsIgnoreCase(parts[0]) && parts.length > 1) {
+            for (ModuleCategory category : ModuleCategory.values()) {
+                if (category.name().equalsIgnoreCase(parts[1])) this.activeCategory = category;
+            }
+        } else if ("DETAIL".equalsIgnoreCase(parts[0])) {
             // DETAIL:<module> opens that module's page; DETAIL:<module>:<setting> also opens that choice's dropdown.
             Module module = parts.length > 1 ? this.modules.find(parts[1]).orElse(null) : this.modules.all().stream().findFirst().orElse(null);
             if (module == null) return;

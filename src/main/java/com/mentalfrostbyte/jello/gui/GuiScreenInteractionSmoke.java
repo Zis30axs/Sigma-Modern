@@ -10,7 +10,6 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mojang.blaze3d.platform.InputConstants;
-import java.util.List;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -88,16 +87,13 @@ public final class GuiScreenInteractionSmoke {
         int sidebarY = panelY + ModernClickGuiScreen.HEADER_H
             + category.ordinal() * screen.sidebarItemHeight() + screen.sidebarItemHeight() / 2;
 
-        int contentX = panelX + ModernClickGuiScreen.PAD + ModernClickGuiScreen.SIDEBAR_W + ModernClickGuiScreen.SIDEBAR_GAP;
-        List<Module> pool = modules.byCategory(category);
-        int index = pool.indexOf(module);
-        int rowX = contentX;
-        int rowY = panelY + ModernClickGuiScreen.HEADER_H + ModernClickGuiScreen.SECTION_H + index * ModernClickGuiScreen.ROW_H;
-
         boolean original = module.isEnabled();
         try {
-            // Switch to the module's own sidebar category, then toggle it from the module row.
+            // Switch to the module's own sidebar category, then toggle it from its tile.
             screen.mouseClicked(new MouseButtonEvent(sidebarX, sidebarY, new MouseButtonInfo(0, 0)), false);
+            int[] tile = screen.moduleBounds(module);
+            if (tile == null) throw new IllegalStateException("Modern category view has no tile for " + module.getName());
+            int rowX = tile[0], rowY = tile[1];
             screen.mouseClicked(new MouseButtonEvent(rowX + 12, rowY + 8, new MouseButtonInfo(0, 0)), false);
             if (module.isEnabled() == original) throw new IllegalStateException("Modern row click did not toggle module");
             boolean afterToggle = module.isEnabled();
