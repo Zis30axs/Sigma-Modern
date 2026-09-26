@@ -17,7 +17,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
  */
 public final class ModernHud {
     /** First free row below the resident wordmark, including its outer spacing. */
-    static final int BRAND_BOTTOM = 54;
+    static final int BRAND_BOTTOM = 38;
+    private static final int BRAND_X = 10, BRAND_Y = 10, BRAND_H = 22;
+    private static final float BRAND_MARK = 12F, BRAND_ITALIC = 0.64F;
 
     private ModernHud() {}
 
@@ -25,19 +27,43 @@ public final class ModernHud {
         return Client.getInstance().getClientModeManager().get() == ClientMode.SIGMA_MODERN;
     }
 
-    /** Resident branding, extracted after screens so it survives menus and the F1 HUD toggle. */
+    /**
+     * Resident branding, extracted after screens so it survives menus and the F1 HUD toggle: the main menu's lockup -
+     * the faceted Σ, "Sigma", and "Modern" in ice-blue italic - in miniature, on a slim pill of the dynamic island's
+     * own glass (its default ice colours), so the two read as one set along the top of the screen and the mark stays
+     * legible over a bright sky or snow.
+     */
     public static void renderBrand(GuiGraphicsExtractor g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || !isActive()) return;
 
-        int x = 10, y = 10, h = 36;
-        float scale = 1.8F;
-        int w = Math.max(82, (int)Math.ceil(ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, scale)) + 24);
+        float markX = BRAND_X + 8F, markY = BRAND_Y + (BRAND_H - BRAND_MARK) / 2F;
+        float wordX = markX + BRAND_MARK * 0.92F + 5F, wordY = BRAND_Y + BRAND_H / 2F - 5.6F;
+        float italicX = wordX + ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, 1F) + 4.2F;
+        int w = Math.round(italicX + ModernTypography.width(ModernTypography.Face.DISPLAY_ITALIC, "Modern", BRAND_ITALIC) + 10F) - BRAND_X;
+        int radius = BRAND_H / 2;
         g.nextStratum();
-        ModernStyle.darkGlass(g, x, y, w, h, 8, 0xC01C2A38);
-        ModernStyle.rounded(g, x + 1, y + 9, 2, h - 18, 1, ModernStyle.GLOW);
-        ModernTypography.draw(g, ModernTypography.Face.DISPLAY, Client.NAME, x + 12F, y + 2F, scale, ModernStyle.TEXT);
-        ModernTypography.draw(g, ModernTypography.Face.TEXT, "M O D E R N", x + 13F, y + 23F, 0.65F, ModernStyle.ACCENT);
+        ModernStyle.dropShadow(g, BRAND_X, BRAND_Y + 2, w, BRAND_H, radius, 0.6F);
+        ModernStyle.rounded(g, BRAND_X, BRAND_Y, w, BRAND_H, radius, 0x80EDFAFF);
+        ModernStyle.rounded(g, BRAND_X + 1, BRAND_Y + 1, w - 2, BRAND_H - 2, radius - 1, 0x9C000000 | (ModernCoverColors.ICE_DEEP & 0xFFFFFF));
+        // Light catching the top-left of the glass, as on the island, kept inside the pill.
+        g.enableScissor(BRAND_X, BRAND_Y, BRAND_X + w, BRAND_Y + BRAND_H);
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(BRAND_X + w * 0.26F, BRAND_Y + 2F);
+            g.pose().scale(1F, 0.5F);
+            ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, -30F, -30F, 60F, 0x24F5FEFF);
+        } finally {
+            g.pose().popMatrix();
+            g.disableScissor();
+        }
+
+        float glow = BRAND_MARK * 2.4F;
+        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, markX + BRAND_MARK * 0.46F - glow / 2F, markY + BRAND_MARK / 2F - glow / 2F, glow, 0x40BFE8FF);
+        ModernIcons.draw(g, ModernIcons.Icon.SIGMA, markX, markY, BRAND_MARK, 0xFFD6F1FF);
+        ModernTypography.draw(g, ModernTypography.Face.DISPLAY, Client.NAME, wordX, wordY, 1F, 0xFFF2F8FC);
+        // On the same baseline as "Sigma".
+        ModernTypography.draw(g, ModernTypography.Face.DISPLAY_ITALIC, "Modern", italicX, wordY + 9F - 9F * BRAND_ITALIC, BRAND_ITALIC, 0xFFA8DDFA);
     }
 
     public static void render(GuiGraphicsExtractor g) {
