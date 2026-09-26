@@ -6,6 +6,7 @@ import com.mentalfrostbyte.jello.module.Keybind;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.setting.Setting;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -30,7 +31,9 @@ import org.slf4j.LoggerFactory;
  * <p>Reading is forgiving about the file and strict about nothing else. A module or a setting the config
  * mentions but the client no longer has is noted and skipped - that is what an old config looks like after
  * a rename. A value that is there but unusable leaves the setting at its default and is logged as a
- * warning, because it is a value the user will notice going missing.</p>
+ * warning, because it is a value the user will notice going missing. A module the config has no usable
+ * on/off state for - one added since the file was written, say - is switched to its
+ * {@linkplain Module#isEnabledByDefault() default}.</p>
  *
  * <p>This works entirely through a config object handed to it, and holds no state, so a layer above can
  * one day keep several of these objects around as profiles without anything here changing.</p>
@@ -50,31 +53,40 @@ public final class ModuleConfig {
     private ModuleConfig() {
     }
 
-    /** Applies everything {@code root} has to say about modules. Settings are applied before the on/off
-     * state, so a module that is switched on during startup already sees its configured values. */
+    /** Applies everything {@code root} has to say about modules, and puts every module it says nothing about
+     * in its default state. Settings are applied before the on/off state, so a module that is switched on during
+     * startup already sees its configured values. */
     public static void read(final JsonObject root, final ModuleManager modules) {
-        if (!root.has(MODULES) || !root.get(MODULES).isJsonObject()) {
-            LOGGER.debug("No module config yet, every module stays at its defaults");
-            return;
+        Map<Module, JsonObject> saved = new HashMap<>();
+        if (root.has(MODULES) && root.get(MODULES).isJsonObject()) {
+            for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject(MODULES).entrySet()) {
+                Optional<Module> module = modules.find(entry.getKey());
+                if (module.isEmpty()) {
+                    LOGGER.debug("Config mentions module '{}', which this client does not have - skipping it", entry.getKey());
+                    continue;
+                }
+
+                if (!entry.getValue().isJsonObject()) {
+                    LOGGER.warn("Config entry for module '{}' is not an object, ignoring it", entry.getKey());
+                    continue;
+                }
+
+                saved.put(module.get(), entry.getValue().getAsJsonObject());
+            }
+        } else {
+            LOGGER.debug("No module config yet, every module starts in its default state");
         }
 
-        for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject(MODULES).entrySet()) {
-            Optional<Module> module = modules.find(entry.getKey());
-            if (module.isEmpty()) {
-                LOGGER.debug("Config mentions module '{}', which this client does not have - skipping it", entry.getKey());
-                continue;
+        for (Module module : modules.all()) {
+            JsonObject json = saved.get(module);
+            if (json == null || !readModule(module, json)) {
+                module.setEnabled(module.isEnabledByDefault());
             }
-
-            if (!entry.getValue().isJsonObject()) {
-                LOGGER.warn("Config entry for module '{}' is not an object, ignoring it", entry.getKey());
-                continue;
-            }
-
-            readModule(module.get(), entry.getValue().getAsJsonObject());
         }
     }
 
-    private static void readModule(final Module module, final JsonObject json) {
+    /** Returns whether the config had a usable on/off state for the module, which has then been applied. */
+    private static boolean readModule(final Module module, final JsonObject json) {
         if (json.has(SETTINGS)) {
             if (json.get(SETTINGS).isJsonObject()) {
                 readSettings(module, json.getAsJsonObject(SETTINGS));
@@ -92,14 +104,19 @@ public final class ModuleConfig {
             }
         }
 
-        if (json.has(ENABLED)) {
-            JsonElement enabled = json.get(ENABLED);
-            if (enabled.isJsonPrimitive() && enabled.getAsJsonPrimitive().isBoolean()) {
-                module.setEnabled(enabled.getAsBoolean());
-            } else {
-                LOGGER.warn("{}: 'enabled' is not a boolean, leaving the module off", module.getName());
-            }
+        if (!json.has(ENABLED)) {
+            return false;
         }
+
+        JsonElement enabled = json.get(ENABLED);
+        if (enabled.isJsonPrimitive() && enabled.getAsJsonPrimitive().isBoolean()) {
+            module.setEnabled(enabled.getAsBoolean());
+            return true;
+        }
+
+        LOGGER.warn("{}: 'enabled' is not a boolean, leaving the module {}", module.getName(),
+                module.isEnabledByDefault() ? "on, its default" : "off");
+        return false;
     }
 
     private static void readSettings(final Module module, final JsonObject json) {

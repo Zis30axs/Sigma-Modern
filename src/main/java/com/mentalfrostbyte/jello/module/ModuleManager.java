@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.module;
 
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
+import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
 import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
@@ -41,6 +42,7 @@ public final class ModuleManager {
         ModuleAntiCheat antiCheat = new ModuleAntiCheat();
         this.register(antiCheat);
         this.register(new ModuleAntiExploit());
+        this.register(new ModuleArrayList());
         this.register(new ModuleSelfDetection());
         this.register(new CameraNoClip());
         this.register(new CustomTitle());

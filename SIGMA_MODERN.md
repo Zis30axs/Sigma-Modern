@@ -115,7 +115,22 @@ Glow/bloom (toggle halos, status dots, the hotbar's selected cell, the main menu
 
 ## In-game HUD
 
-`ModernHud` draws SigmaModern's always-on gameplay overlay: an enabled-module list (top right), a WASD keystroke display (bottom left) and the music island (top center, hooked from `Hud.extractRenderState`'s existing POST client-overlay point). It also reskins the vanilla hotbar as rounded glass cells with a glowing selection highlight, via a small branch inside `Hud.extractItemHotbar`; the nine item slots keep their exact vanilla coordinates. All of it is gated on `ClientMode.SIGMA_MODERN` and only draws with no screen open.
+`ModernHud` draws SigmaModern's always-on gameplay overlay: the **ArrayList** module's list of switched-on modules (top right by default, see below), a WASD keystroke display (bottom left) and the music island (top center, hooked from `Hud.extractRenderState`'s existing POST client-overlay point). It also reskins the vanilla hotbar as rounded glass cells with a glowing selection highlight, via a small branch inside `Hud.extractItemHotbar`; the nine item slots keep their exact vanilla coordinates. All of it is gated on `ClientMode.SIGMA_MODERN` and only draws with no screen open.
+
+## ArrayList
+
+The **ArrayList** module (Interface category) is the list of switched-on modules that `ModernHud` used to draw unconditionally. The module holds the switch and the settings and decides which modules are listed and in what order (`ModuleArrayList.listed`); `gui.modern.ModernArrayList` draws it, asking `Modules.enabled` every frame, so switching the module off hides the list. It is the one module that is **on by default** (`Module.isEnabledByDefault`): `ModuleConfig.read` switches a module the config has no usable `enabled` for to its default, so a config written before the module existed still shows the list. The list never names itself. Switched on untouched, it draws what the old list did: every other module that is on, by name, 10 px from the top-right corner, 11 px apart, with a text shadow. Its settings:
+
+- **Position** (`TOP_RIGHT`, `TOP_LEFT`, `BOTTOM_RIGHT`): the corner it hangs from. Bottom-left isn't offered, because the chat and the keystrokes are there. At the bottom, the first line sits nearest the edge, so `LENGTH` still steps in from the corner.
+- **Sort** (`ALPHABETICAL` / `LENGTH`): by name (ignoring case), or widest line first (suffix included).
+- **Suffix** (default off): after the name, in a dimmer color, the module's first choice setting's value, worded for reading (`Speed Legit Hop`, `Fullbright Night Vision`).
+- **Hide Visuals** (default off): leaves out Render and Interface modules.
+- **Font Size** (8–16 px, default 11) and **Spacing** (0–6 px extra between lines, default 0).
+- **Background** (0–1, default 0): dark glass behind each line, reaching 3 px past the text. At 0 nothing is drawn.
+- **Accent Bar** (default off): a 2 px bar in the line's color on the list's outer edge.
+- **Color Mode** (`STATIC`, `WAVE`, `RAINBOW`) and **Color** (default `ModernStyle.TEXT`, hidden under `RAINBOW`): `WAVE` runs a brightness wave down the list, and `RAINBOW` cycles pastel hues down it. The line's place in the list drives both, so a line keeps its color as it moves.
+- **Text Shadow** (default on).
+- **Animations** (default on): a switched-on module slides in from the screen edge. A switched-off one slides out and fades in its old slot while the lines around it ease into their new places. After a gap in drawing (a screen was open) the list snaps into place instead of replaying what changed meanwhile.
 
 ## Chat
 

@@ -2,20 +2,18 @@ package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClientMode;
-import com.mentalfrostbyte.jello.module.Module;
-import java.util.Comparator;
-import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
- * SigmaModern's always-on in-game HUD decorations: an enabled-module list, a WASD keystroke display and the
- * music "dynamic island" ({@link ModernIsland}), which shows the music player's state and flashes module
- * toggles made in game, and the suspect list's drawer ({@link ModernSuspectDrawer}) while it is left out.
+ * SigmaModern's in-game HUD decorations: the ArrayList module's list of switched-on modules
+ * ({@link ModernArrayList}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
+ * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
+ * ({@link ModernSuspectDrawer}) while it is left out.
  *
- * <p>These are pure overlay chrome: they never read from or write to module/setting state beyond
- * {@link Module#isEnabled()}, and only draw while the real gameplay HUD would (no screen open).</p>
+ * <p>These are pure overlay chrome: they never write to module/setting state, and only draw while the real gameplay
+ * HUD would (no screen open).</p>
  */
 public final class ModernHud {
     private ModernHud() {}
@@ -27,7 +25,7 @@ public final class ModernHud {
     public static void render(GuiGraphicsExtractor g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.gui.screen() != null || mc.player == null || !isActive()) return;
-        drawEnabledList(g, mc);
+        ModernArrayList.render(g);
         drawKeystrokes(g, mc.options);
         ModernIsland.render(g);
         ModernSuspectDrawer.renderHud(g);
@@ -49,20 +47,6 @@ public final class ModernHud {
         int cellX = x + selectedSlot * cellW + 1, cellY = y + 1, cellW2 = cellW - 2, cellH2 = h - 2;
         ModernStyle.halo(g, cellX, cellY, cellW2, cellH2, 4, ModernStyle.GLOW, 0.35F);
         ModernStyle.rounded(g, cellX, cellY, cellW2, cellH2, 4, 0x5CB6E9FF);
-    }
-
-    private static void drawEnabledList(GuiGraphicsExtractor g, Minecraft mc) {
-        List<Module> enabled = Client.getInstance().getModuleManager().all().stream()
-            .filter(Module::isEnabled)
-            .sorted(Comparator.comparing(Module::getName))
-            .toList();
-        int right = g.guiWidth() - 10;
-        int y = 10;
-        for (Module module : enabled) {
-            int w = ModernTypography.width(module.getName());
-            ModernTypography.draw(g, module.getName(), right - w, y, ModernStyle.TEXT, true);
-            y += 11;
-        }
     }
 
     private static void drawKeystrokes(GuiGraphicsExtractor g, Options options) {

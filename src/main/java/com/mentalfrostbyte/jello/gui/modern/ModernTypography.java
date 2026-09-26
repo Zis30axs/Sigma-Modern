@@ -49,6 +49,16 @@ public final class ModernTypography {
         g.pose().popMatrix();
     }
 
+    /** {@link Face#TEXT} at a sub-pixel position and a scale, with the same drop shadow as the unscaled draw. */
+    public static void draw(GuiGraphicsExtractor g, String text, float x, float y, float scale, int color, boolean shadow) {
+        if ((color >>> 24) == 0) return;
+        g.pose().pushMatrix();
+        g.pose().translate(x, y);
+        g.pose().scale(scale, scale);
+        TEXT.draw(g, text, 0, 0, color, shadow);
+        g.pose().popMatrix();
+    }
+
     public static int width(String text) {
         return TEXT.width(text);
     }
