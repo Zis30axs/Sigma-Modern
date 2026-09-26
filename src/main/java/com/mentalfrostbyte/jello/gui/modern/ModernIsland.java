@@ -43,6 +43,12 @@ public final class ModernIsland {
     // "作词 X · 作曲 Y" for the lyrics on show, worked out once per lyrics (null when they name neither).
     private static @Nullable Lyrics creditsFor;
     private static @Nullable String creditsText;
+    // How far the sung line is scrolled when it's wider than the pill (see ModernLyricScroll), and which line that is:
+    // a new line starts from its own offset instead of sliding over from the last one's.
+    private static float lyricScroll;
+    private static Lyrics.@Nullable Line scrolledLine;
+    // A row cut off at an edge fades out over its last FADE_W pixels, in FADE_STEPS strips.
+    private static final int FADE_W = 6, FADE_STEPS = 3;
 
     private ModernIsland() {}
 
@@ -152,9 +158,20 @@ public final class ModernIsland {
             ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.wrap(ModernTypography.Face.TEXT, title, 1F, textRoom, 1).getFirst(),
                 x + 32F, y + 5F, 1F, 0xFFF3FAFF);
             if (line != null) {
-                String shown = ModernTypography.wrap(ModernTypography.Face.TEXT, line, 0.84F, textRoom, 1).getFirst();
-                float lit = lyric.progress() * line.length() / Math.max(1, shown.length());
-                ModernLyricSweep.draw(g, ModernTypography.Face.TEXT, shown, x + 32F, y + 16.5F, 0.84F, lit, 0xB3C9DDEA, 0xFFFFFFFF);
+                // A line too long for the pill scrolls instead of being cut short: word-timed, it follows the sweep;
+                // line-timed, it crosses over the line's time (see ModernLyricScroll).
+                float overflow = Math.max(0F, ModernTypography.width(ModernTypography.Face.TEXT, line, 0.84F) - textRoom);
+                float target = overflow <= 0F ? 0F : lyric.lyrics().kind() == Lyrics.Kind.WORD
+                    ? ModernLyricScroll.follow(ModernLyricSweep.edgeX(ModernTypography.Face.TEXT, line, 0.84F, lyric.progress()), textRoom, overflow)
+                    : ModernLyricScroll.timed(lyric.line().startMs(), lyric.line().endMs(), player.positionMs(), overflow);
+                if (lyric.line() != scrolledLine) {
+                    scrolledLine = lyric.line();
+                    lyricScroll = target;
+                } else {
+                    lyricScroll = ModernStyle.smooth(lyricScroll, target, dt, 12F);
+                }
+                clipped(g, x + 32F, textRoom, y, y + h, lyricScroll, overflow, left ->
+                    ModernLyricSweep.draw(g, ModernTypography.Face.TEXT, line, left, y + 16.5F, 0.84F, lyric.progress(), 0xB3C9DDEA, 0xFFFFFFFF));
             } else {
                 ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.wrap(ModernTypography.Face.TEXT, status, 0.78F, textRoom, 1).getFirst(),
                     x + 32F, y + 17F, 0.78F, 0xFFDFEDF5);
@@ -167,8 +184,18 @@ public final class ModernIsland {
                 // row (squared), so text never shows in a gap too narrow for it.
                 g.enableScissor(x, y, x + w, y + h);
                 try (var row = ModernStyle.alphaScope(extraOpen * extraOpen)) {
-                    String shown = ModernTypography.wrap(ModernTypography.Face.TEXT, extraShown, 0.72F, textRoom, 1).getFirst();
-                    ModernTypography.draw(g, ModernTypography.Face.TEXT, shown, x + 32F, y + ROW_H - 2.5F, 0.72F, 0xD9D2E6F2);
+                    // The sung line's own translation scrolls over the line's time too; credits and a fading last
+                    // translation keep their ellipsis.
+                    float overflow = lineHasExtra
+                        ? Math.max(0F, ModernTypography.width(ModernTypography.Face.TEXT, extraShown, 0.72F) - textRoom) : 0F;
+                    if (overflow > 0F) {
+                        float offset = ModernLyricScroll.timed(lyric.line().startMs(), lyric.line().endMs(), player.positionMs(), overflow);
+                        clipped(g, x + 32F, textRoom, y, y + h, offset, overflow, left ->
+                            ModernTypography.draw(g, ModernTypography.Face.TEXT, extraShown, left, y + ROW_H - 2.5F, 0.72F, 0xD9D2E6F2));
+                    } else {
+                        String shown = ModernTypography.wrap(ModernTypography.Face.TEXT, extraShown, 0.72F, textRoom, 1).getFirst();
+                        ModernTypography.draw(g, ModernTypography.Face.TEXT, shown, x + 32F, y + ROW_H - 2.5F, 0.72F, 0xD9D2E6F2);
+                    }
                 } finally {
                     g.disableScissor();
                 }
@@ -192,6 +219,49 @@ public final class ModernIsland {
             }
         } finally {
             g.pose().popMatrix();
+        }
+    }
+
+    /** Draws a row whose left edge is at the given x. */
+    private interface Row {
+        void draw(float left);
+    }
+
+    /**
+     * Draws {@code row} scrolled {@code offset} px to the left inside the box {@code left}..{@code left + room}, clipped
+     * to it. A row that fits ({@code overflow} 0) is drawn as is. Where the text runs on past an edge, its last pixels
+     * fade out in strips instead of a glyph being sliced in half.
+     */
+    private static void clipped(GuiGraphicsExtractor g, float left, float room, int top, int bottom, float offset, float overflow, Row row) {
+        if (overflow <= 0F) {
+            row.draw(left);
+            return;
+        }
+        int l = (int)Math.floor(left), r = (int)Math.ceil(left + room);
+        boolean fadeLeft = offset > 0.5F, fadeRight = offset < overflow - 0.5F;
+        float shifted = left - offset;
+        g.enableScissor(fadeLeft ? l + FADE_W : l, top, fadeRight ? r - FADE_W : r, bottom);
+        try {
+            row.draw(shifted);
+        } finally {
+            g.disableScissor();
+        }
+        int strip = FADE_W / FADE_STEPS;
+        for (int i = 0; i < FADE_STEPS; i++) {
+            // Outermost strip faintest.
+            try (var fade = ModernStyle.alphaScope((i + 0.5F) / FADE_STEPS)) {
+                if (fadeLeft) strip(g, l + i * strip, top, strip, bottom, row, shifted);
+                if (fadeRight) strip(g, r - (i + 1) * strip, top, strip, bottom, row, shifted);
+            }
+        }
+    }
+
+    private static void strip(GuiGraphicsExtractor g, int x, int top, int width, int bottom, Row row, float shifted) {
+        g.enableScissor(x, top, x + width, bottom);
+        try {
+            row.draw(shifted);
+        } finally {
+            g.disableScissor();
         }
     }
 
