@@ -3,6 +3,8 @@ package com.mentalfrostbyte.jello.gui.modern;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
+import com.mentalfrostbyte.jello.lang.ClientLanguage;
+import com.mentalfrostbyte.jello.lang.Translations;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
@@ -50,7 +52,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private static final int SIDEBAR_ITEM_MIN_H = 20;
     private static final float COMPASS_PX_PER_DEG = 2.4F;
 
-    private enum View { CATEGORY, DETAIL, SEARCH }
+    private enum View { CATEGORY, DETAIL, SEARCH, LANGUAGE }
 
     private final ModuleManager modules;
     private final ClickGuiInteractions interactions = new ClickGuiInteractions();
@@ -98,10 +100,20 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         return new Hit(panelX() + w - 36, panelY() + 5, 34, 34, "search", null, null);
     }
 
+    /** The globe beside the search button, which opens (and, on the page, closes) the Language page. */
+    private Hit languageHit() {
+        Hit search = headerHit();
+        return new Hit(search.x() - 38, search.y(), search.w(), search.h(), "language", null, null);
+    }
+
+    private static Translations translations() {
+        return Client.getInstance().getTranslations();
+    }
+
     /** Extra header space below the title row, before the row list: the section heading, or the search field. */
     private int subheaderHeight() {
         return switch (this.view) {
-            case CATEGORY -> SECTION_H;
+            case CATEGORY, LANGUAGE -> SECTION_H;
             case SEARCH -> SEARCH_FIELD_H;
             case DETAIL -> 0;
         };
@@ -159,6 +171,11 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             }
             hits.add(new Hit(contentX, y, contentW, 40, "keybind", m, null));
             y += 40;
+        } else if (this.view == View.LANGUAGE) {
+            for (ClientLanguage language : ClientLanguage.values()) {
+                hits.add(new Hit(contentX, y, contentW, ROW_H, language, null, null));
+                y += ROW_H;
+            }
         } else {
             List<Module> pool = this.view == View.SEARCH ? filteredModules() : this.modules.byCategory(this.activeCategory);
             if (pool.isEmpty()) {
@@ -270,7 +287,9 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 g.pose().translate(0F, (1F - content) * 7F);
                 if (this.view == View.CATEGORY) drawSectionHeading(g);
                 else if (this.view == View.SEARCH) drawSearchField(g);
+                else if (this.view == View.LANGUAGE) drawLanguageHeading(g);
                 if (this.view == View.DETAIL) drawDetail(g, hits, mx, my);
+                else if (this.view == View.LANGUAGE) drawLanguages(g, hits, mx, my);
                 else drawRows(g, hits, mx, my);
             } finally {
                 g.pose().popMatrix();
@@ -343,9 +362,13 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     private void drawHeader(GuiGraphicsExtractor g, int x, int y, int w, int mx, int my) {
         if (this.view == View.DETAIL) {
-            ModernTypography.draw(g, "‹ " + this.activeCategory.getDisplayName(), x + PAD, y + 16, ModernStyle.BLUE, false);
+            ModernTypography.draw(g, "‹ " + ModernText.category(this.activeCategory), x + PAD, y + 16, ModernStyle.BLUE, false);
         } else {
-            String label = this.view == View.SEARCH ? "SEARCH" : "MODULES";
+            String label = ModernText.tr(switch (this.view) {
+                case SEARCH -> "clickgui.header.search";
+                case LANGUAGE -> "clickgui.header.language";
+                default -> "clickgui.header.modules";
+            });
             ModernStyle.fill(g, x + PAD, y + 14, x + PAD + 3, y + 26, ModernStyle.GLOW);
             ModernTypography.draw(g, ModernStyle.spaced(label), x + PAD + 11, y + 16, ModernStyle.INK_MUTED, false);
         }
@@ -355,6 +378,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             ModernStyle.rounded(g, search.x(), search.y(), search.w(), search.h(), 8, (Math.round(16 + hover * 20) << 24) | 0x1C394A);
             ModernTypography.draw(g, "/", search.x() + 13, search.y() + 11, ModernStyle.INK_MUTED, false);
         }
+        Hit language = languageHit();
+        boolean onLanguage = this.view == View.LANGUAGE;
+        float languageHover = animate(language.key(), ModernStyle.inside(mx, my, language.x(), language.y(), language.w(), language.h()) ? 1 : 0);
+        ModernStyle.rounded(g, language.x(), language.y(), language.w(), language.h(), 8,
+            onLanguage ? 0x33BFE8FF : (Math.round(16 + languageHover * 20) << 24) | 0x1C394A);
+        ModernIcons.draw(g, ModernIcons.Icon.GLOBE, language.x() + 9, language.y() + 9, 16, onLanguage ? ModernStyle.BLUE : ModernStyle.INK_MUTED);
         ModernStyle.fill(g, x + 1, y + HEADER_H - 1, x + w - 1, y + HEADER_H, 0x1EBFEEFF);
     }
 
@@ -373,8 +402,10 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             boolean active = s.category() == this.activeCategory;
             int color = active ? ModernStyle.INK : ModernStyle.INK_MUTED;
             boolean anyEnabled = this.modules.byCategory(s.category()).stream().anyMatch(Module::isEnabled);
-            String name = ModernTypography.fit(s.category().getDisplayName(), s.w() - (anyEnabled ? 30 : 20));
-            ModernTypography.draw(g, name, s.x() + 12, s.y() + (s.h() - 4 - 8) / 2, color, false);
+            // The category's icon, then its name.
+            ModernSvg.mask(g, ModernSvg.categoryIcon(s.category()), s.x() + 10, s.y() + (s.h() - 4 - 12) / 2F, 12, 12, color);
+            String name = ModernTypography.fit(ModernText.category(s.category()), s.w() - (anyEnabled ? 46 : 36));
+            ModernTypography.draw(g, name, s.x() + 28, s.y() + (s.h() - 4 - 8) / 2, color, false);
             if (anyEnabled) ModernStyle.statusDot(g, s.x() + s.w() - 16, s.y() + (s.h() - 4) / 2 - 2, 5, ModernStyle.BLUE, true);
         }
         int dividerX = panelX() + PAD + SIDEBAR_W + SIDEBAR_GAP / 2;
@@ -383,19 +414,60 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     private void drawSectionHeading(GuiGraphicsExtractor g) {
         int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
-        ModernTypography.draw(g, ModernStyle.spaced(this.activeCategory.getDisplayName().toUpperCase(Locale.ROOT)),
+        ModernTypography.draw(g, ModernStyle.spaced(ModernText.category(this.activeCategory).toUpperCase(Locale.ROOT)),
             x, y, ModernStyle.INK_MUTED, false);
         int enabledInCat = (int)this.modules.byCategory(this.activeCategory).stream().filter(Module::isEnabled).count();
         int totalInCat = this.modules.byCategory(this.activeCategory).size();
-        String count = enabledInCat + " / " + totalInCat + " enabled";
+        String count = ModernText.tr("clickgui.section.enabled", enabledInCat, totalInCat);
         ModernTypography.draw(g, count, x + w - ModernTypography.width(count), y, ModernStyle.INK_MUTED, false);
         ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
+    }
+
+    private void drawLanguageHeading(GuiGraphicsExtractor g) {
+        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
+        String heading = ModernStyle.spaced(ModernText.tr("clickgui.language.heading"));
+        ModernTypography.draw(g, heading, x, y, ModernStyle.INK_MUTED, false);
+        String note = ModernTypography.fit(ModernText.tr("clickgui.language.note"), w - ModernTypography.width(heading) - 16);
+        ModernTypography.draw(g, note, x + w - ModernTypography.width(note), y, ModernStyle.INK_MUTED, false);
+        ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
+    }
+
+    /**
+     * One row per client language: its flag, its name in itself, and under that its name in the language being shown.
+     * The one in use is lit the way an enabled module is, with a check.
+     */
+    private void drawLanguages(GuiGraphicsExtractor g, List<Hit> hits, int mx, int my) {
+        ClientLanguage selected = translations().selected();
+        boolean hoverable = my >= visibleContentTop() && my < panelY() + Math.round(this.panelHeight) - FOOTER_H;
+        for (Hit h : hits) {
+            if (!(h.key() instanceof ClientLanguage language)) continue;
+            boolean current = language == selected;
+            float hover = animate(language, hoverable && ModernStyle.inside(mx, my, h.x(), h.y(), h.w(), h.h()) ? 1 : 0);
+            int rowAlpha = Math.round(hover * 22) + (current ? 26 : 0);
+            if (rowAlpha > 0) ModernStyle.rounded(g, h.x() + 2, h.y() + 1, h.w() - 4, h.h() - 3, 6, rowAlpha << 24 | 0x3D9DDC);
+            if (current) ModernStyle.rounded(g, h.x() + 3, h.y() + 8, 2, h.h() - 16, 1, ModernStyle.BLUE);
+
+            // A faint edge, so white fields (Japan, Korea) don't melt into the pale card.
+            int flagX = h.x() + 14, flagY = h.y() + (h.h() - 16) / 2 - 1;
+            ModernStyle.rounded(g, flagX - 1, flagY - 1, 26, 18, 3, 0x3315303E);
+            ModernSvg.picture(g, language.flagResource(), flagX, flagY, 24, 16);
+
+            String own = language.nativeName(), shown = ModernText.tr(language.nameKey());
+            int textX = flagX + 36, nameColor = current ? ModernStyle.BLUE : ModernStyle.INK;
+            if (shown.equals(own)) {
+                ModernTypography.draw(g, own, textX, h.y() + (h.h() - 8) / 2 - 2, nameColor, false);
+            } else {
+                ModernTypography.draw(g, own, textX, h.y() + 6, nameColor, false);
+                ModernTypography.draw(g, ModernTypography.fit(shown, h.w() - 90), textX, h.y() + 22, ModernStyle.INK_MUTED, false);
+            }
+            if (current) ModernIcons.draw(g, ModernIcons.Icon.CHECK, h.x() + h.w() - 32, h.y() + h.h() / 2F - 9, 16, ModernStyle.BLUE);
+        }
     }
 
     private void drawSearchField(GuiGraphicsExtractor g) {
         int x = rowContentX(), y = panelY() + HEADER_H + 6, w = rowContentW(), h = 28;
         ModernStyle.rounded(g, x, y, w, h, 8, 0x30243746);
-        String shown = this.search.isEmpty() ? "Type to search every category..." : this.search;
+        String shown = this.search.isEmpty() ? ModernText.tr("clickgui.search.placeholder") : this.search;
         int color = this.search.isEmpty() ? ModernStyle.INK_MUTED : ModernStyle.INK;
         ModernTypography.draw(g, ModernTypography.fit(shown, w - 24), x + 12, y + 9, color, false);
     }
@@ -403,7 +475,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private void drawRows(GuiGraphicsExtractor g, List<Hit> hits, int mx, int my) {
         if (hits.size() == 1 && "empty".equals(hits.get(0).key())) {
             Hit h = hits.get(0);
-            String message = this.view == View.SEARCH ? "No modules match" : "No modules in this category";
+            String message = ModernText.tr(this.view == View.SEARCH ? "clickgui.empty.search" : "clickgui.empty.category");
             ModernTypography.draw(g, message, h.x(), h.y() + 6, ModernStyle.INK_MUTED, false);
             return;
         }
@@ -440,7 +512,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 ModernStyle.toggle(g, h.x() + h.w() - 44, h.y() + 6, 44, 24, on);
             } else if ("keybind".equals(h.key())) {
                 boolean binding = this.interactions.isBinding(m);
-                String label = binding ? "Press a key… (Esc to cancel)" : "Keybind";
+                String label = ModernText.tr(binding ? "clickgui.detail.binding" : "clickgui.detail.keybind");
                 ModernTypography.draw(g, label, h.x(), h.y() + 6, binding ? ModernStyle.BLUE : ModernStyle.INK, false);
                 if (!binding) ModernTypography.draw(g, m.getKeybind().mode().name(), h.x(), h.y() + 22, ModernStyle.INK_MUTED, false);
                 String value = binding ? "…" : this.interactions.keybindDisplay(m.getKeybind());
@@ -504,13 +576,14 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         ModernStyle.fill(g, panelX + 1, y, panelX + panelW - 1, y + 1, 0x1EBFEEFF);
         int enabled = (int)this.modules.all().stream().filter(Module::isEnabled).count();
         ModernStyle.statusDot(g, panelX + PAD, y + 9, 6, ModernStyle.BLUE, true);
-        ModernTypography.draw(g, enabled + " enabled", panelX + PAD + 12, y + 6, ModernStyle.INK_MUTED, false);
+        ModernTypography.draw(g, ModernText.tr("clickgui.footer.enabled", enabled), panelX + PAD + 12, y + 6, ModernStyle.INK_MUTED, false);
         if (panelW < 420) return;
-        String hint = switch (this.view) {
-            case CATEGORY -> "Left: toggle   Right / ›: settings";
-            case DETAIL -> "Esc: back · changes apply instantly";
-            case SEARCH -> "Type to filter every category";
-        };
+        String hint = ModernText.tr(switch (this.view) {
+            case CATEGORY -> "clickgui.hint.category";
+            case DETAIL -> "clickgui.hint.detail";
+            case SEARCH -> "clickgui.hint.search";
+            case LANGUAGE -> "clickgui.hint.language";
+        });
         ModernTypography.draw(g, hint, panelX + panelW - PAD - ModernTypography.width(hint), y + 6, ModernStyle.INK_MUTED, false);
     }
 
@@ -572,7 +645,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void drawGlobalHints(GuiGraphicsExtractor g) {
-        String hints = "/  Search      Esc  Back      R-Shift  Close";
+        String hints = ModernText.tr("clickgui.hints");
         int w = ModernTypography.width(hints);
         // A small dark pill keeps the pale hints legible over bright snow or a bright world.
         ModernStyle.rounded(g, (this.width - w) / 2 - 10, this.height - 20, w + 20, 16, 8, 0x8C050F1A);
@@ -611,6 +684,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             openSearch();
             return true;
         }
+        Hit language = languageHit();
+        if (ModernStyle.inside(e.x(), e.y(), language.x(), language.y(), language.w(), language.h())) {
+            if (this.view == View.LANGUAGE) closeSearchOrDetail();
+            else openLanguage();
+            return true;
+        }
         int chromeTop = panelY() + HEADER_H;
         int contentBottom = panelY() + targetPanelHeight() - FOOTER_H;
         if (this.view == View.CATEGORY && e.y() >= chromeTop && e.y() < contentBottom) {
@@ -625,6 +704,11 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         if (e.y() < contentTop || e.y() >= contentBottom) return super.mouseClicked(e, twice);
         for (Hit h : rows()) {
             if (!ModernStyle.inside(e.x(), e.y(), h.x(), h.y(), h.w(), h.h())) continue;
+            if (this.view == View.LANGUAGE) {
+                // Takes effect at once: every label is looked up again next frame. Saved with the config on close.
+                if (h.key() instanceof ClientLanguage picked) translations().select(picked);
+                return true;
+            }
             if (this.view == View.DETAIL) return handleDetailClick(h, e);
             if (h.module() != null) {
                 if (e.button() == 2) { this.interactions.startBind(h.module()); return true; }
@@ -649,6 +733,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private void openDetail(Module module) {
         this.detailModule = module;
         this.view = View.DETAIL;
+        this.scroll = 0;
+        markContentChanged();
+    }
+
+    private void openLanguage() {
+        this.view = View.LANGUAGE;
         this.scroll = 0;
         markContentChanged();
     }
@@ -729,7 +819,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
      * Debug-only: jumps to a named view so {@code -Dsigma.debug.screenshotAfterFrames} can capture a view
      * other than whatever {@code GuiScreenInteractionSmoke} happens to leave the screen on. Read by
      * {@link com.mentalfrostbyte.Client#openDebugGuiIfRequested} when {@code -Dsigma.debug.modernPreviewView}
-     * is set to {@code DETAIL}, {@code SEARCH}, {@code MUSIC} (pulls the music window out) or {@code INGAME} (closes the screen, for the in-game HUD);
+     * is set to {@code DETAIL}, {@code SEARCH}, {@code LANGUAGE}, {@code MUSIC} (pulls the music window out) or {@code INGAME} (closes the screen, for the in-game HUD);
      * any other value is ignored.
      */
     public void debugPreview(String view) {
@@ -737,6 +827,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             this.modules.all().stream().findFirst().ifPresent(this::openDetail);
         } else if ("SEARCH".equalsIgnoreCase(view)) {
             openSearch();
+        } else if ("LANGUAGE".equalsIgnoreCase(view)) {
+            openLanguage();
         } else if ("MUSIC".equalsIgnoreCase(view)) {
             ModernMusicDrawer.setOpenNow(true);
         } else if ("INGAME".equalsIgnoreCase(view)) {
