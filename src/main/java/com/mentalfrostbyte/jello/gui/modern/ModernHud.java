@@ -8,7 +8,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
  * SigmaModern's in-game HUD decorations: the ArrayList module's list of switched-on modules
- * ({@link ModernArrayList}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
+ * ({@link ModernArrayList}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
  * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
  * ({@link ModernSuspectDrawer}) while it is left out.
  *
@@ -26,6 +26,7 @@ public final class ModernHud {
         Minecraft mc = Minecraft.getInstance();
         if (mc.gui.screen() != null || mc.player == null || !isActive()) return;
         ModernArrayList.render(g);
+        ModernTabGui.render(g);
         drawKeystrokes(g, mc.options);
         ModernIsland.render(g);
         ModernSuspectDrawer.renderHud(g);

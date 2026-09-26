@@ -93,11 +93,13 @@ final class ModernArrayList {
             else leaving.add(entry);
         }
 
-        for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH);
-        for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH);
+        // Top-left, the list hangs under the TabGUI while that is showing.
+        int top = list.getPosition() == Corner.TOP_LEFT ? Math.max(MARGIN, ModernTabGui.bottom() + 6) : MARGIN;
+        for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH, top);
+        for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH, top);
     }
 
-    private static void drawRow(GuiGraphicsExtractor g, ModuleArrayList list, Module module, Row row, float scale, int rowH) {
+    private static void drawRow(GuiGraphicsExtractor g, ModuleArrayList list, Module module, Row row, float scale, int rowH, int top) {
         String name = module.getName();
         String suffix = list.suffixOf(module);
         float width = ModernTypography.width(ModernTypography.Face.TEXT, label(name, suffix), scale);
@@ -105,7 +107,7 @@ final class ModernArrayList {
         // Out of the way entirely at appear 0: past the screen edge, accent bar and all.
         float slide = (1F - row.appear) * (width + MARGIN + PAD_X + BAR_W + 2);
         float x = corner.isRight() ? g.guiWidth() - MARGIN - width + slide : MARGIN - slide;
-        float y = corner.isBottom() ? g.guiHeight() - MARGIN - rowH - row.offset : MARGIN + row.offset;
+        float y = corner.isBottom() ? g.guiHeight() - MARGIN - rowH - row.offset : top + row.offset;
         int color = lineColor(list.getColorMode(), list.getColor(), row.offset / rowH, time);
 
         try (ModernStyle.AlphaScope ignored = ModernStyle.alphaScope(row.appear)) {

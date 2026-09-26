@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.module;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
 import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
+import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
@@ -52,6 +53,7 @@ public final class ModuleManager {
         this.register(new NoHurtCam());
         this.register(new Speed());
         this.register(new SuspectList(antiCheat));
+        this.register(new TabGui(this));
         this.register(new Weather());
     }
 
