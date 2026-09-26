@@ -41,16 +41,8 @@ final class ModernTabGui {
         return rows * ROW_H + PAD_Y * 2;
     }
 
-    /** The lowest y the menu reaches while it is showing - 0 when it isn't - so the top-left ArrayList can sit under it. */
-    static int bottom() {
-        TabGui tab = Modules.enabled(TabGui.class);
-        if (tab == null || !visible()) return 0;
-        int rows = tab.categories().size();
-        return rows == 0 ? 0 : ModernHud.BRAND_BOTTOM + height(rows);
-    }
-
     private static boolean visible() {
-        return !Minecraft.getInstance().debugEntries.isOverlayVisible();
+        return !ModernHud.debugShowing();
     }
 
     static void render(GuiGraphicsExtractor g) {
@@ -72,7 +64,9 @@ final class ModernTabGui {
         int catW = 0;
         for (ModuleCategory category : categories) catW = Math.max(catW, ModernTypography.width(ModernText.category(category)));
         catW += PAD_X * 2 + DOT + 8;
-        int x = MARGIN, y = ModernHud.BRAND_BOTTOM;
+        // First down the left side under the brand; whatever comes next starts below the categories.
+        int x = MARGIN, y = ModernHud.leftStack();
+        ModernHud.stack(height(categories.size()));
         panel(g, tab, x, y, catW, height(categories.size()));
         float targetY = y + PAD_Y + selected * ROW_H;
         categoryY = snap || categoryY < 0F ? targetY : ModernStyle.smooth(categoryY, targetY, dt, 18F);

@@ -43,6 +43,8 @@ public final class ModernIsland {
     // "作词 X · 作曲 Y" for the lyrics on show, worked out once per lyrics (null when they name neither).
     private static @Nullable Lyrics creditsFor;
     private static @Nullable String creditsText;
+    // The pill's bottom edge as last drawn, for the brand to sit under while F3 moves it to the top centre.
+    private static int lastBottom;
     // How far the sung line is scrolled when it's wider than the pill (see ModernLyricScroll), and which line that is:
     // a new line starts from its own offset instead of sliding over from the last one's.
     private static float lyricScroll;
@@ -65,6 +67,11 @@ public final class ModernIsland {
             activityOn = event.isEnabled();
             activityAt = System.nanoTime();
         }
+    }
+
+    /** Where the island's pill ends, or 0 when it hasn't been drawn lately (a screen is open). */
+    static int bottom() {
+        return System.nanoTime() - lastDraw < 250_000_000L ? lastBottom : 0;
     }
 
     static void render(GuiGraphicsExtractor g) {
@@ -137,6 +144,7 @@ public final class ModernIsland {
 
         int w = Math.round(width), h = Math.round(height);
         int x = (g.guiWidth() - w) / 2, y = 8;
+        lastBottom = y + h;
         int radius = Math.min(15, h / 2);
         float scale = 0.93F + 0.07F * appear;
         g.pose().pushMatrix();

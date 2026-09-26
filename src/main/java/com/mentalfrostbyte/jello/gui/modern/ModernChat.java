@@ -377,8 +377,8 @@ public final class ModernChat {
      * {@code ChatComponent}'s private {@code extractRenderState} while the module is on. {@code lines} is newest
      * first.
      *
-     * <p>Unfocused, the panel holds only the lines still fading out after arriving (and under SigmaModern's HUD sits
-     * above its keystroke display); focused, it holds a full page and rests on the input bar. Both its height and
+     * <p>Unfocused, the panel holds only the lines still fading out after arriving, where vanilla's chat sits; focused,
+     * it holds a full page and rests on the input bar. Both its height and
      * its bottom edge follow the bar's open animation, so opening chat grows the panel upward as the bar unfurls and
      * closing it folds both away. New lines slide in from the bottom edge.</p>
      */
@@ -449,11 +449,11 @@ public final class ModernChat {
         if (restrictedPrompt) presence = 1F;
 
         // Open, the panel rests on the input bar - unless health and hunger show (survival), which it stays above
-        // like vanilla's chat does, or the bed's "leave" button sits there. Unfocused it sits where vanilla's does,
-        // or above the keystroke display SigmaModern's HUD draws in that corner.
+        // like vanilla's chat does, or the bed's "leave" button sits there. Unfocused it sits where vanilla's does:
+        // SigmaModern's keystrokes live in the left stack under the TabGUI, not in this corner.
         boolean statusBars = mc.gameMode != null && mc.gameMode.canHurtPlayer();
         boolean inBed = mc.gui.screen() instanceof InBedChatScreen;
-        float hudBottom = screenHeight - (ModernHud.isActive() ? 62F : 40F + PANEL_PAD_Y);
+        float hudBottom = screenHeight - (40F + PANEL_PAD_Y);
         float openBottom = screenHeight - (inBed ? 48F : statusBars ? 40F + PANEL_PAD_Y : BAR_BOTTOM + barHeight() + PANEL_PAD_Y + 5F);
         float bottom = hudBottom + (openBottom - hudBottom) * o;
         float queueRow = queueSize > 0L ? entry * scale : 0F;

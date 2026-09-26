@@ -28,7 +28,7 @@ public class ModuleArrayList extends Module {
     /** The size the rest of SigmaModern's HUD text is drawn at. */
     public static final float DEFAULT_FONT_SIZE = 11.0F;
 
-    /** The corner the list hangs from. Bottom-left is left out: the chat and the keystrokes live there. */
+    /** The corner the list hangs from. Bottom-left is left out: the chat lives there. */
     public enum Corner {
         TOP_RIGHT,
         TOP_LEFT,

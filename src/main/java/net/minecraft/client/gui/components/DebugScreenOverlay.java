@@ -370,6 +370,15 @@ public class DebugScreenOverlay {
 
     private void extractLines(final GuiGraphicsExtractor graphics, final List<String> lines, final boolean alignLeft) {
         int height = 9;
+        // Sigma hook: SigmaModern's HUD makes room for F3's text, as the old client did - it is told how far down this
+        // column reaches (lines are 9 px apart from y = 2, trailing blank ones drawing nothing).
+        int lastLine = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (!Strings.isNullOrEmpty(lines.get(i))) lastLine = i;
+        }
+        if (lastLine >= 0) {
+            com.mentalfrostbyte.jello.gui.modern.ModernHud.debugColumn(alignLeft, 2 + height * (lastLine + 1));
+        }
 
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);

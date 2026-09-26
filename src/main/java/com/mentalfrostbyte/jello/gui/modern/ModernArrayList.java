@@ -36,6 +36,8 @@ final class ModernArrayList {
     /** Every module with a line on screen, including ones on their way out. Render-thread only. */
     private static final Map<Module, Row> ROWS = new IdentityHashMap<>();
     private static long lastDraw;
+    // Where the top of the list is, eased toward where it should be.
+    private static float listTop = -1F;
     private static float time;
 
     private ModernArrayList() {}
@@ -93,8 +95,15 @@ final class ModernArrayList {
             else leaving.add(entry);
         }
 
-        // Top-left, reserve the resident brand and the TabGUI while that is showing.
-        int top = list.getPosition() == Corner.TOP_LEFT ? Math.max(ModernHud.BRAND_BOTTOM, ModernTabGui.bottom() + 6) : MARGIN;
+        // As the old ActiveMods did: top-right starts below F3's right column while that's up; top-left hangs under the
+        // left stack (brand, TabGUI, keystrokes), or under F3's left column. Eased, so the list slides rather than jumps.
+        int target = switch (list.getPosition()) {
+            case TOP_RIGHT -> Math.max(MARGIN, ModernHud.debugBottom(false) + 6);
+            case TOP_LEFT -> Math.max(ModernHud.leftStack(), ModernHud.debugBottom(true) + 6);
+            case BOTTOM_RIGHT -> MARGIN;
+        };
+        listTop = snap || listTop < 0F ? target : ModernStyle.smooth(listTop, target, dt, 14F);
+        int top = Math.round(listTop);
         for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH, top);
         for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH, top);
     }
