@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module;
 
+import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
@@ -38,21 +39,32 @@ public final class ModuleManager {
         this.register(new CustomTitle());
         this.register(new Fullbright());
         this.register(new LowFire());
+        this.register(new ModernChat());
         this.register(new NoHurtCam());
         this.register(new Weather());
     }
 
+    /**
+     * Registration is all-or-nothing: both a class collision and a name collision are checked before
+     * either map is touched, so a rejected registration never leaves {@code byClass} and {@code byName}
+     * disagreeing about whether the module exists. The preflight check is safe without locking because
+     * registration happens only during {@link #registerAll()}, on a single lifecycle thread.
+     */
     public void register(final Module module) {
-        Module sameClass = this.byClass.putIfAbsent(module.getClass(), module);
+        Module sameClass = this.byClass.get(module.getClass());
         if (sameClass != null) {
             throw new IllegalStateException(module.getClass().getName() + " is already registered");
         }
 
-        Module sameName = this.byName.putIfAbsent(module.getName().toLowerCase(Locale.ROOT), module);
+        String key = module.getName().toLowerCase(Locale.ROOT);
+        Module sameName = this.byName.get(key);
         if (sameName != null) {
             throw new IllegalStateException("Two modules are both named '" + module.getName()
                     + "': " + sameName.getClass().getName() + " and " + module.getClass().getName());
         }
+
+        this.byClass.put(module.getClass(), module);
+        this.byName.put(key, module);
     }
 
     /**

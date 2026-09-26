@@ -3,7 +3,8 @@ package com.mentalfrostbyte.jello.module.impl.misc;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
-import com.mentalfrostbyte.jello.module.Module;
+import com.mentalfrostbyte.jello.module
+        .Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.TextSetting;

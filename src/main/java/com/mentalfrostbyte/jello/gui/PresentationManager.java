@@ -26,6 +26,7 @@ public final class PresentationManager {
             case JELLO -> new JelloModuleScreen(modules);
             case CLASSIC -> new ClassicModuleScreen(modules);
             case NO_ADDONS -> new NoAddonsScreen();
+            case SIGMA_MODERN -> new com.mentalfrostbyte.jello.gui.modern.ModernClickGuiScreen(modules);
         };
     }
 }

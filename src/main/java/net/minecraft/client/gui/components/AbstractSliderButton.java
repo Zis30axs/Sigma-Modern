@@ -68,6 +68,13 @@ public abstract class AbstractSliderButton extends AbstractWidget.WithInactiveMe
 
     @Override
     public void extractWidgetRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        // MODIFIED for porting: SigmaModern draws the track and handle as its own glass; the label stays vanilla's.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.slider(
+                graphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.value, this.isActive(),
+                this.isActive() && (this.isHovered || this.isFocused() || this.canChangeValue), this.alpha
+            );
+        } else {
         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, this.getSprite(), this.getX(), this.getY(), this.getWidth(), this.getHeight(), ARGB.white(this.alpha));
         graphics.blitSprite(
             RenderPipelines.GUI_TEXTURED,
@@ -78,6 +85,7 @@ public abstract class AbstractSliderButton extends AbstractWidget.WithInactiveMe
             this.getHeight(),
             ARGB.white(this.alpha)
         );
+        }
         this.extractScrollingStringOverContents(graphics.textRendererForWidget(this, GuiGraphicsExtractor.HoveredTextEffects.NONE), this.getMessage(), 2);
         this.handleCursor(graphics);
     }

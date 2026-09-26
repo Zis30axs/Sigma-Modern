@@ -176,6 +176,10 @@ public class Gui {
 
             try {
                 this.screen.extractRenderStateWithTooltipAndSubtitles(graphics, xMouse, yMouse, deltaTracker.getGameTimeDeltaTicks());
+                // MODIFIED for porting: SigmaModern's cross-screen fade-in (a no-op unless a Modern screen
+                // requested one), then its transparent caption controls, both above every screen.
+                com.mentalfrostbyte.jello.gui.modern.ModernTransitions.render(graphics);
+                com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.render(graphics);
             } catch (Throwable t) {
                 CrashReport report = CrashReport.forThrowable(t, "Rendering screen");
                 CrashReportCategory category = report.addCategory("Screen render details");
@@ -210,6 +214,10 @@ public class Gui {
             this.renderActiveTextDebug();
         }
 
+        // MODIFIED for porting: drives -Dsigma.debug.screenshotAfterFrames; a no-op unless that debug
+        // countdown is pending.
+        com.mentalfrostbyte.Client.getInstance().onGuiFrameRendered();
+
         profiler.pop();
         graphics.applyCursor(this.minecraft.getWindow());
         // MODIFIED for porting: was sodium-extra's gui MixinGui#onRender (@Inject TAIL, @Local GuiGraphicsExtractor)
@@ -227,6 +235,11 @@ public class Gui {
         if (SharedConstants.IS_RUNNING_IN_IDE && Thread.currentThread() != this.minecraft.getRunningThread()) {
             LOGGER.error("setScreen called from non-game thread");
         }
+
+        // MODIFIED for porting: SigmaModern swaps the exact vanilla world list, server list and options hub for
+        // its own versions here, so every route into them (title screen, pause menu, safety notice, disconnect
+        // "back", refresh) lands on the same screen without a one-frame vanilla flash.
+        screen = com.mentalfrostbyte.jello.gui.modern.ModernScreens.route(screen);
 
         if (this.screen != null) {
             this.screen.removed();

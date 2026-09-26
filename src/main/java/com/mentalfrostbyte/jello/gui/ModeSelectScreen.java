@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.gui;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.mainmenu.MainMenuRouter;
+import com.mentalfrostbyte.jello.gui.modern.ModernTypography;
 import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
 import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
@@ -23,6 +24,8 @@ public final class ModeSelectScreen extends Screen {
     private static final Identifier NO_ADDONS_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/noaddons.png");
     private static final Identifier CLASSIC_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/classic.png");
     private static final Identifier JELLO_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/jello.png");
+    private static final Identifier MODERN_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/modern/card.png");
+    private final Animation modernHover = new Animation(150, 190, Animation.Direction.BACKWARDS);
     private static final Identifier YOUTUBE_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/youtube.png");
     private static final Identifier REDDIT_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/reddit.png");
     private static final Identifier GUILDED_IMAGE = Identifier.withDefaultNamespace("textures/gui/sigma/guilded.png");
@@ -82,6 +85,10 @@ public final class ModeSelectScreen extends Screen {
             layout.x + layout.smallWidth + layout.gap, layout.y + layout.bigHeight + layout.gap,
             layout.smallWidth, layout.smallHeight, SMALL_WIDTH, SMALL_HEIGHT, mouseX, mouseY);
 
+        int modernY = layout.y + layout.bigHeight + layout.smallHeight + layout.gap * 2;
+        this.drawModeCard(graphics, MODERN_IMAGE, ClientMode.SIGMA_MODERN, this.modernHover,
+            layout.x, modernY, layout.bigWidth, layout.modernHeight, 2172, 724, mouseX, mouseY);
+        ModernTypography.draw(graphics, "SigmaModern", layout.x + 12, modernY + layout.modernHeight - 17, 0xFFF0FAFF, false);
         this.drawSocialButtons(graphics);
     }
 
@@ -126,18 +133,21 @@ public final class ModeSelectScreen extends Screen {
         int sourceGap = LegacyUiScale.size(GAP);
 
         float fitScale = Math.min(1.0F, Math.max(0.1F, (this.width - LegacyUiScale.size(24)) / (float) sourceBigWidth));
+        int cardsTop = logoY + logoHeight + LegacyUiScale.size(28);
+        int footerReserve = LegacyUiScale.size(70);
+        int sourceTotalHeight = sourceBigHeight + sourceSmallHeight + sourceBigWidth / 3 + sourceGap * 2;
+        fitScale = Math.min(fitScale, Math.max(0.1F, (this.height - cardsTop - footerReserve) / (float) sourceTotalHeight));
         int bigWidth = Math.max(1, Math.round(sourceBigWidth * fitScale));
         int bigHeight = Math.max(1, Math.round(sourceBigHeight * fitScale));
         int smallWidth = Math.max(1, Math.round(sourceSmallWidth * fitScale));
         int smallHeight = Math.max(1, Math.round(sourceSmallHeight * fitScale));
         int gap = Math.max(1, Math.round(sourceGap * fitScale));
 
-        int cardsTop = logoY + logoHeight + LegacyUiScale.size(28);
-        int cardsTotalHeight = bigHeight + gap + smallHeight;
-        int footerReserve = LegacyUiScale.size(70);
+        int modernHeight = Math.max(1, bigWidth / 3);
+        int cardsTotalHeight = bigHeight + modernHeight + gap * 2 + smallHeight;
         int y = cardsTop + Math.max(0, (this.height - cardsTop - cardsTotalHeight - footerReserve) / 2);
         int x = (this.width - bigWidth) / 2;
-        return new ModeLayout(x, y, bigWidth, bigHeight, smallWidth, smallHeight, gap);
+        return new ModeLayout(x, y, bigWidth, bigHeight, smallWidth, smallHeight, modernHeight, gap);
     }
 
     private void drawSocialButtons(final GuiGraphicsExtractor graphics) {
@@ -176,6 +186,9 @@ public final class ModeSelectScreen extends Screen {
         } else if (inside(mouseX, mouseY, layout.x + layout.smallWidth + layout.gap,
             layout.y + layout.bigHeight + layout.gap, layout.smallWidth, layout.smallHeight)) {
             selected = ClientMode.JELLO;
+        } else if (inside(mouseX, mouseY, layout.x, layout.y + layout.bigHeight + layout.smallHeight + layout.gap * 2,
+            layout.bigWidth, layout.modernHeight)) {
+            selected = ClientMode.SIGMA_MODERN;
         }
 
         if (selected == null) {
@@ -219,6 +232,6 @@ public final class ModeSelectScreen extends Screen {
         }
     }
 
-    private record ModeLayout(int x, int y, int bigWidth, int bigHeight, int smallWidth, int smallHeight, int gap) {
+    private record ModeLayout(int x, int y, int bigWidth, int bigHeight, int smallWidth, int smallHeight, int modernHeight, int gap) {
     }
 }

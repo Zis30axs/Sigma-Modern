@@ -68,8 +68,10 @@ public final class GeneralSettings extends SettingGroup {
 
     public static void setOrientation(final Position position, final int orientationIndex, final int width, final int height) {
         switch (orientationIndex) {
-            case 1 -> position.setPosition(5, 5);
-            case 2 -> position.setPosition(width - 98 - 5, 5);
+            // MODIFIED for porting: SigmaModern's custom window caption covers the top of the window, so the
+            // top-aligned positions start below it (0 when the caption isn't installed).
+            case 1 -> position.setPosition(5, 5 + com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.reservedTop());
+            case 2 -> position.setPosition(width - 98 - 5, 5 + com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.reservedTop());
             case 3 -> position.setPosition(5, height - 20 - 5);
             case 4 -> position.setPosition(width - 98 - 5, height - 20 - 5);
         }

@@ -114,6 +114,18 @@ public abstract class AbstractScrollArea extends AbstractWidget {
         int scrollbarX = this.scrollBarX();
         int scrollerHeight = this.scrollerHeight();
         int scrollerY = this.scrollBarY();
+        // MODIFIED for porting: SigmaModern draws a hairline thumb (and nothing when there is nothing to scroll).
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            if (this.scrollable()) {
+                boolean over = this.isOverScrollbar(mouseX, mouseY);
+                com.mentalfrostbyte.jello.gui.modern.ModernSkin.scrollbar(graphics, scrollbarX, this.getY(), this.scrollbarWidth(), this.getHeight(), scrollerY, scrollerHeight, over || this.scrolling);
+                if (over) {
+                    graphics.requestCursor(this.scrolling ? CursorTypes.RESIZE_NS : CursorTypes.POINTING_HAND);
+                }
+            }
+            return;
+        }
+
         if (!this.scrollable() && this.scrollbarSettings.disabledScrollerSprite() != null) {
             graphics.blitSprite(
                 RenderPipelines.GUI_TEXTURED, this.scrollbarSettings.backgroundSprite(), scrollbarX, this.getY(), this.scrollbarWidth(), this.getHeight()

@@ -32,6 +32,9 @@ public final class ClickGuiHandler {
         }
 
         Minecraft mc = Minecraft.getInstance();
+        if (mc.gui.screen() instanceof com.mentalfrostbyte.jello.gui.TextEntryScreen entry && entry.isTypingText()) {
+            return false;
+        }
         if (mc.gui.screen() instanceof SigmaClickGui) {
             close();
         } else {

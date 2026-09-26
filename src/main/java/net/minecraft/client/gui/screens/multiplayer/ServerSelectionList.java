@@ -168,6 +168,14 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
         @Override
         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            // MODIFIED for porting: SigmaModern draws its own "scanning" divider.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernRows.active()) {
+                com.mentalfrostbyte.jello.gui.modern.ModernRows.lanHeader(
+                    graphics, ServerSelectionList.SCANNING_LABEL, this.getContentX(), this.getContentY(), this.getContentWidth(), this.getContentHeight()
+                );
+                return;
+            }
+
             this.loadingDotsWidget
                 .setPosition(this.getContentXMiddle() - this.minecraft.font.width(ServerSelectionList.SCANNING_LABEL) / 2, this.getContentY());
             this.loadingDotsWidget.extractRenderState(graphics, mouseX, mouseY, a);
@@ -205,6 +213,16 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
         @Override
         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            // MODIFIED for porting: SigmaModern draws its own LAN rows (same texts, same hidden-address option).
+            if (com.mentalfrostbyte.jello.gui.modern.ModernRows.active()) {
+                com.mentalfrostbyte.jello.gui.modern.ModernRows.lanServer(
+                    graphics, LAN_SERVER_HEADER, this.serverData.getMotd(),
+                    this.minecraft.options.hideServerAddress ? HIDDEN_ADDRESS_TEXT : Component.literal(this.serverData.getAddress()),
+                    this.getContentX(), this.getContentY(), this.getContentWidth(), this.getContentHeight(), hovered
+                );
+                return;
+            }
+
             graphics.text(this.minecraft.font, LAN_SERVER_HEADER, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
             graphics.text(this.minecraft.font, this.serverData.getMotd(), this.getContentX() + 32 + 3, this.getContentY() + 12, -8355712);
             if (this.minecraft.options.hideServerAddress) {
@@ -241,6 +259,11 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
         @Override
         public Component getNarration() {
             return Component.translatable("narrator.select", this.getServerNarration());
+        }
+
+        // MODIFIED for porting: SigmaModern - the LAN game this row stands for, for the detail panel.
+        public LanServer getLanServer() {
+            return this.serverData;
         }
 
         public Component getServerNarration() {
@@ -334,22 +357,28 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 }
             }
 
-            graphics.text(this.minecraft.font, this.serverData.name, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
+            // MODIFIED for porting: SigmaModern - the values below (the ViaFabricPlus-aware MOTD, icon and status, the
+            // pinging animation frame and the icon upload) used to be interleaved with the drawing. They are computed
+            // first, unchanged, so both the vanilla drawing and SigmaModern's row read the same values. The icon upload
+            // now runs before the icon is drawn rather than after, so a new icon shows the same frame it arrives.
+            byte[] currentIconBytes = this.serverData.getIconBytes();
+            if (!Arrays.equals(currentIconBytes, this.lastIconBytes)) {
+                if (this.uploadServerIcon(currentIconBytes)) {
+                    this.lastIconBytes = currentIconBytes;
+                } else {
+                    this.serverData.setIconBytes(null);
+                    this.updateServerList();
+                }
+            }
+
             // MODIFIED for porting: was VFP features/networking/server_pinging
             // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on Font#split). Without a
             // ping there is no MOTD, so the MOTD area shows the server address instead.
             final Component viaFabricPlus$motd = this.vfpDisableServerPinging ? Component.nullToEmpty(this.serverData.ip) : this.serverData.motd;
-            List<FormattedCharSequence> lines = this.minecraft.font.split(viaFabricPlus$motd, this.getContentWidth() - 32 - 2);
-
-            for (int i = 0; i < Math.min(lines.size(), 2); i++) {
-                graphics.text(this.minecraft.font, lines.get(i), this.getContentX() + 32 + 3, this.getContentY() + 12 + 9 * i, -8355712);
-            }
-
             // MODIFIED for porting: was VFP features/networking/server_pinging
             // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on
             // FaviconTexture#textureLocation). Without a ping there is no server icon either.
             final Identifier viaFabricPlus$icon = this.vfpDisableServerPinging ? FaviconTexture.MISSING_LOCATION : this.icon.textureLocation();
-            this.extractIcon(graphics, this.getContentX(), this.getContentY(), viaFabricPlus$icon);
             int index = ServerSelectionList.this.children().indexOf(this);
             if (this.serverData.state() == ServerData.State.PINGING) {
                 int iconIndex = (int)(Util.getMillis() / 100L + index * 2 & 7L);
@@ -365,24 +394,6 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 };
             }
 
-            int statusIconX = this.getContentRight() - 10 - 5;
-            // MODIFIED for porting: was VFP features/networking/server_pinging
-            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on the first
-            // GuiGraphicsExtractor#blitSprite). Removes the ping bar.
-            if (this.statusIcon != null && !this.vfpDisableServerPinging) {
-                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, this.statusIcon, statusIconX, this.getContentY(), 10, 8);
-            }
-
-            byte[] currentIconBytes = this.serverData.getIconBytes();
-            if (!Arrays.equals(currentIconBytes, this.lastIconBytes)) {
-                if (this.uploadServerIcon(currentIconBytes)) {
-                    this.lastIconBytes = currentIconBytes;
-                } else {
-                    this.serverData.setIconBytes(null);
-                    this.updateServerList();
-                }
-            }
-
             // MODIFIED for porting: was VFP features/networking/server_pinging
             // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@Redirect on the GETSTATIC of
             // ServerData$State.INCOMPATIBLE). With pinging disabled the entry stays in PINGING, and upstream
@@ -391,6 +402,41 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
             Component status = this.vfpDisableServerPinging || this.serverData.state() == ServerData.State.INCOMPATIBLE
                 ? this.serverData.version.copy().withStyle(ChatFormatting.RED)
                 : this.serverData.status;
+
+            // MODIFIED for porting: SigmaModern draws its own row from the values above. Clicks keep vanilla's icon
+            // geometry (right half joins, left quarters reorder), which the row shows on hover.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernRows.active()) {
+                int region = com.mentalfrostbyte.jello.gui.modern.ModernRows.server(
+                    graphics, this.serverData, viaFabricPlus$motd, viaFabricPlus$icon, viaFabricPlus$icon != FaviconTexture.MISSING_LOCATION, status,
+                    this.vfpDisableServerPinging, index > 0, index < this.screen.getServers().size() - 1,
+                    this.getContentX(), this.getContentY(), this.getContentWidth(), this.getContentHeight(), hovered, mouseX, mouseY
+                );
+                if (region == com.mentalfrostbyte.jello.gui.modern.ModernRows.REGION_PING) {
+                    this.extractStatusIconTooltip(graphics, mouseX, mouseY);
+                } else if (region == com.mentalfrostbyte.jello.gui.modern.ModernRows.REGION_PLAYERS) {
+                    this.extractPlayersTooltip(graphics, mouseX, mouseY);
+                } else if (region == com.mentalfrostbyte.jello.gui.modern.ModernRows.REGION_ICON_ACTION) {
+                    ServerSelectionList.this.handleCursor(graphics);
+                }
+                return;
+            }
+
+            graphics.text(this.minecraft.font, this.serverData.name, this.getContentX() + 32 + 3, this.getContentY() + 1, -1);
+            List<FormattedCharSequence> lines = this.minecraft.font.split(viaFabricPlus$motd, this.getContentWidth() - 32 - 2);
+
+            for (int i = 0; i < Math.min(lines.size(), 2); i++) {
+                graphics.text(this.minecraft.font, lines.get(i), this.getContentX() + 32 + 3, this.getContentY() + 12 + 9 * i, -8355712);
+            }
+
+            this.extractIcon(graphics, this.getContentX(), this.getContentY(), viaFabricPlus$icon);
+            int statusIconX = this.getContentRight() - 10 - 5;
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on the first
+            // GuiGraphicsExtractor#blitSprite). Removes the ping bar.
+            if (this.statusIcon != null && !this.vfpDisableServerPinging) {
+                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, this.statusIcon, statusIconX, this.getContentY(), 10, 8);
+            }
+
             int statusWidth = this.minecraft.font.width(status);
             int statusX = statusIconX - statusWidth - 5;
             // MODIFIED for porting: was VFP features/networking/server_pinging
@@ -405,37 +451,13 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                 && mouseX <= statusIconX + 10
                 && mouseY >= this.getContentY()
                 && mouseY <= this.getContentY() + 8) {
-                // MODIFIED for porting: ViaFabricPlus core/gui MixinServerSelectionList_OnlineServerEntry#drawTranslatingState (@WrapOperation)
-                if (GeneralSettings.INSTANCE.showAdvertisedServerVersion.getValue()) {
-                    final List<Component> viaFabricPlus$tooltips = new ArrayList<>();
-                    viaFabricPlus$tooltips.add(this.statusIconTooltip);
-                    viaFabricPlus$tooltips.add(Component.translatable("base.viafabricplus.target_version", this.serverData.viaFabricPlus$translatingVersion()));
-                    viaFabricPlus$tooltips.add(
-                        Component.translatable("base.viafabricplus.server_version", this.serverData.version.getString() + " (" + this.serverData.protocol + ")")
-                    );
-                    // MODIFIED for porting: was VFP features/networking/server_pinging
-                    // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
-                    // GuiGraphicsExtractor#setTooltipForNextFrame(Component, int, int)). Removes the ping-bar
-                    // tooltip: upstream applies that condition on top of the core/gui @WrapOperation above (same
-                    // call site, and server_pinging is the later mixin in the config), so it suppresses the whole
-                    // handler - both the version tooltip here and the plain one in the else branch.
-                    if (!this.vfpDisableServerPinging) {
-                        graphics.setTooltipForNextFrame(Lists.transform(viaFabricPlus$tooltips, Component::getVisualOrderText), mouseX, mouseY);
-                    }
-                } else if (!this.vfpDisableServerPinging) {
-                    graphics.setTooltipForNextFrame(this.statusIconTooltip, mouseX, mouseY);
-                }
+                this.extractStatusIconTooltip(graphics, mouseX, mouseY);
             } else if (this.onlinePlayersTooltip != null
                 && mouseX >= statusX
                 && mouseX <= statusX + statusWidth
                 && mouseY >= this.getContentY()
                 && mouseY <= this.getContentY() - 1 + 9) {
-                // MODIFIED for porting: was VFP features/networking/server_pinging
-                // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
-                // GuiGraphicsExtractor#setTooltipForNextFrame(List, int, int)). Removes the player-list tooltip.
-                if (!this.vfpDisableServerPinging) {
-                    graphics.setTooltipForNextFrame(Lists.transform(this.onlinePlayersTooltip, Component::getVisualOrderText), mouseX, mouseY);
-                }
+                this.extractPlayersTooltip(graphics, mouseX, mouseY);
             }
 
             if (hovered) {
@@ -472,6 +494,48 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
                         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, ServerSelectionList.MOVE_DOWN_SPRITE, this.getContentX(), this.getContentY(), 32, 32);
                     }
                 }
+            }
+        }
+
+        // MODIFIED for porting: SigmaModern - the two tooltip bodies below were split out of extractContent unchanged,
+        // so SigmaModern's row shows exactly the same tooltips (including ViaFabricPlus's) over its own layout.
+        private void extractStatusIconTooltip(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
+            if (this.statusIconTooltip == null) {
+                return;
+            }
+
+            // MODIFIED for porting: ViaFabricPlus core/gui MixinServerSelectionList_OnlineServerEntry#drawTranslatingState (@WrapOperation)
+            if (GeneralSettings.INSTANCE.showAdvertisedServerVersion.getValue()) {
+                final List<Component> viaFabricPlus$tooltips = new ArrayList<>();
+                viaFabricPlus$tooltips.add(this.statusIconTooltip);
+                viaFabricPlus$tooltips.add(Component.translatable("base.viafabricplus.target_version", this.serverData.viaFabricPlus$translatingVersion()));
+                viaFabricPlus$tooltips.add(
+                    Component.translatable("base.viafabricplus.server_version", this.serverData.version.getString() + " (" + this.serverData.protocol + ")")
+                );
+                // MODIFIED for porting: was VFP features/networking/server_pinging
+                // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
+                // GuiGraphicsExtractor#setTooltipForNextFrame(Component, int, int)). Removes the ping-bar
+                // tooltip: upstream applies that condition on top of the core/gui @WrapOperation above (same
+                // call site, and server_pinging is the later mixin in the config), so it suppresses the whole
+                // handler - both the version tooltip here and the plain one in the else branch.
+                if (!this.vfpDisableServerPinging) {
+                    graphics.setTooltipForNextFrame(Lists.transform(viaFabricPlus$tooltips, Component::getVisualOrderText), mouseX, mouseY);
+                }
+            } else if (!this.vfpDisableServerPinging) {
+                graphics.setTooltipForNextFrame(this.statusIconTooltip, mouseX, mouseY);
+            }
+        }
+
+        private void extractPlayersTooltip(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
+            if (this.onlinePlayersTooltip == null) {
+                return;
+            }
+
+            // MODIFIED for porting: was VFP features/networking/server_pinging
+            // MixinServerSelectionList_OnlineServerEntry#disableServerPinging (@WrapWithCondition on
+            // GuiGraphicsExtractor#setTooltipForNextFrame(List, int, int)). Removes the player-list tooltip.
+            if (!this.vfpDisableServerPinging) {
+                graphics.setTooltipForNextFrame(Lists.transform(this.onlinePlayersTooltip, Component::getVisualOrderText), mouseX, mouseY);
             }
         }
 
@@ -595,6 +659,15 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
         public ServerData getServerData() {
             return this.serverData;
+        }
+
+        // MODIFIED for porting: SigmaModern - the same (ViaFabricPlus-aware) icon the row draws, for the detail panel.
+        public Identifier iconTexture() {
+            return this.vfpDisableServerPinging ? FaviconTexture.MISSING_LOCATION : this.icon.textureLocation();
+        }
+
+        public boolean isPingingDisabled() {
+            return this.vfpDisableServerPinging;
         }
 
         @Override

@@ -410,6 +410,12 @@ public abstract class Screen extends AbstractContainerEventHandler implements Re
     }
 
     protected void extractPanorama(final GuiGraphicsExtractor graphics, final float a) {
+        // MODIFIED for porting: SigmaModern shows its painted night behind vanilla menus instead of the panorama.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.panorama(graphics, this.width, this.height);
+            return;
+        }
+
         this.minecraft.gameRenderer.panorama().extractRenderState(graphics, this.width, this.height);
     }
 
@@ -418,6 +424,12 @@ public abstract class Screen extends AbstractContainerEventHandler implements Re
     }
 
     protected void extractMenuBackground(final GuiGraphicsExtractor graphics, final int x, final int y, final int width, final int height) {
+        // MODIFIED for porting: SigmaModern tints the blurred backdrop instead of tiling the menu background texture.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.menuBackground(graphics, x, y, width, height, this.minecraft.level != null);
+            return;
+        }
+
         extractMenuBackgroundTexture(graphics, this.minecraft.level == null ? MENU_BACKGROUND : INWORLD_MENU_BACKGROUND, x, y, 0.0F, 0.0F, width, height);
     }
 

@@ -504,6 +504,20 @@ public class WorldSelectionList extends ObjectSelectionList<WorldSelectionList.E
 
         @Override
         public void extractContent(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final boolean hovered, final float a) {
+            // MODIFIED for porting: SigmaModern draws its own world rows. Selection, joining and the icon's click
+            // area (a click on the 32x32 icon joins) stay vanilla's; the row just shows that affordance.
+            if (this.list.entryType == WorldSelectionList.EntryType.SINGLEPLAYER && com.mentalfrostbyte.jello.gui.modern.ModernRows.active()) {
+                boolean overIcon = hovered && this.mouseOverIcon(mouseX - this.getContentX(), mouseY - this.getContentY(), 32);
+                com.mentalfrostbyte.jello.gui.modern.ModernRows.world(
+                    graphics, this.summary, this.icon.textureLocation(), this.hasIcon(), this.getContentX(), this.getContentY(),
+                    this.getContentWidth(), this.getContentHeight(), hovered, overIcon, this.canInteract(), mouseX, mouseY
+                );
+                if (overIcon && this.canInteract()) {
+                    WorldSelectionList.this.handleCursor(graphics);
+                }
+                return;
+            }
+
             int textX = this.getTextX();
             this.worldNameText.setPosition(textX, this.getContentY() + 1);
             this.worldNameText.extractRenderState(graphics, mouseX, mouseY, a);
@@ -776,6 +790,16 @@ public class WorldSelectionList extends ObjectSelectionList<WorldSelectionList.E
 
         public String getLevelName() {
             return this.summary.getLevelName();
+        }
+
+        // MODIFIED for porting: SigmaModern - the world's icon for its detail panel, and whether it has one of its
+        // own (otherwise the texture is the generic placeholder, which Modern replaces with its own art).
+        public Identifier iconTexture() {
+            return this.icon.textureLocation();
+        }
+
+        public boolean hasIcon() {
+            return this.iconFile != null;
         }
 
         @Override

@@ -44,6 +44,15 @@ public abstract class AbstractButton extends AbstractWidget.WithInactiveMessage 
     }
 
     protected final void extractDefaultSprite(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: SigmaModern draws vanilla buttons as its own glass (same states: active, highlighted).
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.button(
+                graphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.active,
+                this.overrideRenderHighlightedSprite != null ? this.overrideRenderHighlightedSprite.get() : this.isHoveredOrFocused(), this.alpha
+            );
+            return;
+        }
+
         graphics.blitSprite(
             RenderPipelines.GUI_TEXTURED,
             SPRITES.get(this.active, this.overrideRenderHighlightedSprite != null ? this.overrideRenderHighlightedSprite.get() : this.isHoveredOrFocused()),

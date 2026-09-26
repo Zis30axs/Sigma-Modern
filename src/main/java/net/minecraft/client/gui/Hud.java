@@ -259,6 +259,11 @@ public class Hud {
         }
 
         this.minecraft.gameRenderer.gameRenderState().guiRenderState.isHudHidden = this.isHidden;
+        // MODIFIED for porting: SigmaModern's music visuals (spectrum, beat particles) go first, under the vanilla HUD;
+        // F1 hides them with it.
+        if (!this.isHidden && !(this.minecraft.gui.screen() instanceof LevelLoadingScreen)) {
+            com.mentalfrostbyte.jello.gui.modern.ModernHud.renderBackdrop(graphics);
+        }
         if (!(this.minecraft.gui.screen() instanceof LevelLoadingScreen)) {
             if (!this.isHidden) {
                 this.extractCameraOverlays(graphics, deltaTracker);
@@ -285,6 +290,9 @@ public class Hud {
 
         // Sigma hook: after the vanilla HUD, so client overlays draw on top of it.
         EventBus.call(new EventRender2D(EventState.POST, graphics, deltaTracker));
+        // MODIFIED for porting: SigmaModern's always-on HUD decorations (enabled-module list, keystrokes,
+        // dynamic island), drawn last so they sit above both the vanilla HUD and any module overlay.
+        com.mentalfrostbyte.jello.gui.modern.ModernHud.render(graphics);
     }
 
     private void extractBossOverlay(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
@@ -617,15 +625,21 @@ public class Hud {
             int screenCenter = graphics.guiWidth() / 2;
             int hotbarWidth = 182;
             int halfHotbar = 91;
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, HOTBAR_SPRITE, screenCenter - 91, graphics.guiHeight() - 22, 182, 22);
-            graphics.blitSprite(
-                RenderPipelines.GUI_TEXTURED,
-                HOTBAR_SELECTION_SPRITE,
-                screenCenter - 91 - 1 + player.getInventory().getSelectedSlot() * 20,
-                graphics.guiHeight() - 22 - 1,
-                24,
-                23
-            );
+            // MODIFIED for porting: SigmaModern reskins the hotbar as a glass cell strip instead of the
+            // vanilla sprite; the 9 item slots below stay at the exact same coordinates either way.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernHud.isActive()) {
+                com.mentalfrostbyte.jello.gui.modern.ModernHud.hotbarBackground(graphics, screenCenter, player.getInventory().getSelectedSlot());
+            } else {
+                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, HOTBAR_SPRITE, screenCenter - 91, graphics.guiHeight() - 22, 182, 22);
+                graphics.blitSprite(
+                    RenderPipelines.GUI_TEXTURED,
+                    HOTBAR_SELECTION_SPRITE,
+                    screenCenter - 91 - 1 + player.getInventory().getSelectedSlot() * 20,
+                    graphics.guiHeight() - 22 - 1,
+                    24,
+                    23
+                );
+            }
             if (!offhand.isEmpty()) {
                 if (offhandArm == HumanoidArm.LEFT) {
                     graphics.blitSprite(RenderPipelines.GUI_TEXTURED, HOTBAR_OFFHAND_LEFT_SPRITE, screenCenter - 91 - 29, graphics.guiHeight() - 23, 29, 24);

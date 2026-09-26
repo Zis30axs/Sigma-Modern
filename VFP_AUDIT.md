@@ -17,17 +17,19 @@
 |---|---|---|
 | 上游 mixin | 368 | 368 |
 | 上游 hook | 726 | 726 |
-| 已内联 hook | 152 | **700** |
-| 覆盖率 | 20.9% | **96.4%** |
+| 已内联 hook | 152 | **705** |
+| 覆盖率 | 20.9% | **97.1%** |
 | COMPLETE | 67 | **317** |
-| REPLACED | 0 | **36** |
-| PARTIAL | 16 | **1** |
-| MISSING | 235 | **5** |
+| REPLACED | 0 | **42** |
+| PARTIAL | 16 | **0** |
+| MISSING | 235 | **0** |
 | NOT_APPLICABLE | 50 | 9 |
 
-剩余 26 个未写出的 hook 分三类，没有第四类：
+2026-09-10 补充复核（本次会话，见下方各行"备注"）：新增的 `LegacyBossBarPatches` / `EntityDataFilterPatches` 把 `MixinCommonBoss`、`MixinEntityPacketRewriter1_15`、`MixinEntityTracker1_9` 三行（共 5 个 hook）从 MISSING 移到 REPLACED，`MixinComponentUtil`（1 个 hook）从 PARTIAL 移到 REPLACED —— 不是因为文件存在，而是逐项核对了 `Via.getConfig().isBossbarPatch()` 确实被 `ViaFabricPlusConfig` 覆写为 `false`（`ViaFabricPlusConfig.java:126`）、两个新类的 `apply()` 确实被 `ViaFabricPlusProtocolPatches.apply()` 调用（`ViaFabricPlusProtocolPatches.java:187-188`，链路终点是 `ProtocolTranslator.java:337`）、以及 `EntityDataFilterPatches` 里那条 wolf 过滤器谓词（`filter.index() == -1 && filter.dataType() == null`）确实匹配 `EntityPacketRewriter1_15#registerRewrites` 里 `filter().type(WOLF).removeIndex(18)` 实际构造出的 `EntityDataFilter`（`Builder#removeIndex` 读了 viaversion-common 的源码 jar：它只注册 handler，从不写 `this.index`，所以 built 的 filter 就是 `index=-1`）。剩下真正打开的只有 NBT 的两个 TagLimiter 重定向，见下面 §仍未完成。
 
-- **7 个真的还开着**（6 行，见下面 §仍未完成）。每条都写明为什么无法复现以及确切代价。
+剩余 21 个未写出的 hook 分三类，没有第四类：
+
+- **2 个真的还开着**（2 行，见下面 §仍未完成）。每条都写明为什么无法复现以及确切代价。
 - **11 个在 NOT_APPLICABLE 行里**（9 行）。目标是 jar 里的类，且**已证明本树没有行为损失** —— 修复已在依赖的 jar 里、或它守卫的功能在这里不可能存在。证据是 bytecode / grep / 源码行号，不是“看起来合理”。
 - **8 个在 4 个 COMPLETE 行里**：上游为 MoreCulling 兼容加的 `getOcclusionShape` + `requireOriginalShape` 成对 hook。它们的守卫 `ViaFabricPlusMixinPlugin.MORE_CULLING_PRESENT` 唯一的赋值在一个本树从不调用的 `onLoad()` 里，所以那条分支恒假；照抄只会写出死代码。
 
@@ -37,8 +39,8 @@
 |---|---|---|---|---|---|---|
 | P0 | 61 | 15 | 0 | 2 | 0 | 78 |
 | P1 | 125 | 6 | 0 | 0 | 0 | 131 |
-| P2 | 78 | 3 | 0 | 3 | 0 | 84 |
-| P3 | 53 | 12 | 1 | 0 | 9 | 75 |
+| P2 | 78 | 6 | 0 | 0 | 0 | 84 |
+| P3 | 53 | 13 | 0 | 0 | 9 | 75 |
 
 优先级定义：**P0** 协议/连接状态、报文生成与顺序、keep-alive / ping / transaction / teleport 确认、移动报文节奏。**P1** 玩家与实体物理、交互。**P2** 方块/物品/世界行为。**P3** 观感、GUI、屏幕、字体、音效、Bedrock 专属附加项。
 
@@ -46,20 +48,16 @@
 
 - **COMPLETE** — 每个 hook 都已按行为内联进对应 vanilla 类，版本门控一致。
 - **PARTIAL** — 部分 hook 已内联，缺口逐条列在下面。
-- **MISSING** — 该 mixin 的行为在本树里仍然没有落点。剩 5 行，全部在下面逐条说明。
+- **MISSING** — 该 mixin 的行为在本树里仍然没有落点。当前 0 行；NBT 的两个真实缺口记在 NOT_APPLICABLE 里（见 §库目标），因为它们的目标本来就没有公开 API 路线。
 - **REPLACED** — 目标是 ViaVersion 的类，改用 ViaVersion 公开协议 API 在 bootstrap 阶段重建等价行为，全部集中在 `ViaFabricPlusProtocolPatches`。
 - **NOT_APPLICABLE** — 目标是 jar 依赖里的类且没有公开 API 路线。**这不等于没有行为缺口**，凡是仍有真实损失的都在 §库目标 一节写明。
 
-## 仍未完成 / still open (26 hooks, 6 rows)
+## 仍未完成 / still open (2 hooks, 2 rows)
 
 | 上游 mixin | hook | 优先级 | 剩余行为 |
 |---|---|---|---|
 | `features/networking/limitation/nbt/MixinNamedCompoundTagType.java` | 0/1 | P0 | `@Redirect removeNBTSizeLimit` |
 | `features/networking/limitation/nbt/MixinTagType.java` | 0/1 | P0 | `@Redirect removeNBTSizeLimit` |
-| `features/entity/metadata/MixinCommonBoss.java` | 0/1 | P2 | `@Redirect ignoreHealthCheck` |
-| `features/entity/metadata/MixinEntityPacketRewriter1_15.java` | 0/1 | P2 | `@Redirect removeAndTrackHealth` |
-| `features/entity/metadata/MixinEntityTracker1_9.java` | 0/3 | P2 | `@Redirect removeMin`; `@Redirect removeMax`; `@Redirect remapNaNToZero` |
-| `features/scoreboard/MixinComponentUtil.java` | 1/1 | P3 | `@Redirect dontSkipEmptySections` |
 
 **`features/networking/limitation/nbt/MixinNamedCompoundTagType.java`** — 0/1, 目标 `com.viaversion.viaversion.api.type.types.misc.NamedCompoundTagType (viaversion-common JAR — no source file in the tree)`
 
@@ -73,33 +71,25 @@
   - 落点: com/viaversion/viaversion/api/type/types/misc/TagType.java:74 — the TagLimiter.create call in `public Tag read(ByteBuf)`, immediately before TagRegistry.read(id, in, tagLimiter, 0).
 - 备注: Still open, and the pre-closing NOT_APPLICABLE is a plausibility argument rather than a proof - the fix is NOT in the shipped jar. javap -c of viaversion-common-5.12.0-SNAPSHOT!com/viaversion/viaversion/api/type/types/misc/TagType.read(ByteBuf), offsets 11-18: getfield maxBytes; sipush 512; invokestatic TagLimiter.create(II) - the exact invocation the @Redirect replaces is present in the bytecode, and TagLimiter.create(II) delegates to create(III) with maxTags=262144 (javap TagLimiter). Constants: DEFAULT_MAX_BYTES=2097152, DEFAULT_MAX_NESTING_LEVEL=512, DEFAULT_MAX_TAGS=262144. Types.java:214 Types.TAG = new TagType() so limitBytes=true and maxBytes=2097152; Types.java:220 TRUSTED_TAG = new TagType(false) lifts only the byte cap and still keeps the 512-level and 262144-tag caps, so the 'point Types.TAG at TagType(false)' idea would not even be equivalent. Nothing in this tree does it anyway: grep -rn over src/main/java for TagLimiter, nbt.limiter, misc.TagType and TRUSTED_TAG returns zero hits (the only Types.TAG uses are reads/writes at ContainerAndLevelLoadingPatches.java:274 and 
 
-**`features/entity/metadata/MixinCommonBoss.java`** — 0/1, 目标 `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)`
+### Closed this session (moved out of "still open") / 本次会话已关闭
 
-- `@Redirect ignoreHealthCheck` — No-ops the health precondition so out-of-range or NaN boss health can never throw; needed for every <=1.8 target that displays a wither/ender dragon bar, and it is the pair of the three EntityTracker1_9 redirects that deliberately produce unclamped health.
-  - 落点: CommonBoss#<init> and CommonBoss#setHealth, at the `Preconditions.checkArgument(ZLjava/lang/Object;)V` calls (viaversion-common CommonBoss.java:56 and :78)
-- 备注: Half the guard is genuinely unreachable here, the other half is a live crash, so NOT_APPLICABLE is not defensible. Nothing in the tree touches CommonBoss, BossBar, BossBarProvider or Via's legacyAPI (grep over com/viaversion/viafabricplus -> 0 hits), so Preconditions.checkArgument(health >= 0 && health <= 1) at CommonBoss.java:56 (ctor) and :78 (setHealth) is intact. Out-of-range health cannot occur, for a reason the audit omits: the paired MixinEntityTracker1_9 removeMin/removeMax are also unported, so Via's own clamp Math.max(0.0f, Math.min(v/maxHealth, 1.0f)) at EntityTracker1_9.java:268 still runs and keeps every finite value (and both infinities) inside [0,1]. NaN is the gap: Math.min(NaN,1)=NaN and Math.max(0,NaN)=NaN, and upstream's neutralizer for exactly that (MixinEntityTracker1_9#remapNaNToZero) is unported too. A <=1.8 server sending NaN as wither/ender-dragon entity-data id 6 therefore reaches createLegacyBossBar(title, NaN, ...) at EntityTracker1_9.java:271 or bar.setHealth(NaN) at :278 and throws IllegalArgumentException on the packet path; AbstractProtocol.transform:4
+**`features/entity/metadata/MixinCommonBoss.java`** and **`MixinEntityTracker1_9.java`** (4 hooks: `ignoreHealthCheck`, `removeMin`, `removeMax`, `remapNaNToZero`) — REPLACED by `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyBossBarPatches.java`, added this session together with the fix for the `LegacyBossBarPatches.java` compile break (it imported the real `it.unimi.dsi.fastutil.ints.Int2ObjectMap` instead of the shaded `com.viaversion.viaversion.libs.fastutil.ints.Int2ObjectMap` that `EntityTracker1_9#getBossBarMap()` actually returns, confirmed with `javap` on `viaversion-common-5.12.0-20260819.184210-4.jar`).
 
-**`features/entity/metadata/MixinEntityPacketRewriter1_15.java`** — 0/1, 目标 `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1_15 (ViaVersion JAR)`
+- `apply()` appends a `PacketHandler` to `ClientboundPackets1_8.SET_ENTITY_DATA` and `ADD_MOB` on `Protocol1_8To1_9` (`LegacyBossBarPatches.java:112-122`) that rebuilds the boss-bar block of `EntityTracker1_9#handleEntityData` with all three redirects applied: the health ratio is passed through unclamped (no `Math.max`/`Math.min`, `LegacyBossBarPatches.java:158-166`) and a `Float` `NaN` is remapped to `0F` before the division (`LegacyBossBarPatches.java:163`).
+- `UnclampedLegacyBossBar` (`LegacyBossBarPatches.java:212-473`) is a field-for-field copy of ViaVersion's `CommonBoss` with both `Preconditions.checkArgument(health >= 0 && health <= 1, ...)` calls removed (constructor and `setHealth`), which is exactly `ignoreHealthCheck`.
+- Verified this session, not just "the file exists": (1) `Via.getConfig().isBossbarPatch()` is overridden to `false` in `ViaFabricPlusConfig.java:126`, so ViaVersion's own clamped branch is genuinely switched off and cannot double-fire alongside this rebuild; `isBossbarPatchRequested()` (`ViaFabricPlusConfig.java:130`) still reads the user's real setting, which `LegacyBossBarPatches.isBossbarPatchRequested()` (`LegacyBossBarPatches.java:184`) honors. (2) `LegacyBossBarPatches.apply()` is actually invoked: `ViaFabricPlusProtocolPatches.java:188` -> `ViaFabricPlusProtocolPatches.apply()` -> `ProtocolTranslator.java:337`.
+- Remaining known limitation, documented in the class's own javadoc: this covers the packet path for SET_ENTITY_DATA and ADD_MOB (the two call sites of `handleEntityData` for boss mobs); ADD_PLAYER also calls `handleEntityData` upstream but a player is never a boss, matching upstream's own scope.
 
-- `@Redirect removeAndTrackHealth` — Replaces `filter().type(WOLF).removeIndex(18)` with a handler that stores the wolf health value in WolfHealthTracker1_14_4 (keyed by entity id), cancels that entry, and shifts indices >18 down by one - i.e. removeIndex's own renumbering plus the snapshot. Applies to <=1.14.4 targets.
-  - 落点: EntityPacketRewriter1_15#registerRewrites, at the `EntityDataFilter$Builder#removeIndex(I)` invocation (viaversion-common EntityPacketRewriter1_15.java:132)
-- 备注: The write half of the redirect was never rebuilt. grep -rn over all of src/main/java: zero references to Protocol1_14_4To1_15, EntityPacketRewriter1_15, EntityDataFilter or EntityTypes1_15, and WolfHealthTracker1_14_4#setWolfHealth (WolfHealthTracker1_14_4.java:48) has no caller anywhere in the tree. Via's own filter().type(WOLF).removeIndex(18) (EntityPacketRewriter1_15.java:132) therefore still runs unmodified, which does keep the half of upstream's replacement that is pure renumbering - EntityDataFilter.java:282-292 is exactly event.cancel() for index==18 and event.setIndex(dataIndex-1) for dataIndex>18 - so nothing is mis-numbered; what is missing is only the event.user().get(WolfHealthTracker1_14_4.class).setWolfHealth(event.entityId(), meta.value()) snapshot. ViaFabricPlusProtocol.java:120-121 still puts an (empty) tracker into every connection for serverVersion <= 1.14.4, so the storable exists but stays empty forever.
+**`features/entity/metadata/MixinEntityPacketRewriter1_15.java`** (`removeAndTrackHealth`) — REPLACED by `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/EntityDataFilterPatches.java`, added this session.
 
-**`features/entity/metadata/MixinEntityTracker1_9.java`** — 0/3, 目标 `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersion JAR)`
+- `applyWolfHealthSnapshot` (`EntityDataFilterPatches.java:83-104`) swaps the handler of the already-registered wolf entity data filter for one that snapshots the dropped health into `WolfHealthTracker1_14_4` before cancelling, keeping the exact renumbering ViaVersion's own `removeIndex(18)` already does.
+- Verified this session that the match predicate is not a guess: read `EntityDataFilter.Builder#removeIndex` from `viaversion-common-...-sources.jar` - it registers a handler but never assigns `this.index`, so `filter().type(WOLF).removeIndex(18)` (`EntityPacketRewriter1_15.java:132`, confirmed by extracting that exact line from the sources jar) builds an `EntityDataFilter` with `type=WOLF, filterFamily=true, dataType=null, index=-1`. That is exactly what `EntityDataFilterPatches`'s predicate (`filter.type() == EntityTypes1_15.WOLF && filter.index() == -1 && filter.dataType() == null`, `EntityDataFilterPatches.java:91`) matches, and it is the only WOLF-specific filter `EntityPacketRewriter1_15#registerRewrites` registers, so `replaceFilter` cannot ambiguously match more than one entry.
+- `EntityDataFilterPatches.apply()` is invoked the same way as `LegacyBossBarPatches.apply()` (`ViaFabricPlusProtocolPatches.java:187`).
 
-- `@Redirect removeMin` — Returns the first argument of Math.min(value/maxHealth, 1.0F), i.e. removes the upper clamp so boss health above the assumed 200/300 max is not flattened to a full bar; <=1.8 targets, only when Via's bossbar-anti-flicker is disabled.
-  - 落点: EntityTracker1_9#handleEntityData, the `Math.min(FF)F` call inside `float health = Math.max(0.0f, Math.min(((float) entityData.getValue()) / maxHealth, 1.0f))`, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:264-268)
-- `@Redirect removeMax` — Returns the second argument of Math.max(0.0F, x), i.e. removes the lower clamp so negative boss health is passed through unchanged; <=1.8 targets, same branch.
-  - 落点: EntityTracker1_9#handleEntityData, the `Math.max(FF)F` call of the same health expression, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:268)
-- `@Redirect remapNaNToZero` — Wraps EntityData#getValue() in that branch so a Float NaN health becomes 0F; without it NaN survives both clamps and trips CommonBoss's precondition, throwing inside packet handling. <=1.8 targets, same branch.
-  - 落点: EntityTracker1_9#handleEntityData, the `EntityData#getValue()` call feeding the health division, in the slice starting at the ViaVersionConfig#isBossbarAntiflicker() call (viaversion-common EntityTracker1_9.java:268)
-- 备注: Nothing in the tree implements any of the three redirects, and the no-gap claim is not a proof - it is contradicted by the tree's own ledger. Reachability: the patched branch is EntityTracker1_9.java:264-281, guarded by isBossbarPatch() (default true, AbstractViaConfig.java:137 and assets/viaversion/config.yml:230) and !isBossbarAntiflicker() (default false, AbstractViaConfig.java:138, config.yml:232); ViaFabricPlusConfig overrides neither, so both defaults stand. It is on the packet path: handleEntityData is called from EntityPacketRewriter1_9.java:228 (SET_ENTITY_DATA) and SpawnPacketRewriter1_9.java:218/297. The clamps are still in the shipped jar (`Math.max(0.0f, Math.min(((float) entityData.getValue()) / maxHealth, 1.0f))`, EntityTracker1_9.java:268), so no fix is 'already in the jar'. grep over the whole tree for EntityTracker1_9 / BossBar / CommonBoss / bossbar finds only vanilla net.minecraft boss-bar code - no replacement route, no client-side equivalent, no config override. VFP_AUDIT.md:135 itself records 'Real gap covering all three redirects', while VFP_AUDIT.md:523 files
+**`features/scoreboard/MixinComponentUtil.java`** (`dontSkipEmptySections`) — reclassified REPLACED (was PARTIAL). The hook itself was already fully inlined before this session (it is not new work); what changed is resolving the task's own visible-behavior-vs-literal-coverage question, which the previous entry left open.
 
-**`features/scoreboard/MixinComponentUtil.java`** — 1/1, 目标 `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJsonString(String, boolean))`
-
-- `@Redirect dontSkipEmptySections` — Swaps StringFormat#fromString(String, ColorHandling, DeserializerUnknownHandling) for the 4-arg overload with false, so empty formatting-only sections survive the legacy->JSON conversion; applies to all pre-1.13 targets, ungated.
-  - 落点: No vanilla site - library methods com.viaversion.viaversion.util.ComponentUtil#legacyToJson (line 187) and #legacyToJsonString(String,boolean) (line 195), at the StringFormat.vanilla().fromString(...) call in each.
-- 备注: What IS present is correct and I verified it end to end. The flag's meaning is confirmed from the shaded mcstructs bytecode: StringFormat.fromString(String,ColorHandling,DeserializerUnknownHandling) delegates to the 4-arg overload with iconst_1, and inside the 4-arg body the boolean (iload 4) appears only at offsets 104-114 and 196-206, guarding `if (sb.length() > 0 \|\| !skipEmpty) components.add(...)` - so its ONLY effect is whether zero-length styled components are emitted; both overloads exist with the exact parameter types the patch uses. Protocol1_12_2To1_13Patches:304 reproduces ComponentUtil.legacyToJson with skipEmpty=false, and applyLegacyTextSections replaces SET_OBJECTIVE and SET_PLAYER_TEAM with byte-for-byte copies of Protocol1_12_2To1_13.java:401-419 and :421-470 (same passthrough/read/write order, same mode/action branches, Via.getConfig().is1_13TeamColourFix(), protocol.getLastColorChar - public at :879 - and a faithful copy of the protected rewriteTeamMemberName at :893-909 plus all 22 SCOREBOARD_TEAM_NAME_REWRITE entries from :92-113). CU is right (ClientboundPacke
+- The client never calls `com.viaversion.viaversion.util.ComponentUtil#legacyToJson`/`legacyToJsonString` directly - `Protocol1_12_2To1_13Patches.java` instead keeps two private local re-implementations (`legacyToJson` at :403, `legacyToJsonString` at :410) that call `StringFormat.vanilla().fromString(message, ColorHandling.RESET, DeserializerUnknownHandling.WHITE, false)`, the same 4-arg overload with `skipEmpty=false` the upstream redirect swaps in.
+- Grepped every call site that needs legacy-to-JSON conversion in this file: player list header/footer and the tab-list display name (:266, :280), team prefix/suffix (:304-305), the 1.12.2 entity custom-name entity-data filter swapped in by `applyLegacyCustomNameSections` (:328, via `EntityDataFilterPatches.replaceFilter`), and the three block-entity `CustomName` handlers (banner, command block, and the shared chest/dispenser/dropper/enchanting_table/furnace/hopper/shulker_box path) swapped in by `applyLegacyBlockEntityNameSections`'s `LegacyNameSectionsBlockEntityProvider`. Every one of them routes through the local `legacyToJson`/`legacyToJsonString`, so every reachable pre-1.13 legacy-text-to-JSON conversion in this tree keeps empty styled sections - this is the "visible behavior preserved" claim, verified by enumeration rather than by literal-call-site coverage of `ComponentUtil` itself (which is a jar class and cannot be edited in place).
 
 ## 用 ViaVersion 公开 API 重建 / rebuilt through the public protocol API
 
@@ -242,6 +232,18 @@
 | `MixinLevelLoadingScreen.java` | `net.minecraft.client.gui.screens.LevelLoadingScreen` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/gui/screens/LevelLoadingScreen.java` |
 | `MixinManageServerScreen.java` | `net.minecraft.client.gui.screens.ManageServerScreen` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/gui/screens/ManageServerScreen.java` |
 | `MixinServerSelectionList_OnlineServerEntry.java` | `net.minecraft.client.gui.screens.multiplayer.ServerSelectionList$OnlineServerEnt` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/gui/screens/multiplayer/ServerSelectionList.java` |
+
+> **SigmaModern 改动说明（不改变上表状态）**：`JoinMultiplayerScreen` 与 `ServerSelectionList$OnlineServerEntry`
+> 被重构以便 `ModernServersScreen` 复用，所有 VFP 代码与 `MODIFIED for porting` 标记原样保留，只是位置移动：
+> `init()` 里的按钮 lambda 拆成 `joinSelected/openDirectJoin/openAddServer/openEditSelected/confirmDeleteSelected`；
+> `repositionElements()` 里的 VFP 协议按钮块拆成 `placeViaFabricPlusButton()`（`ModernServersScreen` 不调用它，
+> 改用页眉里的版本 chip，且同样遵守 `multiplayerScreenButtonOrientation` 的 Off）；`OnlineServerEntry.extractContent`
+> 把 VFP 相关的 MOTD / 图标 / 状态先算成局部值，再交给原版绘制或 Modern 行绘制，两个 tooltip 体拆成
+> `extractStatusIconTooltip` / `extractPlayersTooltip`（内容不变，仍受 `vfpDisableServerPinging` 与
+> `showAdvertisedServerVersion` 门控）；图标上传因此提前到绘制之前。`GeneralSettings.setOrientation` 的两个顶部
+> 位置在 SigmaModern 的自绘标题栏安装时下移 `ModernWindowFrame.reservedTop()`，避免与窗口控制按钮重叠。
+> `PerServerVersionScreen` 新增 `selectionConsumer()` / `selectionSupplier()` 两个访问器（无行为变化），供 SigmaModern
+> 的版本选择界面以相同回调接管；`ProtocolSelectionScreen` 未改动，由路由按类替换。
 
 ### `core/integration` — 19/19 hook, COMPLETE 7, REPLACED 3
 
@@ -510,14 +512,14 @@
 | `MixinEntityRenderDispatcher.java` | `net.minecraft.client.renderer.entity.EntityRenderDispatcher` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/renderer/entity/EntityRenderDispatcher.java` |
 | `MixinLayerDefinitions.java` | `net.minecraft.client.model.geom.LayerDefinitions` | 1 | 1 | COMPLETE | P3 | `net/minecraft/client/model/geom/LayerDefinitions.java` |
 
-### `features/entity/metadata` — 2/7 hook, COMPLETE 1, MISSING 3, REPLACED 1
+### `features/entity/metadata` — 7/7 hook, COMPLETE 1, REPLACED 4
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinCommonBoss.java` | `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)` | 1 | 0 | MISSING | P2 | — |
-| `MixinEntityPacketRewriter1_15.java` | `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1` | 1 | 0 | MISSING | P2 | — |
+| `MixinCommonBoss.java` | `com.viaversion.viaversion.legacy.bossbar.CommonBoss (ViaVersion JAR)` | 1 | 1 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyBossBarPatches.java:212-473 (UnclampedLegacyBossBar)` |
+| `MixinEntityPacketRewriter1_15.java` | `com.viaversion.viaversion.protocols.v1_14_4to1_15.rewriter.EntityPacketRewriter1` | 1 | 1 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/EntityDataFilterPatches.java:83-104` |
 | `MixinEntityPacketRewriter1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.rewriter.EntityPacketRewriter1_9 (` | 1 | 1 | REPLACED | P1 | `net/minecraft/client/multiplayer/ClientPacketListener.java:703-713 (helper at src/main/java/net/minecraft/world/entity/LivingEntity.java:193)` |
-| `MixinEntityTracker1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersi` | 3 | 0 | MISSING | P2 | — |
+| `MixinEntityTracker1_9.java` | `com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9 (ViaVersi` | 3 | 3 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyBossBarPatches.java:127-180` |
 | `MixinWolf.java` | `net.minecraft.world.entity.animal.wolf.Wolf` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/entity/animal/wolf/Wolf.java` |
 
 ### `features/entity/pose` — 2/2 hook, COMPLETE 2
@@ -673,6 +675,15 @@
 | `MixinAbstractCommandBlockEditScreen.java` | `net.minecraft.client.gui.screens.inventory.AbstractCommandBlockEditScreen` | 1 | 1 | COMPLETE | P2 | `net/minecraft/client/gui/screens/inventory/AbstractCommandBlockEditScreen.java` |
 | `MixinChatScreen.java` | `net.minecraft.client.gui.screens.ChatScreen` | 4 | 4 | COMPLETE | P3 | `net/minecraft/client/gui/screens/ChatScreen.java` |
 | `MixinCommandSuggestions.java` | `net.minecraft.client.gui.components.CommandSuggestions` | 3 | 3 | COMPLETE | P3 | `net/minecraft/client/gui/components/CommandSuggestions.java` |
+
+> **ModernChat 模块改动说明（不改变上表状态）**：`ChatScreen`、`CommandSuggestions`、`EditBox`（及 `ChatComponent`）
+> 新增了 ModernChat 模块（聊天栏皮肤，模块关闭时完全走原版）的 `MODIFIED for porting` 分支（`gui.modern.ModernChat` /
+> `ModernChatFont`），只增不删：与
+> `git show HEAD:` 逐行比对，这四个类原有的 VFP 标记行全部保留，被替换的原版语句都只是包进了 `ModernChat.active()`
+> 或 `font instanceof ModernChatFont` 条件分支。`ChatScreen.init` 中 legacy_tab_completion 的两段 `setValue`、
+> max_chat_length 的 `setMaxLength` 替换，其顺序与位置不变（输入框只是在构造后立即由 `ModernChat.placeInput` 重新定位）；
+> `onEdited` / `vfpKeepTabComplete`、`CommandSuggestions.formatChat` / `vfpCancelTabComplete` / `extractRenderState`
+> 头部的 `clearMessages` 未改动；`EditBox` 的 classic4j 禁用字符 hook 未改动。Modern 模式下仅绘制与版式不同。
 
 ### `features/limitation/allow_negative_amplifier` — 1/1 hook, COMPLETE 1
 
@@ -931,11 +942,11 @@
 | `MixinEntityPacketRewriter1_12.java` | `com.viaversion.viaversion.protocols.v1_11_1to1_12.rewriter.EntityPacketRewriter1` | 1 | 1 | REPLACED | P2 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/LegacyItemAndRecipePatches.java:408` |
 | `MixinInventoryMenu.java` | `net.minecraft.world.inventory.InventoryMenu` | 1 | 1 | COMPLETE | P2 | `net/minecraft/world/inventory/InventoryMenu.java` |
 
-### `features/scoreboard` — 2/2 hook, COMPLETE 1, PARTIAL 1
+### `features/scoreboard` — 2/2 hook, COMPLETE 1, REPLACED 1
 
 | 上游 mixin | 目标 vanilla 类 | hook | 已移植 | 状态 | 优先级 | Sigma 位置 |
 |---|---|---|---|---|---|---|
-| `MixinComponentUtil.java` | `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJ` | 1 | 1 | PARTIAL | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/Protocol1_12_2To1_13Patches.java:242 (handlers) and :304 (skipEmpty=false helper)` |
+| `MixinComponentUtil.java` | `com.viaversion.viaversion.util.ComponentUtil (methods legacyToJson and legacyToJ` | 1 | 1 | REPLACED | P3 | `com/viaversion/viafabricplus/protocoltranslator/impl/viaversion/Protocol1_12_2To1_13Patches.java:403-419 (legacyToJson/legacyToJsonString local reimplementations, called from every legacy-text call site in that file)` |
 | `MixinPlayerTeam.java` | `net.minecraft.world.scores.PlayerTeam` | 1 | 1 | COMPLETE | P3 | `net/minecraft/world/scores/PlayerTeam.java` |
 
 ### `features/screen_changes` — 8/8 hook, COMPLETE 5

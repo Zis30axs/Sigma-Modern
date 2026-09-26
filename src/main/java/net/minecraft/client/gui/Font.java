@@ -47,6 +47,11 @@ public class Font {
         return this.provider.glyphs(fontLocation);
     }
 
+    // MODIFIED for porting: SigmaModern's ModernChatFont measures in Anthropic Serif over this font's glyphs.
+    public Font.Provider provider() {
+        return this.provider;
+    }
+
     public String bidirectionalShaping(final String text) {
         try {
             Bidi bidi = new Bidi(new ArabicShaping(8).shape(text), 127);

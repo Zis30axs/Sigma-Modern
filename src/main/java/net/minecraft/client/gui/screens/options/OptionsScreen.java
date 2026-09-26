@@ -117,6 +117,11 @@ public class OptionsScreen extends Screen implements HasGamemasterPermissionReac
         return this.lastScreen;
     }
 
+    // MODIFIED for porting: SigmaModern - lets ModernScreens rebuild this screen with the same context.
+    public boolean isInWorld() {
+        return this.inWorld;
+    }
+
     private void applyPacks(final PackRepository packRepository) {
         this.options.updateResourcePacks(packRepository);
         this.minecraft.gui.setScreen(this);

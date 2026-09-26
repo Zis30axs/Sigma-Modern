@@ -47,7 +47,7 @@ import com.viaversion.viaversion.protocols.v1_8to1_9.provider.BossBarProvider;
 import com.viaversion.viaversion.protocols.v1_8to1_9.storage.EntityTracker1_9;
 import com.viaversion.viaversion.util.ComponentUtil;
 import com.viaversion.viaversion.util.UUIDUtil;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import com.viaversion.viaversion.libs.fastutil.ints.Int2ObjectMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;

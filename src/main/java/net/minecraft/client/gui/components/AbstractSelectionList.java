@@ -220,6 +220,11 @@ public abstract class AbstractSelectionList<E extends AbstractSelectionList.Entr
     }
 
     protected void extractListSeparators(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: SigmaModern's backdrop and glass cards already separate the list; no dirt-era rules.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            return;
+        }
+
         Identifier headerSeparator = this.minecraft.level == null ? Screen.HEADER_SEPARATOR : Screen.INWORLD_HEADER_SEPARATOR;
         Identifier footerSeparator = this.minecraft.level == null ? Screen.FOOTER_SEPARATOR : Screen.INWORLD_FOOTER_SEPARATOR;
         graphics.blit(RenderPipelines.GUI_TEXTURED, headerSeparator, this.getX(), this.getY() - 2, 0.0F, 0.0F, this.getWidth(), 2, 32, 2);
@@ -227,6 +232,11 @@ public abstract class AbstractSelectionList<E extends AbstractSelectionList.Entr
     }
 
     protected void extractListBackground(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: SigmaModern lets the (blurred) backdrop or its card show through instead.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            return;
+        }
+
         Identifier menuListBackground = this.minecraft.level == null ? MENU_LIST_BACKGROUND : INWORLD_MENU_LIST_BACKGROUND;
         graphics.blit(
             RenderPipelines.GUI_TEXTURED,
@@ -364,6 +374,12 @@ public abstract class AbstractSelectionList<E extends AbstractSelectionList.Entr
     }
 
     protected void extractSelection(final GuiGraphicsExtractor graphics, final E entry, final int outlineColor) {
+        // MODIFIED for porting: SigmaModern marks the selected row with its ice band and accent bar.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.listSelection(graphics, entry.getX(), entry.getY(), entry.getWidth(), entry.getHeight(), this.isFocused());
+            return;
+        }
+
         int outlineX0 = entry.getX();
         int outlineY0 = entry.getY();
         int outlineX1 = outlineX0 + entry.getWidth();
