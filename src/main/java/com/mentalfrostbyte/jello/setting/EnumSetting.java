@@ -36,6 +36,41 @@ public final class EnumSetting<E extends Enum<E>> extends Setting<E> {
         this.set(this.options.get((this.options.indexOf(this.get()) + 1) % this.options.size()));
     }
 
+    /** The current choice's place in {@link #getOptions()}. */
+    public int index() {
+        return this.options.indexOf(this.get());
+    }
+
+    /** Picks the choice at {@code index} in {@link #getOptions()}, clamped to the list. */
+    public void setIndex(final int index) {
+        this.set(this.options.get(Math.max(0, Math.min(this.options.size() - 1, index))));
+    }
+
+    /** Moves {@code delta} choices along, stopping at either end - what a scroll wheel over the control does. */
+    public void step(final int delta) {
+        this.setIndex(this.index() + delta);
+    }
+
+    /**
+     * A choice as a person would write it: the constant's own {@code toString()} when the enum gives one, otherwise
+     * its name in words - {@code LEGIT_HOP} as "Legit Hop". For showing only; the name is what is stored.
+     */
+    public static String label(final Enum<?> option) {
+        String shown = option.toString();
+        if (!shown.equals(option.name())) {
+            return shown;
+        }
+
+        StringBuilder out = new StringBuilder(shown.length());
+        for (String word : shown.split("_")) {
+            if (word.isEmpty()) continue;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(word.charAt(0)).append(word.substring(1).toLowerCase(java.util.Locale.ROOT));
+        }
+
+        return out.toString();
+    }
+
     @Override
     public JsonElement toJson() {
         return new JsonPrimitive(this.get().name());

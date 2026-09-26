@@ -29,6 +29,18 @@ The ClickGUI palette follows the ice-blue identity (`ModernStyle.ICE`/`GLOW`) ra
 
 Each sidebar category has an icon to the left of its name, tinted like the name (active or muted): 24×24 line drawings with a 2 px round stroke, one SVG file per category in `assets/minecraft/sigma/icons/category/` - crossed swords (Combat), a double chevron (Movement), a person (Player), a crate (Item), mountains under a sun (World), an eye (Render), a paneled window (Interface), a bug (Exploit) and four tiles (Misc). `ModernSvg` draws SVG files through Skija's own SVG renderer: like `ModernIcons`, each file is rasterized once per device size, so it stays crisp at any GUI scale. A mask keeps only the shape and is tinted by the caller (the icons are drawn white for that); a picture keeps the file's own colours (the flags). A file gives only a `viewBox` and is scaled to fill the box it's drawn in.
 
+### Module page
+
+A module's page (a click on a row's ›, or a right-click on the row) is a compact inspector rather than a list of full-width rows. The header holds the module's name (1.25×, not 1.6×), its description on one line, its switch, and its keybind as a chip beside the switch: "Bind R · Toggle", or "Not bound · click to bind". Clicking the chip binds, and right-clicking it switches between toggle and hold. Each setting is one 30 px row: name, and description in one small line, on the left; one control in a column on the right, up to 212 px wide and never more than half the row.
+
+- **Switch**: a small toggle.
+- **Number**: a short slider (ticks when there are at most 12 steps) with the value in a pill. Click the pill to type a value (a decimal comma works; Enter sets it, clamped to the range; Esc or text that isn't a number leaves it).
+- **Choice**: with up to four options that fit side by side, a segmented control where every option is one click and the highlight slides. Otherwise it is a field showing the current option; clicking it (or anywhere on the row) opens a grid of every option under the row, three columns wide, and one click picks. The card grows to fit the grid, and a click elsewhere or Esc closes it. Option names read as words ("One Seven" for `ONE_SEVEN`, via `EnumSetting.label`) unless the enum names itself with its own `toString()`.
+- **Colour**: quick swatches, and the value as hex in a pill with the current colour; click the pill to type a hex value.
+- **Text**: a field; click to type.
+
+The scroll wheel over a control steps it: a number by its step, a choice to the next or previous option. Anywhere else, the wheel scrolls the page. Hovering a setting that isn't at its default shows a reset arrow beside its control, and clicking it resets the setting.
+
 ### Language
 
 A globe button beside the search button opens the **Language** page (and closes it again; so does Esc). It lists the client languages - English, 简体中文, 日本語, 한국어, Русский, Español - one row each with its flag, its name in itself and, under that, its name in the language being shown; the one in use is lit like an enabled module, with a check. A click switches at once and is saved with the config (`"language": "<code>"`). This is the client's own text only; the game's keeps following the game's language setting.

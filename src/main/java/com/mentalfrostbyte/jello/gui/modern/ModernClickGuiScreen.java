@@ -61,6 +61,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private View view = View.CATEGORY;
     private ModuleCategory activeCategory = ModuleCategory.values()[0];
     private Module detailModule;
+    // The choice whose dropdown grid is open, over the detail view; null when none is.
+    private EnumSetting<?> popover;
     private String search = "";
     private int scroll;
     private int contentHeight;
@@ -161,16 +163,18 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
         if (this.view == View.DETAIL) {
             Module m = this.detailModule;
-            hits.add(new Hit(contentX, y, contentW, 56, "detail-toggle", m, null));
-            y += 64;
+            hits.add(keybindChip(contentX, y, contentW));
+            hits.add(new Hit(contentX, y, contentW, DETAIL_HEAD_H, "detail-toggle", m, null));
+            y += DETAIL_HEAD_H + 8;
+            int reach = 0;
             for (Setting<?> setting : m.settings()) {
                 if (!setting.isVisible()) continue;
-                int h = setting instanceof NumberSetting ? 52 : 40;
-                hits.add(new Hit(contentX, y, contentW, h, setting, m, setting));
-                y += h;
+                hits.add(new Hit(contentX, y, contentW, SETTING_H, setting, m, setting));
+                // An open dropdown counts as content, so the card grows to show it under its row.
+                if (setting == this.popover) reach = y + SETTING_H + 2 + popoverHeight(this.popover.getOptions().size(), contentW);
+                y += SETTING_H;
             }
-            hits.add(new Hit(contentX, y, contentW, 40, "keybind", m, null));
-            y += 40;
+            y = Math.max(y, reach) + 6;
         } else if (this.view == View.LANGUAGE) {
             for (ClientLanguage language : ClientLanguage.values()) {
                 hits.add(new Hit(contentX, y, contentW, ROW_H, language, null, null));
@@ -497,74 +501,250 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         }
     }
 
+    // --- module detail: a compact inspector ------------------------------------------------------------
+
+    private static final int DETAIL_HEAD_H = 44, SETTING_H = 30, CONTROL_MAX_W = 212, SEGMENTS_MAX = 4;
+    private static final int POP_CELL_H = 22, POP_GAP = 5, POP_PAD = 7;
+    private static final float DESC_SCALE = 0.78F, VALUE_SCALE = 0.85F;
+    private static final int PILL = 0x24243746, PILL_EDITING = 0x40278DCC;
+    /** Quick picks offered next to a colour's hex value. */
+    private static final int[] SWATCHES = {0xFFEAF6FF, 0xFF7FE3FF, 0xFF2E9BD6, 0xFFFFB86B, 0xFFFF6B8B, 0xFFA6E3A1};
+
+    /** An animation key per (what, which): a row's hover, its toggle and its segment highlight each ease on their own. */
+    private record Anim(String what, Object of) {}
+
+    /** The dropdown grid's panel, and how its cells are laid out. */
+    private record Pop(int x, int y, int w, int h, int cols, int cellW) {}
+
+    private record NumberParts(int trackX, int trackW, int pillX, int pillW) {}
+
+    /** The control column, at the right of a setting row: up to CONTROL_MAX_W wide and never more than half of it. */
+    private static int controlWidth(int rowW) {
+        return Math.min(CONTROL_MAX_W, rowW / 2);
+    }
+
+    private static int controlX(Hit h) {
+        return h.x() + h.w() - controlWidth(h.w());
+    }
+
+    private boolean rowsHoverable(int my) {
+        return this.popover == null && my >= visibleContentTop() && my < panelY() + Math.round(this.panelHeight) - FOOTER_H;
+    }
+
+    private static boolean isDefault(Setting<?> setting) {
+        return java.util.Objects.equals(setting.get(), setting.getDefaultValue());
+    }
+
+    /** Few enough choices with short enough names to sit side by side: then every one is a single click. */
+    private static boolean segmented(EnumSetting<?> setting, int controlW) {
+        if (setting.getOptions().size() > SEGMENTS_MAX) return false;
+        float segmentW = controlW / (float)setting.getOptions().size();
+        for (Enum<?> option : setting.getOptions()) {
+            if (ModernTypography.width(ModernTypography.Face.TEXT, EnumSetting.label(option), VALUE_SCALE) > segmentW - 8) return false;
+        }
+        return true;
+    }
+
+    private NumberParts numberParts(Hit h, NumberSetting n) {
+        int controlW = controlWidth(h.w());
+        String value = this.interactions.isEditing(n) ? this.interactions.displayValue(n) : formatNumber(n);
+        int pillW = Math.max(38, Math.round(ModernTypography.width(ModernTypography.Face.TEXT, value, VALUE_SCALE)) + 14);
+        return new NumberParts(controlX(h) + 5, controlW - pillW - 16, h.x() + h.w() - pillW, pillW);
+    }
+
+    private int hexWidth(ColorSetting color) {
+        return Math.round(ModernTypography.width(ModernTypography.Face.TEXT, this.interactions.displayValue(color), VALUE_SCALE)) + 28;
+    }
+
+    private static int swatchCount(int controlW, int hexW) {
+        return Math.max(0, Math.min(SWATCHES.length, (controlW - hexW - 6) / 19));
+    }
+
+    private String keybindLabel(Module m) {
+        if (this.interactions.isBinding(m)) return ModernText.tr("clickgui.detail.binding");
+        com.mentalfrostbyte.jello.module.Keybind keybind = m.getKeybind();
+        if (!keybind.isBound()) return ModernText.tr("clickgui.detail.unbound");
+        return ModernText.tr("clickgui.detail.bind", keybind.key().getDisplayName().getString(), EnumSetting.label(keybind.mode()));
+    }
+
+    /** The keybind, as a chip in the header left of the module's switch: click to bind, right-click for toggle/hold. */
+    private Hit keybindChip(int headerX, int headerY, int headerW) {
+        int w = Math.round(ModernTypography.width(ModernTypography.Face.TEXT, keybindLabel(this.detailModule), 0.82F)) + 18;
+        return new Hit(headerX + headerW - 34 - 8 - w, headerY + 3, w, 18, "keybind", this.detailModule, null);
+    }
+
     private void drawDetail(GuiGraphicsExtractor g, List<Hit> hits, int mx, int my) {
         Module m = this.detailModule;
+        Hit chip = null;
+        for (Hit h : hits) if ("keybind".equals(h.key())) chip = h;
         for (Hit h : hits) {
-            if ("detail-toggle".equals(h.key())) {
-                float scale = 1.6F;
-                g.pose().pushMatrix();
-                g.pose().translate(h.x(), h.y());
-                g.pose().scale(scale, scale);
-                ModernTypography.draw(g, m.getName(), 0, 0, ModernStyle.INK, false);
-                g.pose().popMatrix();
-                ModernTypography.draw(g, m.getDescription(), h.x(), h.y() + 30, ModernStyle.INK_MUTED, false);
-                float on = animate("detail-on-" + m, m.isEnabled() ? 1 : 0);
-                ModernStyle.toggle(g, h.x() + h.w() - 44, h.y() + 6, 44, 24, on);
-            } else if ("keybind".equals(h.key())) {
-                boolean binding = this.interactions.isBinding(m);
-                String label = ModernText.tr(binding ? "clickgui.detail.binding" : "clickgui.detail.keybind");
-                ModernTypography.draw(g, label, h.x(), h.y() + 6, binding ? ModernStyle.BLUE : ModernStyle.INK, false);
-                if (!binding) ModernTypography.draw(g, m.getKeybind().mode().name(), h.x(), h.y() + 22, ModernStyle.INK_MUTED, false);
-                String value = binding ? "…" : this.interactions.keybindDisplay(m.getKeybind());
-                int vw = ModernTypography.width(value);
-                ModernStyle.rounded(g, h.x() + h.w() - vw - 22, h.y() + 6, vw + 16, 22, 6, 0x30243746);
-                ModernTypography.draw(g, value, h.x() + h.w() - vw - 14, h.y() + 12, ModernStyle.INK, false);
-            } else if (h.setting() != null) {
-                drawSetting(g, h);
-            }
+            if ("detail-toggle".equals(h.key())) drawDetailHeader(g, h, m, chip == null ? h.x() + h.w() : chip.x());
+            else if ("keybind".equals(h.key())) drawKeybindChip(g, h, m, mx, my);
+            else if (h.setting() != null) drawSetting(g, h, mx, my);
         }
+        drawPopover(g, mx, my);
     }
 
-    private void drawSetting(GuiGraphicsExtractor g, Hit h) {
+    private void drawDetailHeader(GuiGraphicsExtractor g, Hit h, Module m, int chipX) {
+        String name = ModernTypography.wrap(ModernTypography.Face.TEXT, m.getName(), 1.25F, chipX - h.x() - 10, 1).getFirst();
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, name, h.x(), h.y() + 1, 1.25F, ModernStyle.INK);
+        float on = animate("detail-on-" + m, m.isEnabled() ? 1 : 0);
+        ModernStyle.toggle(g, h.x() + h.w() - 34, h.y() + 3, 34, 18, on);
+        if (!m.getDescription().isBlank()) {
+            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, m.getDescription(), 0.82F, h.w(), 1).getFirst();
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, description, h.x(), h.y() + 24, 0.82F, ModernStyle.INK_MUTED);
+        }
+        ModernStyle.fill(g, h.x(), h.y() + h.h() + 3, h.x() + h.w(), h.y() + h.h() + 4, 0x1EBFEEFF);
+    }
+
+    private void drawKeybindChip(GuiGraphicsExtractor g, Hit h, Module m, int mx, int my) {
+        boolean binding = this.interactions.isBinding(m);
+        float hover = animate(new Anim("chip", m), rowsHoverable(my) && ModernStyle.inside(mx, my, h.x(), h.y(), h.w(), h.h()) ? 1 : 0);
+        ModernStyle.rounded(g, h.x(), h.y(), h.w(), h.h(), 9, binding ? PILL_EDITING : Math.round(0x24 + hover * 0x18) << 24 | 0x243746);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, keybindLabel(m), h.x() + 9, h.y() + 4.5F, 0.82F,
+            binding ? ModernStyle.BLUE : ModernStyle.INK_MUTED);
+    }
+
+    /**
+     * One setting as an inspector row: its name, and its description in one small line, on the left; one compact
+     * control on the right. Hovered, a setting that isn't at its default shows a reset arrow beside the control.
+     */
+    private void drawSetting(GuiGraphicsExtractor g, Hit h, int mx, int my) {
         Setting<?> s = h.setting();
-        ModernTypography.draw(g, s.getName(), h.x(), h.y() + 4, ModernStyle.INK, false);
-        String desc = ModernTypography.fit(s.getDescription(), h.w());
-        if (!desc.isEmpty()) ModernTypography.draw(g, desc, h.x(), h.y() + 18, ModernStyle.INK_MUTED, false);
+        int x = h.x(), w = h.w(), controlW = controlWidth(w), cx = controlX(h), mid = h.y() + h.h() / 2;
+        boolean over = rowsHoverable(my) && ModernStyle.inside(mx, my, x - 6, h.y(), w + 12, h.h());
+        float hover = animate(new Anim("row", s), over ? 1 : 0);
+        if (hover > 0.01F) ModernStyle.rounded(g, x - 6, h.y(), w + 12, h.h(), 6, Math.round(hover * 22) << 24 | 0x3D9DDC);
+        int labelW = cx - x - 24;
+        ModernTypography.draw(g, ModernTypography.fit(s.getName(), labelW), x, h.y() + 4, ModernStyle.INK, false);
+        if (!s.getDescription().isBlank()) {
+            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, s.getDescription(), DESC_SCALE, labelW, 1).getFirst();
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, description, x, h.y() + 17, DESC_SCALE, ModernStyle.INK_MUTED);
+        }
+        if (over && !isDefault(s)) ModernIcons.draw(g, ModernIcons.Icon.REFRESH, cx - 17, mid - 5.5F, 11, ModernStyle.INK_MUTED);
+
         if (s instanceof BooleanSetting bool) {
-            float on = animate(s, bool.get() ? 1 : 0);
-            ModernStyle.toggle(g, h.x() + h.w() - 40, h.y() + 8, 40, 22, on);
+            ModernStyle.toggle(g, x + w - 28, mid - 8, 28, 16, animate(new Anim("on", s), bool.get() ? 1 : 0));
         } else if (s instanceof NumberSetting n) {
-            String value = formatNumber(n);
-            ModernTypography.draw(g, value, h.x() + h.w() - ModernTypography.width(value), h.y() + 4, ModernStyle.BLUE, false);
-            int trackY = h.y() + 34, trackH = 4;
-            ModernStyle.fill(g, h.x(), trackY, h.x() + h.w(), trackY + trackH, 0x306C96B0);
-            float frac = (n.get() - n.getMin()) / Math.max(1e-6F, n.getMax() - n.getMin());
-            int fillW = Math.round(h.w() * frac);
-            ModernStyle.fill(g, h.x(), trackY, h.x() + fillW, trackY + trackH, ModernStyle.BLUE);
-            ModernStyle.rounded(g, h.x() + fillW - 4, trackY - 3, 8, 10, 4, 0xFFFFFFFF);
-        } else if (s instanceof EnumSetting<?> enumSetting) {
-            String value = this.interactions.displayValue(enumSetting);
-            drawValuePill(g, h, value, false);
+            drawNumber(g, h, n, mid);
+        } else if (s instanceof EnumSetting<?> choice) {
+            drawChoice(g, choice, cx, controlW, mid);
         } else if (s instanceof ColorSetting color) {
             boolean editing = this.interactions.isEditing(s);
-            String value = this.interactions.displayValue(color);
-            int vw = ModernTypography.width(value);
-            ModernStyle.rounded(g, h.x() + h.w() - vw - 34, h.y() + 2, 16, 16, 4, color.get());
-            drawValueText(g, h.x() + h.w() - vw - 14, h.y() + 4, value, editing);
+            int hexW = hexWidth(color), hexX = x + w - hexW;
+            ModernStyle.rounded(g, hexX, mid - 8, hexW, 16, 5, editing ? PILL_EDITING : PILL);
+            ModernStyle.rounded(g, hexX + 4, mid - 5, 10, 10, 3, 0x3315303E);
+            ModernStyle.rounded(g, hexX + 5, mid - 4, 8, 8, 2, color.get());
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, this.interactions.displayValue(color), hexX + 18, mid - 4.6F, VALUE_SCALE,
+                editing ? ModernStyle.BLUE : ModernStyle.INK);
+            for (int i = 0, count = swatchCount(controlW, hexW); i < count; i++) {
+                int sx = cx + i * 19;
+                if ((color.get() & 0xFFFFFF) == (SWATCHES[i] & 0xFFFFFF)) ModernStyle.rounded(g, sx - 2, mid - 9, 18, 18, 6, ModernStyle.BLUE);
+                ModernStyle.rounded(g, sx - 1, mid - 8, 16, 16, 5, 0x3315303E);
+                ModernStyle.rounded(g, sx, mid - 7, 14, 14, 4, SWATCHES[i]);
+            }
         } else if (s instanceof TextSetting) {
             boolean editing = this.interactions.isEditing(s);
-            drawValuePill(g, h, this.interactions.displayValue(s), editing);
+            ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, editing ? PILL_EDITING : PILL);
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(this.interactions.displayValue(s), controlW - 16),
+                cx + 8, mid - 4.6F, VALUE_SCALE, editing ? ModernStyle.BLUE : ModernStyle.INK);
         }
     }
 
-    private void drawValuePill(GuiGraphicsExtractor g, Hit h, String value, boolean editing) {
-        int vw = ModernTypography.width(value);
-        ModernStyle.rounded(g, h.x() + h.w() - vw - 22, h.y() + 1, vw + 16, 18, 5, editing ? 0x40278DCC : 0x24243746);
-        ModernTypography.draw(g, value, h.x() + h.w() - vw - 14, h.y() + 5, editing ? ModernStyle.BLUE : ModernStyle.INK, false);
+    /** A short slider with its value in a pill beside it (click the pill to type one), and ticks when there are few steps. */
+    private void drawNumber(GuiGraphicsExtractor g, Hit h, NumberSetting n, int mid) {
+        NumberParts p = numberParts(h, n);
+        float frac = Math.max(0F, Math.min(1F, (n.get() - n.getMin()) / Math.max(1e-6F, n.getMax() - n.getMin())));
+        ModernStyle.rounded(g, p.trackX(), mid - 2, p.trackW(), 4, 2, 0x306C96B0);
+        int fillW = Math.round(p.trackW() * frac);
+        if (fillW > 0) ModernStyle.rounded(g, p.trackX(), mid - 2, fillW, 4, 2, ModernStyle.BLUE);
+        int steps = Math.round((n.getMax() - n.getMin()) / n.getStep());
+        if (steps > 0 && steps <= 12) {
+            for (int k = 0; k <= steps; k++) {
+                int tx = p.trackX() + Math.round(p.trackW() * k / (float)steps);
+                ModernStyle.fill(g, tx, mid + 4, tx + 1, mid + 6, 0x406C96B0);
+            }
+        }
+        int knobX = p.trackX() + fillW;
+        ModernStyle.rounded(g, knobX - 5, mid - 5, 10, 10, 5, ModernStyle.BLUE);
+        ModernStyle.rounded(g, knobX - 4, mid - 4, 8, 8, 4, 0xFFFFFFFF);
+
+        boolean editing = this.interactions.isEditing(n);
+        String value = editing ? this.interactions.displayValue(n) : formatNumber(n);
+        ModernStyle.rounded(g, p.pillX(), mid - 8, p.pillW(), 16, 5, editing ? PILL_EDITING : PILL);
+        float valueW = ModernTypography.width(ModernTypography.Face.TEXT, value, VALUE_SCALE);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, value, p.pillX() + (p.pillW() - valueW) / 2F, mid - 4.6F, VALUE_SCALE,
+            editing ? ModernStyle.BLUE : ModernStyle.INK);
     }
 
-    private void drawValueText(GuiGraphicsExtractor g, int x, int y, String value, boolean editing) {
-        ModernTypography.draw(g, value, x, y, editing ? ModernStyle.BLUE : ModernStyle.INK, false);
+    /** A choice: side-by-side segments when they fit, else a field that opens a grid of every option. */
+    private void drawChoice(GuiGraphicsExtractor g, EnumSetting<?> choice, int cx, int controlW, int mid) {
+        if (segmented(choice, controlW)) {
+            List<? extends Enum<?>> options = choice.getOptions();
+            float segmentW = controlW / (float)options.size();
+            ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, PILL);
+            float at = animate(new Anim("segment", choice), choice.index());
+            ModernStyle.rounded(g, Math.round(cx + segmentW * at + 1.5F), mid - 7, Math.round(segmentW - 3), 14, 5, 0xFFFFFFFF);
+            for (int i = 0; i < options.size(); i++) {
+                String label = EnumSetting.label(options.get(i));
+                float labelW = ModernTypography.width(ModernTypography.Face.TEXT, label, VALUE_SCALE);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, label, cx + segmentW * i + (segmentW - labelW) / 2F, mid - 4.6F, VALUE_SCALE,
+                    i == choice.index() ? ModernStyle.BLUE : ModernStyle.INK_MUTED);
+            }
+            return;
+        }
+        boolean open = this.popover == choice;
+        ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, open ? PILL_EDITING : PILL);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(EnumSetting.label(choice.get()), controlW - 30),
+            cx + 8, mid - 4.6F, VALUE_SCALE, ModernStyle.INK);
+        ModernIcons.draw(g, open ? ModernIcons.Icon.CHEVRON_UP : ModernIcons.Icon.CHEVRON_DOWN, cx + controlW - 17, mid - 4.5F, 9, ModernStyle.INK_MUTED);
+    }
+
+    /** Where the open dropdown grid sits: under its row, or above it when there's no room below; null when none is open. */
+    private @org.jspecify.annotations.Nullable Pop popoverBounds() {
+        if (this.popover == null || this.view != View.DETAIL) return null;
+        Hit anchor = null;
+        for (Hit h : rows()) if (h.setting() == this.popover) anchor = h;
+        if (anchor == null) return null;
+        int cols = popoverColumns(anchor.w());
+        int cellW = (anchor.w() - POP_PAD * 2 - POP_GAP * (cols - 1)) / cols;
+        int h = popoverHeight(this.popover.getOptions().size(), anchor.w());
+        int top = visibleContentTop(), bottom = panelY() + targetPanelHeight() - FOOTER_H;
+        int y = anchor.y() + anchor.h() + 2;
+        if (y + h > bottom - 4) y = Math.max(top + 4, anchor.y() - 2 - h);
+        return new Pop(anchor.x(), y, anchor.w(), h, cols, cellW);
+    }
+
+    private static int popoverColumns(int width) {
+        return width >= 360 ? 3 : 2;
+    }
+
+    private static int popoverHeight(int count, int width) {
+        int rowCount = (count + popoverColumns(width) - 1) / popoverColumns(width);
+        return POP_PAD * 2 + rowCount * POP_CELL_H + (rowCount - 1) * POP_GAP;
+    }
+
+    private static int[] cell(Pop p, int index) {
+        return new int[]{p.x() + POP_PAD + (index % p.cols()) * (p.cellW() + POP_GAP), p.y() + POP_PAD + (index / p.cols()) * (POP_CELL_H + POP_GAP)};
+    }
+
+    private void drawPopover(GuiGraphicsExtractor g, int mx, int my) {
+        Pop p = popoverBounds();
+        if (p == null) return;
+        // The page steps back while a choice is being made.
+        ModernStyle.fill(g, panelX() + 4, visibleContentTop(), panelX() + panelWidth() - 4, panelY() + Math.round(this.panelHeight) - FOOTER_H, 0x2215303E);
+        ModernStyle.dropShadow(g, p.x(), p.y() + 3, p.w(), p.h(), 10, 0.9F);
+        ModernStyle.rounded(g, p.x(), p.y(), p.w(), p.h(), 10, 0xFAFFFFFF);
+        List<? extends Enum<?>> options = this.popover.getOptions();
+        for (int i = 0; i < options.size(); i++) {
+            int[] c = cell(p, i);
+            boolean chosen = i == this.popover.index();
+            boolean hovered = ModernStyle.inside(mx, my, c[0], c[1], p.cellW(), POP_CELL_H);
+            ModernStyle.rounded(g, c[0], c[1], p.cellW(), POP_CELL_H, 6, chosen ? 0x333D9DDC : hovered ? 0x1F3D9DDC : 0x0F243746);
+            if (chosen) ModernStyle.rounded(g, c[0] + 1, c[1] + 6, 2, POP_CELL_H - 12, 1, ModernStyle.BLUE);
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(EnumSetting.label(options.get(i)), p.cellW() - 16),
+                c[0] + 9, c[1] + 6.5F, 0.9F, chosen ? ModernStyle.BLUE : ModernStyle.INK);
+        }
     }
 
     private String formatNumber(NumberSetting n) {
@@ -660,15 +840,13 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     /**
-     * Test seam for {@code GuiScreenInteractionSmoke}: scrolls the detail view so its keybind row is
-     * actually within the clickable content strip (a module with enough settings can otherwise push it
-     * past {@link #targetPanelHeight()}), then returns that row's current on-screen bounds as
-     * {@code {x, y, w, h}}, or {@code null} outside the detail view.
+     * Test seam for {@code GuiScreenInteractionSmoke}: scrolls the detail view back to its top, where the keybind chip
+     * sits in the module's header, and returns the chip's on-screen bounds as {@code {x, y, w, h}}, or {@code null}
+     * outside the detail view.
      */
     public int[] scrollToKeybindRow() {
         if (this.view != View.DETAIL) return null;
-        int viewport = targetPanelHeight() - HEADER_H - FOOTER_H;
-        this.scroll = Math.max(0, this.contentHeight - viewport);
+        this.scroll = 0;
         for (Hit h : rows()) if ("keybind".equals(h.key())) return new int[]{h.x(), h.y(), h.w(), h.h()};
         return null;
     }
@@ -679,6 +857,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         if (this.interactions.mouseClickedBinding(e)) return true;
         placeMusic();
         if (this.music.mouseClicked(e.x(), e.y(), e.button())) return true;
+        if (this.popover != null) return handlePopoverClick(e);
         Hit search = headerHit();
         if (this.view != View.SEARCH && ModernStyle.inside(e.x(), e.y(), search.x(), search.y(), search.w(), search.h())) {
             openSearch();
@@ -721,13 +900,80 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private boolean handleDetailClick(Hit h, MouseButtonEvent e) {
-        if ("detail-toggle".equals(h.key())) { this.detailModule.toggle(); return true; }
         if ("keybind".equals(h.key())) { this.interactions.handleKeybindClick(this.detailModule, e.button()); return true; }
-        if (h.setting() != null) {
-            this.interactions.handleSettingClick(h.setting(), (int)e.x(), h.x(), h.x() + h.w());
+        if ("detail-toggle".equals(h.key())) { this.detailModule.toggle(); return true; }
+        Setting<?> s = h.setting();
+        if (s == null || e.button() != 0) return true;
+        int controlW = controlWidth(h.w()), cx = controlX(h);
+        double mx = e.x();
+        if (mx >= cx - 20 && mx < cx - 2 && !isDefault(s)) {
+            s.reset();
             return true;
         }
+        if (s instanceof BooleanSetting bool) {
+            bool.toggle();
+        } else if (s instanceof NumberSetting n) {
+            NumberParts p = numberParts(h, n);
+            if (mx >= p.pillX()) this.interactions.startEditing(n, formatNumber(n));
+            else if (mx >= p.trackX() - 6) this.interactions.handleSettingClick(n, (int)mx, p.trackX(), p.trackX() + p.trackW());
+        } else if (s instanceof EnumSetting<?> choice) {
+            if (!segmented(choice, controlW)) this.popover = choice;
+            else if (mx >= cx) choice.setIndex((int)((mx - cx) / (controlW / (float)choice.getOptions().size())));
+            else choice.cycle();
+        } else if (s instanceof ColorSetting color) {
+            int hexW = hexWidth(color), hexX = h.x() + h.w() - hexW;
+            if (mx >= hexX) {
+                this.interactions.handleSettingClick(color, (int)mx, hexX, hexX + hexW);
+            } else {
+                int i = (int)((mx - cx) / 19);
+                if (mx >= cx && i < swatchCount(controlW, hexW)) {
+                    color.set(color.isAlphaEnabled() ? (color.get() & 0xFF000000) | (SWATCHES[i] & 0xFFFFFF) : SWATCHES[i]);
+                }
+            }
+        } else {
+            this.interactions.handleSettingClick(s, (int)mx, cx, cx + controlW);
+        }
         return true;
+    }
+
+    /** A click while the dropdown grid is open: a cell picks that option; anywhere else just closes it. */
+    private boolean handlePopoverClick(MouseButtonEvent e) {
+        Pop p = popoverBounds();
+        EnumSetting<?> choice = this.popover;
+        this.popover = null;
+        if (p == null || choice == null || !ModernStyle.inside(e.x(), e.y(), p.x(), p.y(), p.w(), p.h())) return true;
+        for (int i = 0; i < choice.getOptions().size(); i++) {
+            int[] c = cell(p, i);
+            if (ModernStyle.inside(e.x(), e.y(), c[0], c[1], p.cellW(), POP_CELL_H)) {
+                choice.setIndex(i);
+                return true;
+            }
+        }
+        this.popover = choice;
+        return true;
+    }
+
+    /**
+     * The wheel over a setting's control steps it - a number by its step, a choice to the next or previous - and
+     * anywhere else scrolls the page. Returns whether it stepped something.
+     */
+    private boolean stepControlUnder(double x, double y, double sy) {
+        int dir = sy > 0 ? 1 : sy < 0 ? -1 : 0;
+        if (this.view != View.DETAIL || dir == 0 || y < visibleContentTop() || y >= panelY() + targetPanelHeight() - FOOTER_H) return false;
+        for (Hit h : rows()) {
+            if (h.setting() == null || !ModernStyle.inside(x, y, h.x(), h.y(), h.w(), h.h())) continue;
+            if (x < controlX(h) - 6) return false;
+            if (h.setting() instanceof NumberSetting n) {
+                n.set(n.getMin() + (Math.round((n.get() - n.getMin()) / n.getStep()) + dir) * n.getStep());
+                return true;
+            }
+            if (h.setting() instanceof EnumSetting<?> choice) {
+                choice.step(-dir);
+                return true;
+            }
+            return false;
+        }
+        return false;
     }
 
     private void openDetail(Module module) {
@@ -758,11 +1004,13 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     private void markContentChanged() {
         this.contentChangeStart = System.nanoTime();
+        this.popover = null;
     }
 
     @Override public boolean mouseScrolled(double x, double y, double sx, double sy) {
         placeMusic();
         if (this.music.mouseScrolled(x, y, sy)) return true;
+        if (this.popover != null || stepControlUnder(x, y, sy)) return true;
         int targetHeight = targetPanelHeight();
         int viewport = targetHeight - HEADER_H - subheaderHeight() - FOOTER_H;
         int maxScroll = Math.max(0, this.contentHeight - viewport);
@@ -802,6 +1050,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             this.scroll = 0;
             return true;
         }
+        if (e.isEscape() && this.popover != null) { this.popover = null; return true; }
         if (e.isEscape() && this.view != View.CATEGORY) { closeSearchOrDetail(); return true; }
         if (e.key() == GLFW.GLFW_KEY_SLASH && this.view == View.CATEGORY) { openSearch(); return true; }
         return super.keyPressed(e);
@@ -819,12 +1068,19 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
      * Debug-only: jumps to a named view so {@code -Dsigma.debug.screenshotAfterFrames} can capture a view
      * other than whatever {@code GuiScreenInteractionSmoke} happens to leave the screen on. Read by
      * {@link com.mentalfrostbyte.Client#openDebugGuiIfRequested} when {@code -Dsigma.debug.modernPreviewView}
-     * is set to {@code DETAIL}, {@code SEARCH}, {@code LANGUAGE}, {@code MUSIC} (pulls the music window out) or {@code INGAME} (closes the screen, for the in-game HUD);
+     * is set to {@code DETAIL} (or {@code DETAIL:<module>}, or {@code DETAIL:<module>:<setting>} to open a choice's
+     * dropdown too), {@code SEARCH}, {@code LANGUAGE}, {@code MUSIC} (pulls the music window out) or {@code INGAME} (closes the screen, for the in-game HUD);
      * any other value is ignored.
      */
     public void debugPreview(String view) {
-        if ("DETAIL".equalsIgnoreCase(view)) {
-            this.modules.all().stream().findFirst().ifPresent(this::openDetail);
+        String[] parts = view.split(":");
+        if ("DETAIL".equalsIgnoreCase(parts[0])) {
+            // DETAIL:<module> opens that module's page; DETAIL:<module>:<setting> also opens that choice's dropdown.
+            Module module = parts.length > 1 ? this.modules.find(parts[1]).orElse(null) : this.modules.all().stream().findFirst().orElse(null);
+            if (module == null) return;
+            this.activeCategory = module.getCategory();
+            openDetail(module);
+            if (parts.length > 2 && module.setting(parts[2]).orElse(null) instanceof EnumSetting<?> choice) this.popover = choice;
         } else if ("SEARCH".equalsIgnoreCase(view)) {
             openSearch();
         } else if ("LANGUAGE".equalsIgnoreCase(view)) {

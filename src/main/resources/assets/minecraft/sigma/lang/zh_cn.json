@@ -24,10 +24,12 @@
   "clickgui.empty.category": "No modules in this category",
   "clickgui.detail.keybind": "Keybind",
   "clickgui.detail.binding": "Press a key… (Esc to cancel)",
+  "clickgui.detail.bind": "Bind %s · %s",
+  "clickgui.detail.unbound": "Not bound · click to bind",
   "clickgui.language.heading": "CLIENT LANGUAGE",
   "clickgui.language.note": "Text not translated yet stays in English",
   "clickgui.hint.category": "Left: toggle   Right / ›: settings",
-  "clickgui.hint.detail": "Esc: back · changes apply instantly",
+  "clickgui.hint.detail": "Esc: back · scroll over a control to step it",
   "clickgui.hint.search": "Type to filter every category",
   "clickgui.hint.language": "Click a language to use it",
   "clickgui.hints": "/  Search      Esc  Back      R-Shift  Close"

@@ -10,7 +10,6 @@ import com.mentalfrostbyte.jello.setting.Setting;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.ToIntFunction;
 import org.jspecify.annotations.Nullable;
 
@@ -139,23 +138,11 @@ public class ModuleArrayList extends Module {
 
         for (Setting<?> setting : module.settings()) {
             if (setting instanceof EnumSetting<?> choice) {
-                return words(choice.get().name());
+                return EnumSetting.label(choice.get());
             }
         }
 
         return null;
-    }
-
-    /** {@code NIGHT_VISION} as "Night Vision". */
-    static String words(final String constant) {
-        StringBuilder out = new StringBuilder(constant.length());
-        for (String word : constant.split("_")) {
-            if (word.isEmpty()) continue;
-            if (!out.isEmpty()) out.append(' ');
-            out.append(word.charAt(0)).append(word.substring(1).toLowerCase(Locale.ROOT));
-        }
-
-        return out.toString();
     }
 
     public Corner getPosition() {

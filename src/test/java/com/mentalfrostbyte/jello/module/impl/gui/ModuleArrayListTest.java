@@ -91,8 +91,6 @@ class ModuleArrayListTest {
         ((BooleanSetting) list.setting("Suffix").orElseThrow()).set(true);
         assertEquals("Legit Hop", list.suffixOf(new Probe("Speed", ModuleCategory.MOVEMENT, true)));
         assertNull(list.suffixOf(new Probe("NoHurtCam", ModuleCategory.RENDER, false)), "nothing to name");
-        assertEquals("Night Vision", ModuleArrayList.words("NIGHT_VISION"));
-        assertEquals("Sigma", ModuleArrayList.words("SIGMA"));
     }
 
     @Test

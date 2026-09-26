@@ -158,6 +158,15 @@ public final class ClickGuiInteractions {
         }
     }
 
+    /**
+     * Starts typing a number's value, beginning from {@code shown} (what the control displays). Enter sets it -
+     * clamped to the setting's range like any value - and Esc, or text that isn't a number, leaves it as it was.
+     */
+    public void startEditing(final NumberSetting number, final String shown) {
+        this.editingSetting = number;
+        this.editingBuffer = shown;
+    }
+
     public boolean isEditing(final Setting<?> setting) {
         return this.editingSetting == setting;
     }
@@ -207,9 +216,20 @@ public final class ClickGuiInteractions {
             text.set(this.editingBuffer);
         } else if (setting instanceof ColorSetting color) {
             this.parseColor(this.editingBuffer).ifPresent(color::set);
+        } else if (setting instanceof NumberSetting number) {
+            parseNumber(this.editingBuffer).ifPresent(number::set);
         }
 
         this.editingSetting = null;
+    }
+
+    private static Optional<Float> parseNumber(final String input) {
+        try {
+            float value = Float.parseFloat(input.trim().replace(',', '.'));
+            return Float.isFinite(value) ? Optional.of(value) : Optional.empty();
+        } catch (NumberFormatException ignored) {
+            return Optional.empty();
+        }
     }
 
     private Optional<Integer> parseColor(final String input) {
