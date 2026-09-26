@@ -1,8 +1,12 @@
 package com.mentalfrostbyte.jello.module;
 
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
+import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
+import com.mentalfrostbyte.jello.module.impl.movement.Speed;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
@@ -34,13 +38,18 @@ public final class ModuleManager {
 
     /** Registers every module the client ships with. */
     public void registerAll() {
+        ModuleAntiCheat antiCheat = new ModuleAntiCheat();
+        this.register(antiCheat);
         this.register(new ModuleAntiExploit());
+        this.register(new ModuleSelfDetection());
         this.register(new CameraNoClip());
         this.register(new CustomTitle());
         this.register(new Fullbright());
         this.register(new LowFire());
         this.register(new ModernChat());
         this.register(new NoHurtCam());
+        this.register(new Speed());
+        this.register(new SuspectList(antiCheat));
         this.register(new Weather());
     }
 

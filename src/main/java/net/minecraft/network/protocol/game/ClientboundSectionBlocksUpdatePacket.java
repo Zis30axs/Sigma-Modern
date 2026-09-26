@@ -75,6 +75,11 @@ public class ClientboundSectionBlocksUpdatePacket implements Packet<ClientGamePa
         listener.handleChunkBlocksUpdate(this);
     }
 
+    // Sigma hook: AntiCheat only needs to know which section changed, not every block in it.
+    public SectionPos sectionPos() {
+        return this.sectionPos;
+    }
+
     public void runUpdates(final BiConsumer<BlockPos, BlockState> updateFunction) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 

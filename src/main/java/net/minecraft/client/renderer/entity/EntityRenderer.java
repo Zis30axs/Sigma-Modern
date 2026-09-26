@@ -162,7 +162,17 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
     }
 
     protected @Nullable Component getNameTag(final T entity) {
-        return entity.getDisplayName();
+        Component name = entity.getDisplayName();
+        // Sigma hook: AntiCheat adds a violation level after the name of a player it has flagged.
+        if (name != null && entity instanceof net.minecraft.client.player.RemotePlayer) {
+            com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat antiCheat =
+                com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat.class);
+            if (antiCheat != null) {
+                return antiCheat.tagged(entity.getUUID(), name);
+            }
+        }
+
+        return name;
     }
 
     protected float getShadowRadius(final S state) {

@@ -1,7 +1,9 @@
 package net.minecraft.client.multiplayer;
 
 import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
 import com.viaversion.viafabricplus.features.block.connections.BlockConnectionsEmulation1_12_2;
 import com.viaversion.viafabricplus.injection.access.core.IConnection;
 import com.viaversion.viafabricplus.injection.access.networking.downloading_terrain.ILevelLoadingScreen;
@@ -692,6 +694,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         Entity entity = this.level.getEntity(packet.id());
         if (entity != null) {
             entity.lerpMotion(packet.movement());
+            // Sigma hook: the server only announces another player's velocity when something pushed them, so
+            // AntiCheat stops judging their movement for a while.
+            ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+            if (antiCheat != null) {
+                antiCheat.observer().onImpulse(entity);
+            }
         }
     }
 
@@ -746,6 +754,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 }
 
                 entity.setOnGround(packet.onGround());
+                // Sigma hook: a full position report, which the server sends whenever the ground flag flips.
+                ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+                if (antiCheat != null) {
+                    antiCheat.observer().onPosition(entity, pos, packet.onGround());
+                }
             }
         }
     }
@@ -776,6 +789,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
             boolean interpolate = this.level.isTickingEntity(entity) || !entity.isLocalInstanceAuthoritative() || hasRelative;
             boolean wasInterpolated = setValuesFromPositionPacket(packet.change(), packet.relatives(), entity, interpolate);
             entity.setOnGround(packet.onGround());
+            // Sigma hook: a teleport is a jump in position no movement rule explains.
+            ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+            if (antiCheat != null) {
+                antiCheat.observer().onTeleport(entity);
+            }
+
             if (!wasInterpolated && entity.hasIndirectPassenger(this.minecraft.player)) {
                 entity.positionRider(this.minecraft.player);
                 this.minecraft.player.setOldPosAndRot();
@@ -843,6 +862,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                     } else {
                         entity.moveOrInterpolateTo(pos);
                     }
+
+                    // Sigma hook: the decoded position, not entity.position(), which only catches up as it interpolates.
+                    ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+                    if (antiCheat != null) {
+                        antiCheat.observer().onPosition(entity, pos, packet.isOnGround());
+                    }
                 } else if (packet.hasRotation()) {
                     entity.moveOrInterpolateTo(packet.getYRot(), packet.getXRot());
                 }
@@ -883,6 +908,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
                 }
 
                 this.level.removeEntity(entityId, Entity.RemovalReason.DISCARDED);
+                // Sigma hook: a removed entity is no longer watched.
+                ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+                if (antiCheat != null) {
+                    antiCheat.observer().onRemoved(entityId);
+                }
+
                 this.debugSubscriber.dropEntity(entity);
             }
         });
@@ -974,6 +1005,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleChunkBlocksUpdate(final ClientboundSectionBlocksUpdatePacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         packet.runUpdates((pos, state) -> this.level.setServerVerifiedBlockState(pos, state, 19));
+        // Sigma hook: players near changed blocks stop being judged for a moment - what the client sees under
+        // them is not what they moved through.
+        ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+        if (antiCheat != null) {
+            antiCheat.observer().onSectionChanged(packet.sectionPos());
+        }
     }
 
     @Override
@@ -1071,6 +1108,11 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     public void handleBlockUpdate(final ClientboundBlockUpdatePacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
         this.level.setServerVerifiedBlockState(packet.getPos(), packet.getBlockState(), 19);
+        // Sigma hook: see handleChunkBlocksUpdate.
+        ModuleAntiCheat antiCheat = Modules.enabled(ModuleAntiCheat.class);
+        if (antiCheat != null) {
+            antiCheat.observer().onBlockChanged(packet.getPos());
+        }
         // MODIFIED for porting: was VFP block/connections MixinClientChunkCache#updateBlockConnections
         // (@Inject handleBlockUpdate TAIL) - re-connects the neighbours of the changed block.
         BlockConnectionsEmulation1_12_2.updateChunkNeighborConnections(this.level, packet.getPos());
@@ -2897,6 +2939,12 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     }
 
     public void sendChat(final String content) {
+        // Sigma hook: SelfDetection answers its own commands (".grim alerts") here, before anything is signed or
+        // sent; such a line never reaches the server.
+        ModuleSelfDetection selfDetection = Modules.enabled(ModuleSelfDetection.class);
+        if (selfDetection != null && selfDetection.interceptChat(content)) {
+            return;
+        }
         Instant timeStamp = Instant.now();
         long salt = Crypt.SaltSupplier.getLong();
         LastSeenMessagesTracker.Update lastSeenUpdate = this.lastSeenMessages.generateAndApplyUpdate();

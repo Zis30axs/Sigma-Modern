@@ -19,6 +19,13 @@ public class PacketDecoder<T extends PacketListener> extends ByteToMessageDecode
         this.protocolInfo = protocolInfo;
     }
 
+    // Sigma hook: SelfDetection injects its pings right behind this decoder and must know which phase the
+    // decoder is in - a ping is a configuration/play packet, and delivering one to the login listener would
+    // break the connection.
+    public ConnectionProtocol protocol() {
+        return this.protocolInfo.id();
+    }
+
     @Override
     protected void decode(final ChannelHandlerContext ctx, final ByteBuf input, final List<Object> out) throws Exception {
         int readableBytes = input.readableBytes();

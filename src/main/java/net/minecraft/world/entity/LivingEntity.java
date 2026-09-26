@@ -136,6 +136,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 // Sigma: jump event.
 import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.EventState;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -977,6 +978,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                 }
             }
         }
+    }
+
+    // Sigma hook: AntiCheat cannot see another player's potion effects - the server only tells the player who
+    // has them - but the effect particles are synced entity data, so their presence says that some effect is
+    // active. A real accessor rather than reflection, as the other private synced fields get.
+    public boolean sigmaShowsEffectParticles() {
+        return !this.entityData.get(DATA_EFFECT_PARTICLES).isEmpty();
     }
 
     private void updateDirtyEffects() {
@@ -2521,8 +2529,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         float yRot = this.getYRot();
         // Sigma hook: the local player's jump, before the impulse lands. The power sets the height and
         // the yaw steers the sprint boost vanilla adds on top; cancelling suppresses the jump.
+        EventJump jump = null;
         if (this instanceof net.minecraft.client.player.LocalPlayer) {
-            EventJump jump = EventBus.call(new EventJump(jumpPower, yRot));
+            jump = EventBus.call(new EventJump(jumpPower, yRot));
             if (jump.isCancelled()) {
                 return;
             }
@@ -2540,6 +2549,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
             }
 
             this.needsSync = true;
+            // Sigma hook: the same event again once the impulse is in the velocity, for modules that shape the
+            // jump itself (a speed module sets the horizontal velocity here).
+            if (jump != null) {
+                jump.setState(EventState.POST);
+                EventBus.call(jump);
+            }
         }
     }
 

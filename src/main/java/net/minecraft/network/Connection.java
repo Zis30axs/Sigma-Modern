@@ -70,6 +70,10 @@ import net.minecraft.network.protocol.PacketFlow;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+// Sigma: SelfDetection.
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
+import com.mentalfrostbyte.jello.selfcheck.host.SelfCheckPipeline;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.network.protocol.handshake.ClientIntent;
 import net.minecraft.network.protocol.handshake.ClientIntentionPacket;
@@ -137,6 +141,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
         if (evt.getClass().getName().equals("me.steinborn.krypton.mod.shared.misc.KryptonPipelineEvent")
             && "COMPRESSION_ENABLED".equals(evt.toString())) {
             ViaChannelInitializer.reorderPipeline(ctx.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
+            SelfCheckPipeline.reanchor(ctx.pipeline()); // Sigma hook: SelfDetection's taps stay on the wire side of Via
             ViaFabricPlusImpl.INSTANCE
                 .getLogger()
                 .warn(
@@ -565,6 +570,9 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
             vfpEventLoopGroupHolder = newEventLoopGroupHolder;
         }
 
+        // Sigma hook: SelfDetection only watches the connection ConnectScreen opens to play on, not server-list pings.
+        final boolean sigma$playConnection = eventLoopGroupHolder.viaFabricPlus$isConnecting();
+        final ProtocolVersion sigma$targetVersion = targetVersion;
         final Bootstrap vfpBootstrap = new Bootstrap().group(vfpEventLoopGroupHolder.eventLoopGroup()).handler(new ChannelInitializer<Channel>() {
             @Override
             protected void initChannel(final Channel channel) {
@@ -578,6 +586,13 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                 connection.configurePacketHandler(pipeline);
                 // MODIFIED for porting: was VFP MixinConnection_1#injectViaIntoPipeline (@Inject RETURN)
                 ProtocolTranslator.injectViaPipeline(connection, channel);
+                // Sigma hook: SelfDetection puts its taps in beside the Via handlers that were just added.
+                if (sigma$playConnection) {
+                    ModuleSelfDetection selfDetection = Modules.enabled(ModuleSelfDetection.class);
+                    if (selfDetection != null) {
+                        selfDetection.attach(channel, sigma$targetVersion, address);
+                    }
+                }
             }
         });
         // MODIFIED for porting: was VFP bedrock MixinConnection#useRakNetChannelFactory (@WrapOperation on
@@ -814,6 +829,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
 
         // MODIFIED for porting: compression enabled and handlers placed, keep Via handlers ordered (was VFP MixinConnection#reorderCompression)
         ViaChannelInitializer.reorderPipeline(this.channel.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
+        SelfCheckPipeline.reanchor(this.channel.pipeline()); // Sigma hook: SelfDetection's taps stay on the wire side of Via
     }
 
     public void handleDisconnection() {

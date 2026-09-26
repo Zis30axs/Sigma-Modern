@@ -2,6 +2,10 @@ package net.minecraft.client.multiplayer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
+// Sigma: SelfDetection's own pings and pongs.
+import com.mentalfrostbyte.jello.selfcheck.host.SelfCheck;
+import com.mentalfrostbyte.jello.selfcheck.host.SelfCheckPing;
+import com.mentalfrostbyte.jello.selfcheck.host.SelfCheckPong;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
 import java.net.MalformedURLException;
@@ -188,15 +192,20 @@ public abstract class ClientCommonPacketListenerImpl implements ClientCommonPack
         // player cancels the answer instead. 1.16 vanilla likewise answered nothing without a container.
         if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
             if (this.minecraft.player == null) {
+                SelfCheck.refused(packet); // Sigma hook: SelfDetection learns its ping will never be answered
                 return;
             }
 
             final short inventoryId = (short)(packet.getId() >> 16 & 0xFF);
             if (inventoryId != 0 && inventoryId != this.minecraft.player.containerMenu.containerId) {
+                SelfCheck.refused(packet); // Sigma hook: as above
                 return;
             }
         }
-        this.send(new ServerboundPongPacket(packet.getId()));
+        // Sigma hook: SelfDetection - the answer to a ping it put into the stream is a SelfCheckPong. It goes
+        // through send() like any pong, so modules treat it the same, and is taken out of the pipeline before the
+        // encoder: the server never sent that ping and must never see the answer.
+        this.send(packet instanceof SelfCheckPing ? new SelfCheckPong(packet.getId()) : new ServerboundPongPacket(packet.getId()));
     }
 
     @Override
