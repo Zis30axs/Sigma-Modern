@@ -12,14 +12,32 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
  * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
  * ({@link ModernSuspectDrawer}) while it is left out.
  *
- * <p>These are pure overlay chrome: they never write to module/setting state, and only draw while the real gameplay
- * HUD would (no screen open).</p>
+ * <p>These are pure overlay chrome: they never write to module/setting state. Gameplay decorations draw with no
+ * screen open; {@link #renderBrand} is a separate resident layer above in-game screens.</p>
  */
 public final class ModernHud {
+    /** First free row below the resident wordmark, including its outer spacing. */
+    static final int BRAND_BOTTOM = 54;
+
     private ModernHud() {}
 
     public static boolean isActive() {
         return Client.getInstance().getClientModeManager().get() == ClientMode.SIGMA_MODERN;
+    }
+
+    /** Resident branding, extracted after screens so it survives menus and the F1 HUD toggle. */
+    public static void renderBrand(GuiGraphicsExtractor g) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null || !isActive()) return;
+
+        int x = 10, y = 10, h = 36;
+        float scale = 1.8F;
+        int w = Math.max(82, (int)Math.ceil(ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, scale)) + 24);
+        g.nextStratum();
+        ModernStyle.darkGlass(g, x, y, w, h, 8, 0xC01C2A38);
+        ModernStyle.rounded(g, x + 1, y + 9, 2, h - 18, 1, ModernStyle.GLOW);
+        ModernTypography.draw(g, ModernTypography.Face.DISPLAY, Client.NAME, x + 12F, y + 2F, scale, ModernStyle.TEXT);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, "M O D E R N", x + 13F, y + 23F, 0.65F, ModernStyle.ACCENT);
     }
 
     public static void render(GuiGraphicsExtractor g) {

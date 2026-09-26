@@ -4,6 +4,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.effects.SpearAnimations;
 import net.minecraft.client.player.AbstractClientPlayer;
@@ -19,6 +21,7 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.HumanoidArm;
@@ -487,6 +490,13 @@ public class ItemInHandRenderer implements net.irisshaders.iris.mixinterface.Ite
             boolean isMainHand = hand == InteractionHand.MAIN_HAND;
             HumanoidArm arm = isMainHand ? player.getMainArm() : player.getMainArm().getOpposite();
             poseStack.pushPose();
+            // MODIFIED for porting: discard a sword block pose when the main-hand item changes.
+            if (isMainHand && !itemStack.is(ItemTags.SWORDS)) {
+                BlockAnimation blockAnimation = Modules.enabled(BlockAnimation.class);
+                if (blockAnimation != null) {
+                    blockAnimation.reset();
+                }
+            }
             if (itemStack.isEmpty()) {
                 if (isMainHand && !player.isInvisible()) {
                     this.renderPlayerArm(poseStack, submitNodeCollector, lightCoords, inverseArmHeight, attack, arm);
@@ -559,10 +569,15 @@ public class ItemInHandRenderer implements net.irisshaders.iris.mixinterface.Ite
                             break;
                         case BLOCK:
                             if (!(itemStack.getItem() instanceof ShieldItem)) {
-                                poseStack.translate(invert * -0.14142136F, 0.08F, 0.14142136F);
-                                poseStack.mulPose(Axis.XP.rotationDegrees(-102.25F));
-                                poseStack.mulPose(Axis.YP.rotationDegrees(invert * 13.365F));
-                                poseStack.mulPose(Axis.ZP.rotationDegrees(invert * 78.05F));
+                                // MODIFIED for porting: Sigma BlockAnimation follows VFP's real sword-use state.
+                                BlockAnimation blockAnimation = isMainHand && itemStack.is(ItemTags.SWORDS)
+                                    ? Modules.enabled(BlockAnimation.class) : null;
+                                if (blockAnimation == null || !blockAnimation.apply(poseStack, player, arm, attack, true)) {
+                                    poseStack.translate(invert * -0.14142136F, 0.08F, 0.14142136F);
+                                    poseStack.mulPose(Axis.XP.rotationDegrees(-102.25F));
+                                    poseStack.mulPose(Axis.YP.rotationDegrees(invert * 13.365F));
+                                    poseStack.mulPose(Axis.ZP.rotationDegrees(invert * 78.05F));
+                                }
                             }
                             break;
                         case BOW: {
@@ -631,15 +646,25 @@ public class ItemInHandRenderer implements net.irisshaders.iris.mixinterface.Ite
                     poseStack.mulPose(Axis.ZP.rotationDegrees(invert * -85.0F));
                 } else {
                     this.applyItemArmTransform(poseStack, arm, inverseArmHeight);
-                    switch (itemStack.getSwingAnimation().type()) {
-                        case NONE:
-                        default:
-                            break;
-                        case WHACK:
-                            this.swingArm(attack, poseStack, invert, arm);
-                            break;
-                        case STAB:
-                            SpearAnimations.firstPersonAttack(attack, poseStack, invert, arm);
+                    // MODIFIED for porting: Sigma BlockAnimation eases out after VFP's sword-use state ends.
+                    BlockAnimation blockAnimation = Modules.enabled(BlockAnimation.class);
+                    boolean animatedBlock = false;
+                    if (blockAnimation != null && isMainHand) {
+                        if (itemStack.is(ItemTags.SWORDS)) {
+                            animatedBlock = blockAnimation.apply(poseStack, player, arm, attack, false);
+                        }
+                    }
+                    if (!animatedBlock) {
+                        switch (itemStack.getSwingAnimation().type()) {
+                            case NONE:
+                            default:
+                                break;
+                            case WHACK:
+                                this.swingArm(attack, poseStack, invert, arm);
+                                break;
+                            case STAB:
+                                SpearAnimations.firstPersonAttack(attack, poseStack, invert, arm);
+                        }
                     }
                 }
 

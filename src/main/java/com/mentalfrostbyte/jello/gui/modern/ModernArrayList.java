@@ -93,8 +93,8 @@ final class ModernArrayList {
             else leaving.add(entry);
         }
 
-        // Top-left, the list hangs under the TabGUI while that is showing.
-        int top = list.getPosition() == Corner.TOP_LEFT ? Math.max(MARGIN, ModernTabGui.bottom() + 6) : MARGIN;
+        // Top-left, reserve the resident brand and the TabGUI while that is showing.
+        int top = list.getPosition() == Corner.TOP_LEFT ? Math.max(ModernHud.BRAND_BOTTOM, ModernTabGui.bottom() + 6) : MARGIN;
         for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH, top);
         for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH, top);
     }

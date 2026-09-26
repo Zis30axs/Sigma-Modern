@@ -46,7 +46,7 @@ final class ModernTabGui {
         TabGui tab = Modules.enabled(TabGui.class);
         if (tab == null || !visible()) return 0;
         int rows = tab.categories().size();
-        return rows == 0 ? 0 : MARGIN + height(rows);
+        return rows == 0 ? 0 : ModernHud.BRAND_BOTTOM + height(rows);
     }
 
     private static boolean visible() {
@@ -72,7 +72,7 @@ final class ModernTabGui {
         int catW = 0;
         for (ModuleCategory category : categories) catW = Math.max(catW, ModernTypography.width(category.getDisplayName()));
         catW += PAD_X * 2 + DOT + 8;
-        int x = MARGIN, y = MARGIN;
+        int x = MARGIN, y = ModernHud.BRAND_BOTTOM;
         panel(g, tab, x, y, catW, height(categories.size()));
         float targetY = y + PAD_Y + selected * ROW_H;
         categoryY = snap || categoryY < 0F ? targetY : ModernStyle.smooth(categoryY, targetY, dt, 18F);

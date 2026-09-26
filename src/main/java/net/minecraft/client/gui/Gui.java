@@ -217,6 +217,11 @@ public class Gui {
             this.renderActiveTextDebug();
         }
 
+        // MODIFIED for porting: resident Modern branding stays above in-game screens, even with F1.
+        if (shouldRenderLevel && resourcesLoaded && this.overlay == null) {
+            com.mentalfrostbyte.jello.gui.modern.ModernHud.renderBrand(graphics);
+        }
+
         // MODIFIED for porting: drives -Dsigma.debug.screenshotAfterFrames; a no-op unless that debug
         // countdown is pending.
         com.mentalfrostbyte.Client.getInstance().onGuiFrameRendered();

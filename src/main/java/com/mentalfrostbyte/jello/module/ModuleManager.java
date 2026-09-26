@@ -9,6 +9,7 @@ import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
 import com.mentalfrostbyte.jello.module.impl.movement.Speed;
+import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
@@ -45,6 +46,7 @@ public final class ModuleManager {
         this.register(new ModuleAntiExploit());
         this.register(new ModuleArrayList());
         this.register(new ModuleSelfDetection());
+        this.register(new BlockAnimation());
         this.register(new CameraNoClip());
         this.register(new CustomTitle());
         this.register(new Fullbright());
