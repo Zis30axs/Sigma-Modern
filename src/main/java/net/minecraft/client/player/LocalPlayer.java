@@ -390,7 +390,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 ? this.positionReminder - 1
                 : this.positionReminder;
             boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || positionReminderForCheck >= 20;
-            boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0;
+            boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0 || motion.isRotationForced();
             if (move && rot) {
                 this.connection
                     .send(new ServerboundMovePlayerPacket.PosRot(x, y, z, yRot, xRot, onGround, this.horizontalCollision));
@@ -449,6 +449,16 @@ public class LocalPlayer extends AbstractClientPlayer
             this.connection.send(new ServerboundPlayerCommandPacket(this, action));
             this.wasSprinting = isSprinting;
         }
+    }
+
+    // Sigma hook: the sprint state the server was last told about. A module that sends its own sprint commands
+    // (SuperKnockback) records here what it left the server believing, so the next tick neither repeats nor undoes it.
+    public boolean wasSprinting() {
+        return this.wasSprinting;
+    }
+
+    public void setWasSprinting(final boolean wasSprinting) {
+        this.wasSprinting = wasSprinting;
     }
 
     public boolean drop(final boolean all) {

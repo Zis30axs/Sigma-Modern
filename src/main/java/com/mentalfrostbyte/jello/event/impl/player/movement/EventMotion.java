@@ -11,6 +11,10 @@ import com.mentalfrostbyte.jello.event.EventState;
  * leaves behind is what gets sent, and what the client remembers as last reported. Cancelling sends
  * no movement packet this tick at all. {@link EventState#POST} is fired with the same instance after
  * the packet has gone out, so a listener can restore state it spoofed.</p>
+ *
+ * <p>The client reports its rotation only when it differs from the one it remembers reporting. That record misses the
+ * rotation a teleport confirmation carries, so a listener that knows the server holds a different rotation - one that
+ * reports its own - can {@link #forceRotation() force} the report.</p>
  */
 public class EventMotion extends CancellableEvent {
 
@@ -20,6 +24,7 @@ public class EventMotion extends CancellableEvent {
     private float yaw;
     private float pitch;
     private boolean onGround;
+    private boolean forceRotation;
 
     public EventMotion(final double x, final double y, final double z,
                        final float yaw, final float pitch, final boolean onGround) {
@@ -77,5 +82,14 @@ public class EventMotion extends CancellableEvent {
 
     public void setOnGround(final boolean onGround) {
         this.onGround = onGround;
+    }
+
+    /** Reports the rotation this tick even if it matches the one the client remembers reporting. */
+    public void forceRotation() {
+        this.forceRotation = true;
+    }
+
+    public boolean isRotationForced() {
+        return this.forceRotation;
     }
 }

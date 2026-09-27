@@ -151,6 +151,7 @@ import net.minecraft.world.phys.Vec3;
 // Sigma: movement event.
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMove;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventStrafe;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
@@ -2135,7 +2136,14 @@ public abstract class Entity
     }
 
     public void moveRelative(final float speed, final Vec3 input) {
-        Vec3 delta = getInputVector(input, speed, this.getYRot());
+        // Sigma hook: the yaw the local player's keys are turned by, so a module that reports another facing to the
+        // server (a silent rotation) can have the player walk the way the server thinks they face.
+        float yRot = this.getYRot();
+        if (this instanceof net.minecraft.client.player.LocalPlayer) {
+            yRot = EventBus.call(new EventStrafe(yRot)).getYaw();
+        }
+
+        Vec3 delta = getInputVector(input, speed, yRot);
         this.setDeltaMovement(this.getDeltaMovement().add(delta));
     }
 

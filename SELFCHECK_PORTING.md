@@ -132,6 +132,14 @@ Phase 0 发现、要带进实现的事项：
 Grim 为传送包包的事务只能在事后当场补上，时机全错；补发的一大批移动包在 Timer 看来就是加速。结果头一秒有 117 次误报，之后 Grim 卡死不再预测。
 现在的做法是：就绪前服务器的包连客户端也不给，就绪后按原顺序"现场"放行；引擎并行启动；超过 15 s 就放弃并放行。实测扣住 3 个包、等 3 s。
 
+**登录阶段例外**（2026-09-27，连本地离线服时发现）：
+- 登录阶段的包照常交给客户端，只给引擎存一份拷贝，就绪后按原顺序补上。
+- 原因是登录会改连接自己的管线。服务器发出"开启压缩"后，紧接着就发压缩过的包，不等客户端回应。
+- 分流点在解压器后面。在这里扣住"开启压缩"，客户端就装不上解压器，后面的包以压缩形态被扣下；放行时它们也不会再经过解压器，于是解码失败：`login_disconnect ... found 41 bytes extra`，连接断开。
+- loyisa 是正版服，加密握手比 Grim 启动慢，所以一直没暴露。本地离线服登录只要几毫秒，一连就出错。
+- 登录阶段没有移动、也没有事务，补给引擎和现场看到是等价的。判断依据是客户端解码器当前所处的阶段（`PacketDecoder.protocol()`）。一旦扣住过一个包，后面的就全部扣住，保证顺序不乱。
+- 回归测试：`SelfCheckSessionTest.theLoginGoesStraightThroughAndTheEnginesSeeItOnceReady`。在修复前的代码上跑，这条测试会失败。
+
 ### 回放
 - 录制格式 2：录制时宿主在**每个服务器包后面**注入一个标记 ping，它的应答位置就是客户端处理完这个包的准确时刻。
   回放时，引擎放在第 i 个包前面的事务按第 i−1 个标记的应答位置应答，放在后面的按第 i 个标记的位置应答，精确到单个包。
@@ -157,6 +165,212 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   这是 VFP 的 1.8 模拟与真 1.8 之间的差异；只要连 Grim 服就会有这批误报，可以在 VFP 这一侧修（另开任务）。
 - 服务器报的 TransactionOrder 1 次本地没有复现。本地事务几乎零延迟，这类由网络时序导致的检测不会一模一样。
 
+## 测试用的战斗与发包模块（移植自 LiquidBounce，GPL-3.0）
+
+来源：LiquidBounce `nextgen` @ `f37f07f`（2026-09-26）。和 `Speed` 一样，每个模块都挑了落在判定线两侧的模式，用来测 SelfDetection 能抓到什么、会不会冤枉合法操作。
+
+| 模块 | 模式 | 做什么 | 预期 |
+|---|---|---|---|
+| `Criticals`（Combat） | `Jump` | 敌人在攻击范围内时替玩家起跳，下落时出手 | 合法 |
+| | `Packet` | 攻击前多发几个移动包，谎称跳起了一点。偏移表是上游的 7 组：Vanilla、NoCheatPlus、Falling、Low、Down、Grim、BlocksMC | 违规 |
+| | `NoGround` | 所有移动包都说"没着地" | 违规 |
+| `Velocity`（Combat） | `Modify` | 按比例缩放击退；默认横竖都是 0，直接丢掉击退包 | 违规 |
+| | `JumpReset` | 疾跑中挨打，下一 tick 起跳（手动也能做到） | 合法 |
+| `SuperKnockback`（Combat） | Packet | 攻击前连发 停止/开始/停止/开始 疾跑 | 违规 |
+| `NoFall`（Player） | `SpoofGround`、`Packet` | 摔落超过 3 格后谎称着地：前者改原本的移动包，后者每 tick 另发一个 | 违规 |
+| `Derp`（Misc） | 视角随机/旋转/抖动 | 只改报给服务器的视角；关掉 `Safe Pitch` 后俯仰角可以超出 ±90° | 越界时违规 |
+
+新增的钩子：
+- `EventAttack`：在 `MultiPlayerGameMode.attack` 开头、攻击包之前触发，可以取消。这里发的包会先于攻击包到达服务器。
+- `LocalPlayer.wasSprinting()` / `setWasSprinting()`：自己发疾跑指令的模块，用它记下"服务器现在以为的疾跑状态"。
+
+每个模块没移植的内容写在各自的类注释里。`Velocity` 没有移植会扣住 pong 的 `TransactionBuffer`，原因见上面"给今后的模块定的规矩"。
+
+## 实机：本地 26.2 服务器（2026-09-27）
+
+环境：
+- 会话的权限策略不允许从容器直连第三方服务器（mc.loyisa.cn），所以这次在本机起了 Mojang 官方的 26.2 服务端 jar（SHA1 已校验），离线模式、超平坦、关闭刷怪。
+- 同一份源码不能直接当专用服跑：移植进来的 SodiumExtra 会在服务端的光照线程里访问 `Minecraft.getInstance()`，直接崩溃。
+- 客户端用 `--quickPlayMultiplayer` 经 ConnectScreen 进服，SelfDetection 照常挂上。本节的服务器版本是 26.2，loyisa 那边是 1.8；两边的 Grim 在版本相关的阈值上会不同（例如 BadPacketsV 在 ≤1.18 用 0.03）。
+
+场景：
+- 全部由服务器控制台驱动：tp 定位，刷一只不动、1000 血的尸壳当靶子；`/damage <玩家> 1 minecraft:mob_attack by <尸壳>` 制造击退；tp 到 10 格高制造摔落；xdotool 模拟点击和按键。
+- 跳跃次数用服务器的 `minecraft.custom:minecraft.jump` 计分板核对。
+- 每个场景跑 20 s，每组都有不开模块的基线。表里只数动作期间的 flag；进服头几秒的 Timer/TimerLimit 是已知误报（见上），不计入。
+- 第一次跑时超平坦世界刷出了史莱姆，推动并攻击玩家，那一轮数据作废。之后关闭了刷怪，每次开场先清掉所有非玩家实体。
+
+结果（Grim 默认配置，以及打开 `experimental-checks` 后的增量）：
+
+| 场景 | 默认配置 | 实验性检查另外报的 |
+|---|---|---|
+| 站着打（基线）/ 边跳边打（基线）/ 边走边打（基线） | 无 | 无 |
+| `Criticals` Jump | 无（46 次自动起跳，587 次预测，最大偏差 0） | 无 |
+| `Criticals` Packet NoCheatPlus（Full） | TickTimer 73、Timer 50、Simulation 38（0.11）、GroundSpoof 31、AimDuplicateLook 25、Post 10 | PacketOrderO 50、BadPacketsV 29 |
+| `Criticals` Packet NoCheatPlus（Position） | 同上，但没有 AimDuplicateLook：那一项纯粹来自 Full 包里没变的视角 | 同上 |
+| `Criticals` Packet Low（1e-9） | TickTimer 49、Timer 26、GroundSpoof 24、AimDuplicateLook 23、Post 9；**Simulation 0**（偏移低于阈值） | BadPacketsV 50、PacketOrderO 50 |
+| `Criticals` Packet Grim（空中下压 1e-6） | Simulation 12（最大 0.75）、GroundSpoof 3、TickTimer 2、Timer 2 | PacketOrderO、BadPacketsV |
+| `Criticals` NoGround | GroundSpoof 24 | 无 |
+| `SuperKnockback`，边走边打 | **无** | BadPacketsX 36、PacketOrderF 18 |
+| `SuperKnockback`，站着打（关 Only On Move） | Timer 1、TimerLimit 1 | BadPacketsX 72、PacketOrderF 24 |
+| 挨打（基线） | 无 | 无 |
+| `Velocity` Modify 0/0 | AntiKB 12，每一下都报（偏差 0.538） | 无 |
+| `Velocity` Modify 横向 80% | AntiKB 12（0.079），每一下都报；之后每下约 15 个递减的 Simulation | 无 |
+| `Velocity` Modify 横向 95%（只在实验性一轮跑过） | AntiKB 13（0.019），每一下都报；Simulation 169 | — |
+| 疾跑挨打（基线） | Simulation 4 | 无 |
+| `Velocity` JumpReset | Simulation 4，和基线完全相同；8 次挨打起跳 8 次，基线 0 次 | 无 |
+| 摔落（基线） | 无 | 无 |
+| `NoFall` SpoofGround | GroundSpoof 21 | 无 |
+| `NoFall` Packet | Simulation 61、TickTimer 42、GroundSpoof 28、Timer 25、AimDuplicateLook 14、TimerLimit 7 | BadPacketsV 21 |
+| `Derp` 随机（安全范围） | AimModulo360 1 | 无 |
+| `Derp` 俯仰 120°（Static，只发一次视角包） | BadPacketsD 1 | 无 |
+| `Derp` 随机，关 Safe Pitch（只在实验性一轮跑过） | BadPacketsD 241（开场 148） | — |
+
+两个场景本身的问题，已排除：
+- 疾跑中被服务器 tp，基线本身就有 4 个 Simulation，偏差数值和 JumpReset 那一轮逐位相同。
+- 第一版"边走边打"每 2 s 才 tp 一次，玩家 0.7 s 后就走过了尸壳，后面的点击大多打空，SuperKnockback 几乎没机会触发；基线同样有 6 个 Simulation。
+  改成每次 tp 后 0.25 s 出手，基线就干净了。
+
+结论：
+- **AntiKB 有效**：丢掉击退、保留 80%、保留 95%，每一次挨打都被抓到；合法的 JumpReset 没有多出任何 flag。
+- **BadPackets**：越界俯仰角（D）在默认配置下就抓；Criticals 的微小位移（V）、SuperKnockback 的一 tick 内重复疾跑指令（X）都是实验性检查。
+  Grim 默认配置下，**SuperKnockback 的发包式 W-tap 完全抓不到**；打开实验性检查后每一下都能抓到。
+- Criticals 的各种发包模式在默认配置下主要靠移动预测（Simulation）、着地（GroundSpoof）、计时（Timer/TickTimer）和包序（Post）抓到，而不是 BadPackets。
+  专门针对 Grim 调的 Grim 模式，在 26.2 上照样被 Simulation 抓：多出来的每个移动包都会被 Grim 当作一个 tick 去模拟。
+- 除了上面两个已排除的场景问题，两轮里的基线和合法模式（Jump、JumpReset）都没有被报，打开实验性检查也一样。
+
+## KillAura、FakePlayer 与跨版本实验（2026-09-27）
+
+### 模块
+- `KillAura`（Combat，自写，不是移植）：
+  - 每 tick 开头选目标、算出这一 tick 的视角；视角射线在攻击距离内碰到目标、且到了该攻击的时候就出手。这些都发生在这一 tick 的移动包之前，和原版点击的顺序一样：先发攻击，瞄准用的视角随同一 tick 的移动包上报。
+  - 攻击走 `MultiPlayerGameMode.attack`，所以 `EventAttack` 的模块（Criticals、SuperKnockback）照常配合。挥手顺序按版本：≤1.8 先挥手后攻击。
+  - Timing：Auto 在 1.9+ 等冷却满，在 1.8 按随机 CPS（默认 8–12）。
+  - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
+  - `Silent` 只改上报的视角；`Movement Fix` 让按键和起跳加速按上报的朝向推（`EventStrafe`、`EventJump`）。
+  - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。
+- `Claude1` / `Claude2` 是暂定名：
+  - `Claude1`：每 tick 走完剩余角度的 60%（至少 3°，横向最多 55°、纵向最多 30°），瞄目标碰撞箱上离眼睛最近的点，再把转角取整到当前鼠标灵敏度的整数步长（`MouseHandler` 的 f³·8·0.15）。
+  - `Claude2`：要攻击时如果正在格挡，这一 tick 先放下，不攻击；下一 tick 攻击，并按原版右键的方式重新举起（先对准星上的实体发交互包，再用物品）。这就是玩家手动格挡攻击时的节奏：原版在使用物品的那一 tick 会丢掉攻击点击。
+- `FakePlayer`（Misc）：只存在于客户端的假人，四种模式：
+  - `Moving`：在圈内随机走动，原版步行速度。
+  - `Jumping`：疾跑加原版跳跃弧线。
+  - `Flying`：在圈上方的空中飞，用来测俯仰角。
+  - `CombatSimulation`：保持在攻击距离、绕着玩家换边横移、偶尔起跳、挥手后后撤（W-tap）。
+  - 任何模式都不会离开以出现点为圆心、半径 `Radius` 的圈，被击退也一样；对打时对手走远了，它就守在圈边离对手最近的地方。
+  - 打它不发攻击包：在包发出前取消，本地变红、击退，并像真打中一样重置攻击冷却。它不能被推动，否则玩家会被一个服务器不知道的东西推开。
+  - 瞄它时发出的视角、格挡、移动都是真的，所以能拿来测 Aim 和移动类检查；需要攻击包的检查（Hitboxes、AutoBlock）仍然用服务器上的真实体。
+- 新钩子：
+  - `EventStrafe`（`Entity.moveRelative`，只对本地玩家）：改按键推动所用的 yaw。
+  - `EventStopUsingItem`（`Minecraft.handleKeybinds`）：右键没按着时原版会松开正在用的物品；取消它就等于一直按着。
+  - `EventMotion.forceRotation()`：本 tick 即使视角和客户端记录的相同，也强制上报。
+
+### 实验环境（沿用上一节，另加一台带插件的 1.8 服）
+- **Paper 1.8.8**（build 445，JDK 21）+ **ViaVersion 5.12.0** + **GrimAC 2.3.74-8eb5f28**。服务器上的 Grim 和 SelfDetection 内嵌的是同一个提交，所以每个场景都有两份判决可以逐项对照。
+  - 服务器打开了 `verbose.print-to-console`：告警要到 `punishments.yml` 的阈值（例如 Simulation 组是 100 VL）才发，逐条对照必须看 verbose。
+  - ViaVersion 设置：`show-shield-when-sword-in-hand: true`，让 1.9+ 客户端拿剑时副手有盾可举；`fix-1_21-placement-rotation: false`，这是 Grim 启动时明确要求关掉的，否则会有误报和绕过。
+  - 客户端版本用 ViaFabricPlus 切换：1.8.x、1.12.2、26.2。
+- **原版 26.2 服**：26.2 客户端直连，只有本地判决。
+- 场景：
+  - `fake`：玩家站着打 FakePlayer，假人半径 3.5，光环瞄准距离 6。
+  - `fake-walk`：边往前走边打，每 1.2 s 传回起点。
+  - `side`：不转头、关射线，打正侧面的僵尸。
+  - `fight`：一只会还手、不吃击退的僵尸或尸壳，困难难度，玩家加 20 级生命提升。结束时从服务器记分板读血量，看格挡在服务器那边算不算。
+  - 每个场景 20 s，默认配置一遍、`experimental-checks: true` 一遍（本地和服务器同时切）。
+- 这台 Paper 服踩过的坑：
+  - `spawn-monsters=false` 时 summon 会打印"成功"，但怪物实体被 CraftBukkit 直接丢掉。
+  - 控制台的 `@e[...]` 选择器不生效，被当成玩家名或 UUID。改成每轮换一块远处的新场地，上一轮的怪留在原地不管。
+  - 不认 `--nogui`，要用 `--nojline nogui`。
+  - **Paper 1.8.8 自带 Netty 4.0**，ViaVersion 5 给 26.2 客户端翻译僵尸、蜘蛛等怪物时会调用 `ByteBuf.writeShortLE`（Netty 4.1 才有），服务器随即把玩家踢掉。猪没问题。所以"26.2 客户端在 1.8 服上用 AutoBlock"在这个环境里测不了。现实里这种组合要靠带新 Netty 的 1.8 分支（如 PandaSpigot），这个会话拿不到 GitHub 上的构件。
+- 脚本层面：
+  - quickPlay 会在客户端打开 SelfDetection 之前就开始连服（见"已知问题"）。每轮核对 SelfCheck 日志里有没有本轮的玩家，以及协议版本对不对，不对就重跑，最多三次。
+  - 原版服也改成每轮换新场地，让假人出现在玩家面前。第一版原版假人实验里，假人离玩家 5–11 格，光环多数时间根本没锁定，那一批数据作废。
+
+### 结果：转头（打 FakePlayer，默认配置，本地 / 服务器端）
+| Rotation | Moving | Jumping | Flying | CombatSimulation |
+|---|---|---|---|---|
+| Snap | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Wrapped（1.8.x @Paper） | AimModulo360 16 / 16 | 20 / 20 | 27 / 27 | 15 / 15 |
+| Wrapped（原版 26.2） | AimModulo360 20 | 28 | 23 | 16 |
+| Smooth | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Claude1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+- 另有零星的单次 GroundSpoof、TimerLimit 等，只在本地出现、服务器端没有对应，没有计入。
+- 1.12.2 和 26.2 客户端经 ViaVersion 连 1.8 服，打 CombatSimulation：Wrapped 两边都是 AimModulo360 15 / 15，Claude1 都是 0 / 0。
+- **AimModulo360 什么时候触发**，规则见 `AimModulo360.java`：
+  - yaw 绝对值小于 360；
+  - 这一 tick 的 yaw 变化超过 320°；
+  - 上一 tick 的变化小于 30°。
+- 发 atan2 算出的 -180..180 yaw 的光环，在目标跨过玩家正北（±180° 那条线）的那一 tick，yaw 会从 179 跳到 -179，差 358°，正好满足。跨线越频繁报得越多，所以飞行、跳跃这类到处跑的目标报得最多。
+- 只要把 yaw 保持连续（`上次上报的 yaw + wrapDegrees(目标 − 上次)`），Snap 这种瞬间转头也不会触发。
+- 另一种触发方式也验证过：玩家先把自己的视角转两圈（yaw≈900），光环再用 Wrapped 锁定时，第一 tick 从 900 跳到 180 左右，同样会报。
+- 单元测试 `KillAuraTest` 用同一条规则复现了"Wrapped 每次跨线都报、连续 yaw 一次都不报"。
+
+### 结果：Hitboxes 与移动修正（默认配置，本地 / 服务器端）
+| 场景 | 1.8.x @Paper | 原版 26.2 |
+|---|---|---|
+| 不转头、关射线，打正侧面的僵尸 | Hitboxes 187 / 187（几乎每一刀） | Hitboxes 36 |
+| 静默转头边走边打，**关**移动修正 | Simulation 268 + AntiKB 146 / Simulation 137 | Simulation 417 |
+| 静默转头边走边打，开修正（Snap / Claude1） | 0 / 0 | 0 |
+
+原版 26.2 打开实验性检查那一遍，开修正的两轮出现过 Simulation 19 / 35，同时伴有 Timer 6 / 13 和 TimerLimit：那一轮有卡顿（新场地离出生点很远，要现生成区块）。这两个场景各复测两次，都是 0。
+
+### 结果：AutoBlock
+对打场景：一只会还手、不吃击退的怪，20 s。
+
+检测（本地 / 服务器端，打开 `experimental-checks` 之后；**默认配置下四种模式在所有版本上都是 0**）：
+
+| AutoBlock | 1.8.x @Paper | 1.12.2 @Paper | 原版 26.2（盾） |
+|---|---|---|---|
+| None | 0 / 0 | 0 / 0 | 0 |
+| Hold | MultiActionsA 188 + MultiActionsE 188 / 同 | MultiActionsA 345 + E 345 + PacketOrderJ 29 / A 239 + E 239 + J 29 | MultiActionsA 35 + E 35 + PacketOrderJ 1 |
+| SameTick | PacketOrderI 376 + PacketOrderJ 188 / 同 | PacketOrderI 268 + J 136 / 同 | PacketOrderI 70 + J 36 |
+| Claude2 | 0 / 0 | 0 / 0 | 0 |
+
+- Hold：原版在使用物品时会丢掉攻击点击，所以"格挡中攻击"（MultiActionsA）和"格挡中挥手"（MultiActionsE）原版客户端发不出来。
+- SameTick：同一 tick 里"放下 → 攻击 → 举起"，原版也做不到（放下的那一 tick 攻击点击同样被丢掉），PacketOrderI 抓的就是这个包序；直接用物品、前面没有对实体的交互包，PacketOrderJ 也会报。
+- Claude2：把放下和攻击拆到两个 tick，再举起时先发实体交互包，包序和原版右键一致，两遍、三个版本都没有任何 flag。
+
+减伤（`fight`，玩家 104 血，20 s 内掉的血）：
+- 原版 26.2 盾牌：None 58–61；Hold 0；SameTick 1；Claude2 5–7（每次攻击前放下的那一 tick 会漏一点）。
+- 1.8 剑挡（1.8.x @Paper，每种 3 轮；单轮噪声很大，有两轮僵尸根本没打到人，所以重复取平均）：
+
+| 情况 | 3 轮掉血 | 平均 | 相对不挡 |
+|---|---|---|---|
+| 光环不格挡 | 85 / 90 / 85 | 87 | — |
+| 原版手动，不举剑 | 80 / 86 / 80 | 82 | — |
+| 原版手动，一直按右键举剑、不攻击 | 49 / 50 / 50 | 50 | −40% |
+| Hold | 76 / 69 / 79 | 75 | −14% |
+| SameTick | 49 / 52 / 47 | 49 | −44% |
+| Claude2 | 57 / 58 / 60 | 58 | −33% |
+
+  - 实验方法本身是准的：手动举剑减伤 40%，1.8 的剑挡公式是 (1+伤害)/2，每下 4.5 变 2.75，约 −39%。
+  - Hold 在 1.8 上基本不减伤：两边的 Grim 都认为玩家一直在用物品，但隔着格挡攻击之后，服务器的伤害计算不再把它当格挡。具体机制没有细查，大概率是 Paper 在攻击这条路径上清掉了使用状态。
+  - SameTick 每次攻击后当 tick 就重新举起，格挡几乎不间断，效果和手动举剑一样。
+  - Claude2 在攻击前那一 tick 放下，那一瞬间挨的打会漏过去，所以挡住约四分之三。
+  - 1.12.2 客户端经 ViaVersion 只跑了单轮，趋势相同（None 85、Hold 60–73、SameTick 52–54、Claude2 63–71）。
+
+结论：
+- 用 Grim 默认配置的服务器看不到任何一种 AutoBlock。
+- 打开实验性检查后，Hold 和 SameTick 每一刀都会被抓；Claude2 在三个客户端版本上都没有被抓，1.8 上挡住约 3/4 的伤害，盾牌挡住约 9 成。
+- 这个结论只针对 GrimAC `8eb5f28`，而且是本地实验环境；其他反作弊或其他配置没有测过。
+
+### 这一轮发现并修掉的问题
+- **传送后静默视角没发出去**：
+  - 服务器传送时，客户端用确认包上报的是镜头视角，但它记录的"上次上报的视角"并没有更新。
+  - 光环的视角恰好等于那个旧记录时，这一 tick 就不发视角，于是服务器按传送的朝向预测移动，玩家却按光环的朝向在走。实测 Claude1 收敛后会出现一串 Simulation。
+  - 修复：`EventMotion.forceRotation()`，光环从所有发出去的移动包（包括传送确认）记录服务器实际知道的视角，不一致就强制上报。没有模块使用时，原版行为不变。
+- **AutoBlock 每 tick 闪一下**：
+  - 原版在右键没按着时会松开正在用的物品。光环在 tick 开头举起格挡，同一 tick 就被原版放下了，服务器看到的格挡一直在闪，伤害照吃不误。
+  - 实验性的 PacketOrderI 因此每 tick 都报（20 s 里约 466 次）。
+  - 修复：`EventStopUsingItem`。另外，1.8 下剑的 `useItem` 返回 PASS（物品堆没变），是否在格挡改为直接读玩家的状态。
+- 实验脚本自身的问题也记在上面的"实验环境"里：史莱姆、选择器、场地位置、版本竞争。
+
+### 已知问题（未修）
+- **quickPlay 启动时序**：`Minecraft.onGameLoadFinished` 先执行 `showScreen`（quickPlay 就在这里发起连接），后执行 `Client.start()`（按配置打开模块）。所以用 `--quickPlayMultiplayer` 启动时，SelfDetection 有时会错过第一个服务器。从多人游戏菜单进服不受影响。
+  - 正确的修法是把 `Client.start` 拆成"打开模块"和"主菜单跳转"两段，前者放到 `showScreen` 之前。但它是带回滚的事务式启动，改动面较大，这次没动。
+- **本地进服阶段的噪声**：本地 SelfDetection 在进服到场景开始之间会报一些 BadPacketsE、Phase、AimDuplicateLook、Timer，服务器端的 Grim 多数没有。这是引擎就绪前扣包、之后集中放行造成的，统计时已排除在外。
+- 原版药水效果图标会盖住右上角的 ArrayList。
+
 ## 状态
 
 - Phase 0：通过（上表）。
@@ -164,3 +378,4 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 - Phase 2（Grim 全量移植 + 平台层）：完成。编译通过，回放测试和实机对照都已验证（见上）。
 - Phase 3（模块、`.grim` 指令、实机联调）：模块和实机联调已完成。**还没有实机验证**的有：`.grim` 指令（只有单元测试覆盖路由）、Discord webhook、
   `plugins/*.jar` 外部引擎（只有单元测试覆盖加载）、连续进出服务器后隔离加载器的内存回收，以及每包耗时。
+- 测试模块（`Criticals`、`Velocity`、`SuperKnockback`、`NoFall`、`Derp`）：已在本地 26.2 服上逐个模式验证（见"实机：本地 26.2 服务器"）。**还没有**在 1.8 的 Grim 服上和服务器自己的 Grim 对照过；这一步需要能连外网的环境，在 loyisa 上照 `Speed` 那一节的方式做。

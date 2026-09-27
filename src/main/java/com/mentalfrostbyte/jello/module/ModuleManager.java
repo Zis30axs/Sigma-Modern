@@ -1,14 +1,21 @@
 package com.mentalfrostbyte.jello.module;
 
+import com.mentalfrostbyte.jello.module.impl.combat.Criticals;
+import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
+import com.mentalfrostbyte.jello.module.impl.combat.SuperKnockback;
+import com.mentalfrostbyte.jello.module.impl.combat.Velocity;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
 import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
+import com.mentalfrostbyte.jello.module.impl.misc.Derp;
+import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
 import com.mentalfrostbyte.jello.module.impl.movement.Speed;
+import com.mentalfrostbyte.jello.module.impl.player.NoFall;
 import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
@@ -48,14 +55,21 @@ public final class ModuleManager {
         this.register(new ModuleSelfDetection());
         this.register(new BlockAnimation());
         this.register(new CameraNoClip());
+        this.register(new Criticals());
         this.register(new CustomTitle());
+        this.register(new Derp());
+        this.register(new FakePlayer());
         this.register(new Fullbright());
+        this.register(new KillAura());
         this.register(new LowFire());
         this.register(new ModernChat());
+        this.register(new NoFall());
         this.register(new NoHurtCam());
         this.register(new Speed());
+        this.register(new SuperKnockback());
         this.register(new SuspectList(antiCheat));
         this.register(new TabGui(this));
+        this.register(new Velocity());
         this.register(new Weather());
     }
 
