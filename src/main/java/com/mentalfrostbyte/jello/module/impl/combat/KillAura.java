@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.module.impl.combat;
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventStrafe;
@@ -225,6 +226,17 @@ public class KillAura extends Module {
         Optional<Vec3> hit = this.reach(player, level, eye, look, this.target);
         boolean due = this.tickClick(player);
         this.fight(player, gameMode, this.target, hit, due);
+    }
+
+    /**
+     * A block the aura raised stays up until the aura lowers it, as if the player held the use key: without this the
+     * game would lower it again in the same tick, and the server would see it flicker instead of stay.
+     */
+    @EventTarget
+    public void onStopUsing(final EventStopUsingItem event) {
+        if (this.blockingByAura && this.target != null) {
+            event.cancel();
+        }
     }
 
     /** Silent + Movement Fix: the keys push along the reported facing. */
@@ -501,11 +513,13 @@ public class KillAura extends Module {
         return null;
     }
 
-    /** Raises the block straight away with a use-item packet. */
+    /**
+     * Raises the block straight away with a use-item packet. Whether it went up is read off the player, not the result:
+     * on 1.8 a sword's use reports PASS (the stack did not change) although the block is up.
+     */
     private void raiseBlock(final LocalPlayer player, final MultiPlayerGameMode gameMode, final InteractionHand hand) {
-        if (gameMode.useItem(player, hand) instanceof InteractionResult.Success) {
-            this.blockingByAura = true;
-        }
+        gameMode.useItem(player, hand);
+        this.blockingByAura = player.isUsingItem();
     }
 
     /**
@@ -524,10 +538,10 @@ public class KillAura extends Module {
                 return;
             }
             if (!held.isEmpty() && gameMode.useItem(player, hand) instanceof InteractionResult.Success) {
-                this.blockingByAura = player.isUsingItem();
-                return;
+                break;
             }
         }
+        this.blockingByAura = player.isUsingItem();
     }
 
     private void lowerBlock(final LocalPlayer player, final MultiPlayerGameMode gameMode) {

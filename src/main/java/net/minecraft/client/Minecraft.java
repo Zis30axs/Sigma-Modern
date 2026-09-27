@@ -272,6 +272,7 @@ import org.slf4j.Logger;
 // Sigma: the client entry point, and the events this class publishes.
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.EventState;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
 import com.mentalfrostbyte.jello.event.impl.game.EventRunLoop;
@@ -2220,7 +2221,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
         boolean instantAttack = false;
         if (this.player.isUsingItem()) {
-            if (!this.options.keyUse.isDown()) {
+            // Sigma hook: the use key is up, so vanilla stops using the item; a module that is holding the item in
+            // use itself (AutoBlock) cancels this, as a held key would.
+            if (!this.options.keyUse.isDown() && !EventBus.call(new EventStopUsingItem()).isCancelled()) {
                 this.gameMode.releaseUsingItem(this.player);
             }
 
