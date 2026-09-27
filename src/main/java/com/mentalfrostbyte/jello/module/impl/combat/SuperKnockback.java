@@ -52,6 +52,9 @@ public class SuperKnockback extends Module {
     /** LiquidBounce {@code ModuleSuperKnockback.Packet.attackHandler}. */
     @EventTarget
     public void onAttack(final EventAttack event) {
+        if (event.isCancelled()) {
+            return; // an attack that will not happen (a FakePlayer hit) gets nothing sent ahead of it
+        }
         LocalPlayer player = mc.player;
         ClientPacketListener connection = mc.getConnection();
         if (player == null || connection == null || !(event.getTarget() instanceof LivingEntity target)) {

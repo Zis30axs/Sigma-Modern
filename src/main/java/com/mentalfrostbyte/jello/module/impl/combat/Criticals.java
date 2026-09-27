@@ -132,6 +132,9 @@ public class Criticals extends Module {
     /** Packet: the hop goes out ahead of the attack packet (LiquidBounce {@code CriticalsPacket.attackHandler}). */
     @EventTarget
     public void onAttack(final EventAttack event) {
+        if (event.isCancelled()) {
+            return; // an attack that will not happen (a FakePlayer hit) gets nothing sent ahead of it
+        }
         LocalPlayer player = mc.player;
         ClientPacketListener connection = mc.getConnection();
         if (!this.mode.is(Mode.PACKET) || player == null || connection == null || !(event.getTarget() instanceof LivingEntity)) {

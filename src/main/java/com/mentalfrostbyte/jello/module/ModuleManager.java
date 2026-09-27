@@ -10,6 +10,7 @@ import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.Derp;
+import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
@@ -57,6 +58,7 @@ public final class ModuleManager {
         this.register(new Criticals());
         this.register(new CustomTitle());
         this.register(new Derp());
+        this.register(new FakePlayer());
         this.register(new Fullbright());
         this.register(new KillAura());
         this.register(new LowFire());
