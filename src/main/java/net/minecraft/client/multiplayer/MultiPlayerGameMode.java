@@ -1,5 +1,7 @@
 package net.minecraft.client.multiplayer;
 
+import com.mentalfrostbyte.jello.event.EventBus;
+import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
 import com.viaversion.viafabricplus.features.interaction.r1_18_2_block_ack_emulation.ClientPlayerInteractionManager1_18_2;
 import com.viaversion.viafabricplus.features.interaction.replace_block_placement_logic.ActionResultException1_12_2;
 import com.viaversion.viafabricplus.injection.access.interaction.container_clicking.IAbstractContainerMenu;
@@ -650,6 +652,12 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
     }
 
     public void attack(final Player player, final Entity entity) {
+        // Sigma hook: the local player's attack, before anything of it is sent - packets a module sends from here
+        // arrive ahead of the attack packet (Criticals, SuperKnockback). Cancelling skips the attack.
+        if (EventBus.call(new EventAttack(entity)).isCancelled()) {
+            return;
+        }
+
         this.ensureHasSentCarriedItem();
         this.connection.send(new ServerboundAttackPacket(entity.getId()));
         player.attack(entity);

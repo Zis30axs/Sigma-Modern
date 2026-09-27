@@ -451,6 +451,16 @@ public class LocalPlayer extends AbstractClientPlayer
         }
     }
 
+    // Sigma hook: the sprint state the server was last told about. A module that sends its own sprint commands
+    // (SuperKnockback) records here what it left the server believing, so the next tick neither repeats nor undoes it.
+    public boolean wasSprinting() {
+        return this.wasSprinting;
+    }
+
+    public void setWasSprinting(final boolean wasSprinting) {
+        this.wasSprinting = wasSprinting;
+    }
+
     public boolean drop(final boolean all) {
         ServerboundPlayerActionPacket.Action action = all
             ? ServerboundPlayerActionPacket.Action.DROP_ALL_ITEMS
