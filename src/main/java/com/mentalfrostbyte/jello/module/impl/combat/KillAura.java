@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -146,7 +147,10 @@ public class KillAura extends Module {
     private @Nullable LivingEntity target;
     /** The look reported this tick, or null to leave the report to vanilla. */
     private @Nullable Rotation rotation;
-    /** The look the server was last told. */
+    /**
+     * The look the server holds: the last one any movement packet carried, a teleport confirmation's included - the
+     * client's own record of what it reported misses those.
+     */
     private @Nullable Rotation lastSent;
     private float clickBudget;
     private float cps;
@@ -241,25 +245,33 @@ public class KillAura extends Module {
 
     @EventTarget
     public void onMotion(final EventMotion event) {
-        if (event.isPre()) {
-            if (this.rotation != null && this.silent.get()) {
-                event.setYaw(this.rotation.yaw());
-                event.setPitch(this.rotation.pitch());
+        Rotation reported = this.rotation;
+        if (event.isPre() && reported != null && this.silent.get()) {
+            event.setYaw(reported.yaw());
+            event.setPitch(reported.pitch());
+            // After a teleport the server holds the confirmation's look, while the client still remembers the one it
+            // reported before; a look that happens to match that stale record would otherwise not be sent at all.
+            if (!reported.equals(this.lastSent)) {
+                event.forceRotation();
             }
-        } else {
-            this.lastSent = new Rotation(event.getYaw(), event.getPitch());
         }
     }
 
     /**
      * Since 1.19 the use-item packet carries the look it was aimed with, and the server holds it to the tick's movement
-     * report; with a silent look that must be the reported one, not the camera's.
+     * report; with a silent look that must be the reported one, not the camera's. Every movement packet that carries a
+     * look is noted as what the server now holds.
      */
     @EventTarget
     public void onSend(final EventSendPacket event) {
+        if (!mc.isSameThread()) {
+            return;
+        }
         Rotation reported = this.rotation;
-        if (reported != null && this.silent.get() && event.getPacket() instanceof ServerboundUseItemPacket use && mc.isSameThread()) {
+        if (reported != null && this.silent.get() && event.getPacket() instanceof ServerboundUseItemPacket use) {
             event.setPacket(new ServerboundUseItemPacket(use.getHand(), use.getSequence(), reported.yaw(), reported.pitch()));
+        } else if (event.getPacket() instanceof ServerboundMovePlayerPacket move && move.hasRotation()) {
+            this.lastSent = new Rotation(move.getYRot(0.0F), move.getXRot(0.0F));
         }
     }
 

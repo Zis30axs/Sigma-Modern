@@ -390,7 +390,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 ? this.positionReminder - 1
                 : this.positionReminder;
             boolean move = Mth.lengthSquared(deltaX, deltaY, deltaZ) > (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_18) ? 9.0E-4D : Mth.square(2.0E-4)) || positionReminderForCheck >= 20;
-            boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0;
+            boolean rot = deltaYRot != 0.0 || deltaXRot != 0.0 || motion.isRotationForced();
             if (move && rot) {
                 this.connection
                     .send(new ServerboundMovePlayerPacket.PosRot(x, y, z, yRot, xRot, onGround, this.horizontalCollision));
