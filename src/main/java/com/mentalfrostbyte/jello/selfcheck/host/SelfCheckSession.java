@@ -24,6 +24,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import net.minecraft.network.ConnectionProtocol;
+import net.minecraft.network.HandlerNames;
+import net.minecraft.network.PacketDecoder;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -37,9 +40,15 @@ import org.slf4j.Logger;
  *
  * <p>Until the engines have started, packets from the server are held back from the client as well as from the
  * engines, and released in order once they are ready. An engine is only accurate about what it watched happen: had the
- * client handled the login and the first chunks while the engines were still starting, their transactions could no
+ * client handled the first chunks and movement while the engines were still starting, their transactions could no
  * longer go where they belong, and a burst of held-back movement would look like a timer cheat. The cost is that
  * joining waits for the engines (a few seconds for Grim), and never longer than {@link #START_TIMEOUT_SECONDS}.</p>
+ *
+ * <p>The login is the exception: its packets go on to the client at once, and the engines are shown copies once they
+ * are ready. The login switches the connection's own pipeline - compression, which the server turns on and then uses
+ * straight away without waiting for an answer - and a packet held back at the tap has already passed where the
+ * decompressor goes, so everything the server compressed behind the switch would reach the decoder still compressed.
+ * Nothing in the login is timed or answered with a transaction, so watching it late costs an engine nothing.</p>
  *
  * <p>Nothing an engine does can reach the real connection: an engine that throws loses that one call. Each failure
  * adds one to the engine's failure score and each successful call takes {@link #FAILURE_DECAY} off it; an engine
@@ -75,6 +84,8 @@ public final class SelfCheckSession {
     private long backlogBytes;
     private final long startedAt = System.nanoTime();
     private boolean ready;
+    // Whether a server packet has been held back from the client yet; network thread.
+    private boolean holding;
     private volatile boolean closed;
     private boolean recorderFailed;
 
@@ -82,8 +93,11 @@ public final class SelfCheckSession {
     private @Nullable List<Integer> before;
     private @Nullable List<Integer> after;
 
-    /** Held back while the engines start: a server packet itself (not yet given to the client), or a copy of one sent. */
-    private record Held(Direction direction, long nanoTime, @Nullable ByteBuf inbound, byte @Nullable [] outbound) {
+    /**
+     * Held back while the engines start: a server packet itself (not yet given to the client), or a copy the engines
+     * have yet to see - of a packet sent, or of one received during the login, which the client already has.
+     */
+    private record Held(Direction direction, long nanoTime, @Nullable ByteBuf inbound, byte @Nullable [] copy) {
     }
 
     public SelfCheckSession(final Channel channel, final Target target, final ServerRoot root, final SelfCheckOutput output,
@@ -142,8 +156,8 @@ public final class SelfCheckSession {
             while ((held = this.backlog.poll()) != null) {
                 if (held.inbound() != null && ctx != null) {
                     this.process(ctx, System.nanoTime(), held.inbound());
-                } else if (held.outbound() != null) {
-                    this.deliver(Direction.SERVERBOUND, held.nanoTime(), Unpooled.wrappedBuffer(held.outbound()));
+                } else if (held.copy() != null) {
+                    this.deliver(held.direction(), held.nanoTime(), Unpooled.wrappedBuffer(held.copy()));
                 }
             }
             this.backlogBytes = 0;
@@ -176,10 +190,24 @@ public final class SelfCheckSession {
         }
 
         if (!this.ready) {
+            // Once one packet is held, all after it are, or they would overtake it.
+            if (!this.holding && loggingIn(ctx)) {
+                this.copy(Direction.CLIENTBOUND, System.nanoTime(), buffer);
+                ctx.fireChannelRead(buffer);
+                return;
+            }
+            this.holding = true;
             this.holdInbound(buffer);
             return;
         }
         this.process(ctx, System.nanoTime(), buffer);
+    }
+
+    /** Whether the client is still logging in: its decoder reads the login protocol. */
+    private static boolean loggingIn(final ChannelHandlerContext ctx) {
+        ChannelHandlerContext decoder = ctx.pipeline().context(HandlerNames.DECODER);
+        return decoder != null && decoder.handler() instanceof PacketDecoder<?> packetDecoder
+                && packetDecoder.protocol() == ConnectionProtocol.LOGIN;
     }
 
     /** A server packet, live: shown to the engines, then given to the client with the engines' pings around it. */
@@ -227,7 +255,7 @@ public final class SelfCheckSession {
         }
         long now = System.nanoTime();
         if (!this.ready) {
-            this.holdOutbound(now, buffer);
+            this.copy(Direction.SERVERBOUND, now, buffer);
             return;
         }
         this.deliver(Direction.SERVERBOUND, now, buffer);
@@ -307,11 +335,14 @@ public final class SelfCheckSession {
         }
     }
 
-    /** A copy of a packet the client sent before the engines were ready; the packet itself goes to the server as usual. */
-    private void holdOutbound(final long nanoTime, final ByteBuf buffer) {
+    /**
+     * A copy, for the engines once they are ready, of a packet that goes on as usual meanwhile: one the client sent, or
+     * one the server sent during the login.
+     */
+    private void copy(final Direction direction, final long nanoTime, final ByteBuf buffer) {
         byte[] bytes = new byte[buffer.readableBytes()];
         buffer.getBytes(buffer.readerIndex(), bytes);
-        this.backlog.add(new Held(Direction.SERVERBOUND, nanoTime, null, bytes));
+        this.backlog.add(new Held(direction, nanoTime, null, bytes));
         this.backlogBytes += bytes.length;
     }
 

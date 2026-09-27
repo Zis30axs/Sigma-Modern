@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 import net.minecraft.network.ConnectionProtocol;
 import net.minecraft.network.HandlerNames;
+import net.minecraft.network.PacketDecoder;
 import net.minecraft.network.protocol.common.ServerboundPongPacket;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -181,6 +182,36 @@ class SelfCheckSessionTest {
 
         f.wire.receive(3);
         assertEquals(List.of("S1", "S2", "C5", "S3", "end"), late.events);
+    }
+
+    /**
+     * The login goes straight through: a server turns compression on and compresses the very next packet, and a
+     * packet held at the tap has already passed where the decompressor goes. Found joining a local offline server,
+     * where the login finishes before Grim has started.
+     */
+    @Test
+    void theLoginGoesStraightThroughAndTheEnginesSeeItOnceReady() {
+        Fixture f = this.fixture(ConnectionProtocol.LOGIN, false);
+        f.wire.receive(1, 2);
+        f.wire.channel.writeOutbound(new TestWire.TestPacket(5));
+        assertEquals(List.of("P1", "P2"), delivered(f.wire), "login packets are not held back");
+        assertEquals(List.of(5), f.wire.sent());
+
+        // The login is over; from here on the client waits for the engines as before.
+        f.wire.channel.pipeline().replace(HandlerNames.DECODER, HandlerNames.DECODER, new PacketDecoder<>(TestWire.protocol(ConnectionProtocol.PLAY)));
+        f.wire.receive(3);
+        assertEquals(List.of("P1", "P2"), delivered(f.wire), "play packets are held back");
+        assertTrue(f.engine.events.isEmpty());
+
+        SelfCheckSession.Slot slot = f.session.newSlot("Late", this.tmp, () -> {
+        });
+        LoggingEngine late = new LoggingEngine(slot);
+        slot.attach(late);
+        f.session.enginesReady(List.of(slot));
+        f.wire.channel.runPendingTasks();
+
+        assertEquals(List.of("S1", "S2", "C5", "S3"), late.events, "the login's copies first, in the order they crossed the taps");
+        assertEquals(List.of("P1", "P2", "P3"), delivered(f.wire));
     }
 
     @Test
