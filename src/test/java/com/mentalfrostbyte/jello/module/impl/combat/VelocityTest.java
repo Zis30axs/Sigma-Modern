@@ -21,9 +21,16 @@ class VelocityTest {
 
     @Test
     void sidewaysAndUpAreScaledApart() {
-        assertEquals(new Vec3(0.3 * 0.5F, 0.4, -0.2 * 0.5F), Velocity.scaled(PUSH, 0.5F, 1.0F));
-        assertEquals(new Vec3(0.0, 0.4 * 0.25F, 0.0), Velocity.scaled(PUSH, 0.0F, 0.25F), "a 0 axis is zeroed, not kept");
-        assertEquals(new Vec3(-0.3, 0.4, 0.2), Velocity.scaled(PUSH, -1.0F, 1.0F), "negative pulls towards the attacker");
+        assertVec(new Vec3(0.15, 0.4, -0.1), Velocity.scaled(PUSH, 0.5F, 1.0F), "half sideways, all of the lift");
+        assertVec(new Vec3(0.0, 0.1, 0.0), Velocity.scaled(PUSH, 0.0F, 0.25F), "a 0 axis is zeroed, not kept");
+        assertVec(new Vec3(-0.3, 0.4, 0.2), Velocity.scaled(PUSH, -1.0F, 1.0F), "negative pulls towards the attacker");
+    }
+
+    /** Component by component, so that the -0.0 a zeroed negative axis comes out as counts as 0. */
+    private static void assertVec(final Vec3 expected, final Vec3 actual, final String what) {
+        assertEquals(expected.x, actual.x, 1.0E-9, what + ": x");
+        assertEquals(expected.y, actual.y, 1.0E-9, what + ": y");
+        assertEquals(expected.z, actual.z, 1.0E-9, what + ": z");
     }
 
     @Test

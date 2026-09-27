@@ -165,6 +165,79 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   这是 VFP 的 1.8 模拟与真 1.8 之间的差异；只要连 Grim 服就会有这批误报，可以在 VFP 这一侧修（另开任务）。
 - 服务器报的 TransactionOrder 1 次本地没有复现。本地事务几乎零延迟，这类由网络时序导致的检测不会一模一样。
 
+## 测试用的战斗与发包模块（移植自 LiquidBounce，GPL-3.0）
+
+来源：LiquidBounce `nextgen` @ `f37f07f`（2026-09-26）。和 `Speed` 一样，每个模块都挑了落在判定线两侧的模式，用来测 SelfDetection 能抓到什么、会不会冤枉合法操作。
+
+| 模块 | 模式 | 做什么 | 预期 |
+|---|---|---|---|
+| `Criticals`（Combat） | `Jump` | 敌人在攻击范围内时替玩家起跳，下落时出手 | 合法 |
+| | `Packet` | 攻击前多发几个移动包，谎称跳起了一点。偏移表是上游的 7 组：Vanilla、NoCheatPlus、Falling、Low、Down、Grim、BlocksMC | 违规 |
+| | `NoGround` | 所有移动包都说"没着地" | 违规 |
+| `Velocity`（Combat） | `Modify` | 按比例缩放击退；默认横竖都是 0，直接丢掉击退包 | 违规 |
+| | `JumpReset` | 疾跑中挨打，下一 tick 起跳（手动也能做到） | 合法 |
+| `SuperKnockback`（Combat） | Packet | 攻击前连发 停止/开始/停止/开始 疾跑 | 违规 |
+| `NoFall`（Player） | `SpoofGround`、`Packet` | 摔落超过 3 格后谎称着地：前者改原本的移动包，后者每 tick 另发一个 | 违规 |
+| `Derp`（Misc） | 视角随机/旋转/抖动 | 只改报给服务器的视角；关掉 `Safe Pitch` 后俯仰角可以超出 ±90° | 越界时违规 |
+
+新增的钩子：
+- `EventAttack`：在 `MultiPlayerGameMode.attack` 开头、攻击包之前触发，可以取消。这里发的包会先于攻击包到达服务器。
+- `LocalPlayer.wasSprinting()` / `setWasSprinting()`：自己发疾跑指令的模块，用它记下"服务器现在以为的疾跑状态"。
+
+每个模块没移植的内容写在各自的类注释里。`Velocity` 没有移植会扣住 pong 的 `TransactionBuffer`，原因见上面"给今后的模块定的规矩"。
+
+## 实机：本地 26.2 服务器（2026-09-27）
+
+环境：
+- 会话的权限策略不允许从容器直连第三方服务器（mc.loyisa.cn），所以这次在本机起了 Mojang 官方的 26.2 服务端 jar（SHA1 已校验），离线模式、超平坦、关闭刷怪。
+- 同一份源码不能直接当专用服跑：移植进来的 SodiumExtra 会在服务端的光照线程里访问 `Minecraft.getInstance()`，直接崩溃。
+- 客户端用 `--quickPlayMultiplayer` 经 ConnectScreen 进服，SelfDetection 照常挂上。本节的服务器版本是 26.2，loyisa 那边是 1.8；两边的 Grim 在版本相关的阈值上会不同（例如 BadPacketsV 在 ≤1.18 用 0.03）。
+
+场景：
+- 全部由服务器控制台驱动：tp 定位，刷一只不动、1000 血的尸壳当靶子；`/damage <玩家> 1 minecraft:mob_attack by <尸壳>` 制造击退；tp 到 10 格高制造摔落；xdotool 模拟点击和按键。
+- 跳跃次数用服务器的 `minecraft.custom:minecraft.jump` 计分板核对。
+- 每个场景跑 20 s，每组都有不开模块的基线。表里只数动作期间的 flag；进服头几秒的 Timer/TimerLimit 是已知误报（见上），不计入。
+- 第一次跑时超平坦世界刷出了史莱姆，推动并攻击玩家，那一轮数据作废。之后关闭了刷怪，每次开场先清掉所有非玩家实体。
+
+结果（Grim 默认配置，以及打开 `experimental-checks` 后的增量）：
+
+| 场景 | 默认配置 | 实验性检查另外报的 |
+|---|---|---|
+| 站着打（基线）/ 边跳边打（基线）/ 边走边打（基线） | 无 | 无 |
+| `Criticals` Jump | 无（46 次自动起跳，587 次预测，最大偏差 0） | 无 |
+| `Criticals` Packet NoCheatPlus（Full） | TickTimer 73、Timer 50、Simulation 38（0.11）、GroundSpoof 31、AimDuplicateLook 25、Post 10 | PacketOrderO 50、BadPacketsV 29 |
+| `Criticals` Packet NoCheatPlus（Position） | 同上，但没有 AimDuplicateLook：那一项纯粹来自 Full 包里没变的视角 | 同上 |
+| `Criticals` Packet Low（1e-9） | TickTimer 49、Timer 26、GroundSpoof 24、AimDuplicateLook 23、Post 9；**Simulation 0**（偏移低于阈值） | BadPacketsV 50、PacketOrderO 50 |
+| `Criticals` Packet Grim（空中下压 1e-6） | Simulation 12（最大 0.75）、GroundSpoof 3、TickTimer 2、Timer 2 | PacketOrderO、BadPacketsV |
+| `Criticals` NoGround | GroundSpoof 24 | 无 |
+| `SuperKnockback`，边走边打 | **无** | BadPacketsX 36、PacketOrderF 18 |
+| `SuperKnockback`，站着打（关 Only On Move） | Timer 1、TimerLimit 1 | BadPacketsX 72、PacketOrderF 24 |
+| 挨打（基线） | 无 | 无 |
+| `Velocity` Modify 0/0 | AntiKB 12，每一下都报（偏差 0.538） | 无 |
+| `Velocity` Modify 横向 80% | AntiKB 12（0.079），每一下都报；之后每下约 15 个递减的 Simulation | 无 |
+| `Velocity` Modify 横向 95%（只在实验性一轮跑过） | AntiKB 13（0.019），每一下都报；Simulation 169 | — |
+| 疾跑挨打（基线） | Simulation 4 | 无 |
+| `Velocity` JumpReset | Simulation 4，和基线完全相同；8 次挨打起跳 8 次，基线 0 次 | 无 |
+| 摔落（基线） | 无 | 无 |
+| `NoFall` SpoofGround | GroundSpoof 21 | 无 |
+| `NoFall` Packet | Simulation 61、TickTimer 42、GroundSpoof 28、Timer 25、AimDuplicateLook 14、TimerLimit 7 | BadPacketsV 21 |
+| `Derp` 随机（安全范围） | AimModulo360 1 | 无 |
+| `Derp` 俯仰 120°（Static，只发一次视角包） | BadPacketsD 1 | 无 |
+| `Derp` 随机，关 Safe Pitch（只在实验性一轮跑过） | BadPacketsD 241（开场 148） | — |
+
+两个场景本身的问题，已排除：
+- 疾跑中被服务器 tp，基线本身就有 4 个 Simulation，偏差数值和 JumpReset 那一轮逐位相同。
+- 第一版"边走边打"每 2 s 才 tp 一次，玩家 0.7 s 后就走过了尸壳，后面的点击大多打空，SuperKnockback 几乎没机会触发；基线同样有 6 个 Simulation。
+  改成每次 tp 后 0.25 s 出手，基线就干净了。
+
+结论：
+- **AntiKB 有效**：丢掉击退、保留 80%、保留 95%，每一次挨打都被抓到；合法的 JumpReset 没有多出任何 flag。
+- **BadPackets**：越界俯仰角（D）在默认配置下就抓；Criticals 的微小位移（V）、SuperKnockback 的一 tick 内重复疾跑指令（X）都是实验性检查。
+  Grim 默认配置下，**SuperKnockback 的发包式 W-tap 完全抓不到**；打开实验性检查后每一下都能抓到。
+- Criticals 的各种发包模式在默认配置下主要靠移动预测（Simulation）、着地（GroundSpoof）、计时（Timer/TickTimer）和包序（Post）抓到，而不是 BadPackets。
+  专门针对 Grim 调的 Grim 模式，在 26.2 上照样被 Simulation 抓：多出来的每个移动包都会被 Grim 当作一个 tick 去模拟。
+- 除了上面两个已排除的场景问题，两轮里的基线和合法模式（Jump、JumpReset）都没有被报，打开实验性检查也一样。
+
 ## 状态
 
 - Phase 0：通过（上表）。
@@ -172,3 +245,4 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 - Phase 2（Grim 全量移植 + 平台层）：完成。编译通过，回放测试和实机对照都已验证（见上）。
 - Phase 3（模块、`.grim` 指令、实机联调）：模块和实机联调已完成。**还没有实机验证**的有：`.grim` 指令（只有单元测试覆盖路由）、Discord webhook、
   `plugins/*.jar` 外部引擎（只有单元测试覆盖加载）、连续进出服务器后隔离加载器的内存回收，以及每包耗时。
+- 测试模块（`Criticals`、`Velocity`、`SuperKnockback`、`NoFall`、`Derp`）：已在本地 26.2 服上逐个模式验证（见"实机：本地 26.2 服务器"）。**还没有**在 1.8 的 Grim 服上和服务器自己的 Grim 对照过；这一步需要能连外网的环境，在 loyisa 上照 `Speed` 那一节的方式做。
