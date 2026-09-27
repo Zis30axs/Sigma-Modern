@@ -13,9 +13,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.Holder;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.effect.MobEffect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +35,8 @@ final class ModernSvg {
 
     private static final Map<String, Optional<byte[]>> FILES = new HashMap<>();
     private static final Map<Key, Identifier> CACHE = new HashMap<>();
+    private static final Map<String, String> EFFECT_ICONS = new HashMap<>();
+    private static final String EFFECT_ICON_DIR = "/assets/minecraft/sigma/icons/effect/";
     private static long serial;
 
     private record Key(String resource, int width, int height, boolean mask) {}
@@ -42,6 +46,22 @@ final class ModernSvg {
     /** The icon a category is shown with. */
     static String categoryIcon(ModuleCategory category) {
         return "/assets/minecraft/sigma/icons/category/" + category.name().toLowerCase(Locale.ROOT) + ".svg";
+    }
+
+    /** The icon a status effect is shown with: its own if the client has one (vanilla's all do), else a bottle. */
+    static String effectIcon(Holder<MobEffect> effect) {
+        return effect.unwrapKey()
+            .filter(key -> key.identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE))
+            .map(key -> effectIcon(key.identifier().getPath()))
+            .orElse(EFFECT_ICON_DIR + "generic.svg");
+    }
+
+    /** The icon for the effect registered as {@code minecraft:<path>}; package-visible for tests. */
+    static String effectIcon(String path) {
+        return EFFECT_ICONS.computeIfAbsent(path, name -> {
+            String resource = EFFECT_ICON_DIR + name + ".svg";
+            return name.matches("[a-z0-9_]+") && ModernSvg.class.getResource(resource) != null ? resource : EFFECT_ICON_DIR + "generic.svg";
+        });
     }
 
     /** Draws {@code resource}'s shape filling the box, in {@code color}. */

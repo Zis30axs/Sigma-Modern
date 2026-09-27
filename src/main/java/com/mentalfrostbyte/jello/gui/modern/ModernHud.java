@@ -2,13 +2,16 @@ package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClientMode;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.gui.PotionStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.effect.MobEffectInstance;
 
 /**
  * SigmaModern's in-game HUD decorations: the ArrayList module's list of switched-on modules
- * ({@link ModernArrayList}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
+ * ({@link ModernArrayList}) with the PotionStatus module's status effects above it ({@link ModernPotionStatus}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
  * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
  * ({@link ModernSuspectDrawer}) while it is left out.
  *
@@ -21,11 +24,16 @@ public final class ModernHud {
     private static final int BRAND_X = 10, BRAND_Y = 10, BRAND_H = 22;
     private static final float BRAND_MARK = 12F, BRAND_ITALIC = 0.64F;
     private static final int STACK_GAP = 6;
+    /** Where the right side starts: the distance the ArrayList always kept from the top edge. */
+    private static final int RIGHT_TOP = 10;
     private static final long DEBUG_STALE_NANOS = 200_000_000L;
 
     // The left side, the old client's way (its EventRender2DOffset): below the brand, each element starts where the one
     // above it ended - TabGUI, then the keystrokes, then a top-left ArrayList. Reset every frame.
     private static int leftStack = BRAND_BOTTOM;
+    // The same down the top-right corner: PotionStatus's effects, then a top-right ArrayList. Reset every frame, to
+    // below vanilla's effect icons while those are drawn there instead.
+    private static int rightStack = RIGHT_TOP;
     // How far down F3's text reached on the left [0] and right [1], and when that was reported.
     private static final int[] debugBottom = new int[2];
     private static final long[] debugAt = new long[2];
@@ -71,6 +79,45 @@ public final class ModernHud {
     /** Claims {@code height} of the left side for the element just drawn at {@link #leftStack()}. */
     static void stack(int height) {
         leftStack += height + STACK_GAP;
+    }
+
+    /** Where the next element down the top-right corner starts. */
+    static int rightStack() {
+        return rightStack;
+    }
+
+    /**
+     * Claims one side down to {@code bottom}, for an element that may have started lower than the stack (below F3's
+     * text): the next element starts below it either way.
+     */
+    static void claim(boolean left, int bottom) {
+        if (left) leftStack = Math.max(leftStack, bottom + STACK_GAP);
+        else rightStack = Math.max(rightStack, bottom + STACK_GAP);
+    }
+
+    /**
+     * How far down vanilla's effect icons reach in the top-right corner, or 0 while it draws none there: a row of
+     * 24-pixel icons at the top for good effects and one under it for bad ones, 15 lower in a demo world (see
+     * {@code Hud.extractEffects}). Only while PotionStatus isn't drawing them in its place.
+     */
+    static int vanillaEffectsBottom(Minecraft mc) {
+        if (mc.gui.hud.isHidden() || Modules.enabled(PotionStatus.class) != null) return 0;
+        boolean harmful = false, any = false;
+        for (MobEffectInstance instance : mc.player.getActiveEffects()) {
+            if (!instance.showIcon()) continue;
+            any = true;
+            harmful |= !instance.getEffect().value().isBeneficial();
+        }
+        if (!any) return 0;
+        return (mc.isDemo() ? 15 : 0) + (harmful ? 27 : 1) + 24;
+    }
+
+    /**
+     * Whether vanilla's effect icons give way to PotionStatus: called from a Sigma hook at the top of
+     * {@code Hud.extractEffects}. Only in SigmaModern, whose HUD is the one that draws them instead.
+     */
+    public static boolean replacesEffectIcons() {
+        return isActive() && Modules.enabled(PotionStatus.class) != null;
     }
 
     /**
@@ -134,8 +181,11 @@ public final class ModernHud {
         Minecraft mc = Minecraft.getInstance();
         if (mc.gui.screen() != null || mc.player == null || !isActive()) return;
         leftStack = BRAND_BOTTOM;
+        rightStack = Math.max(RIGHT_TOP, vanillaEffectsBottom(mc) + STACK_GAP);
         ModernTabGui.render(g);
         drawKeystrokes(g, mc.options);
+        // Before the list, which starts below whatever the effects claimed on its side.
+        ModernPotionStatus.render(g);
         ModernArrayList.render(g);
         ModernIsland.render(g);
         ModernSuspectDrawer.renderHud(g);

@@ -369,7 +369,7 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 - **quickPlay 启动时序**：`Minecraft.onGameLoadFinished` 先执行 `showScreen`（quickPlay 就在这里发起连接），后执行 `Client.start()`（按配置打开模块）。所以用 `--quickPlayMultiplayer` 启动时，SelfDetection 有时会错过第一个服务器。从多人游戏菜单进服不受影响。
   - 正确的修法是把 `Client.start` 拆成"打开模块"和"主菜单跳转"两段，前者放到 `showScreen` 之前。但它是带回滚的事务式启动，改动面较大，这次没动。
 - **本地进服阶段的噪声**：本地 SelfDetection 在进服到场景开始之间会报一些 BadPacketsE、Phase、AimDuplicateLook、Timer，服务器端的 Grim 多数没有。这是引擎就绪前扣包、之后集中放行造成的，统计时已排除在外。
-- 原版药水效果图标会盖住右上角的 ArrayList。
+- ~~原版药水效果图标会盖住右上角的 ArrayList。~~ 已修：PotionStatus 模块在 SigmaModern 下代替原版图标，画在 ArrayList 上方；模块关闭时 ArrayList 让到原版图标下面（见 `SIGMA_MODERN.md` 的 PotionStatus 一节）。
 
 ## 状态
 

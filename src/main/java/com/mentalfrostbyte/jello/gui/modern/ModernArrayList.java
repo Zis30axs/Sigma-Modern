@@ -96,9 +96,10 @@ final class ModernArrayList {
         }
 
         // As the old ActiveMods did: top-right starts below F3's right column while that's up; top-left hangs under the
-        // left stack (brand, TabGUI, keystrokes), or under F3's left column. Eased, so the list slides rather than jumps.
+        // left stack (brand, TabGUI, keystrokes), or under F3's left column. Either starts below PotionStatus's effects,
+        // or top-right below vanilla's effect icons (the right stack). Eased, so the list slides rather than jumps.
         int target = switch (list.getPosition()) {
-            case TOP_RIGHT -> Math.max(MARGIN, ModernHud.debugBottom(false) + 6);
+            case TOP_RIGHT -> Math.max(ModernHud.rightStack(), ModernHud.debugBottom(false) + 6);
             case TOP_LEFT -> Math.max(ModernHud.leftStack(), ModernHud.debugBottom(true) + 6);
             case BOTTOM_RIGHT -> MARGIN;
         };

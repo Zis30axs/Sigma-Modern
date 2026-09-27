@@ -6,6 +6,7 @@ import com.mentalfrostbyte.jello.module.impl.combat.SuperKnockback;
 import com.mentalfrostbyte.jello.module.impl.combat.Velocity;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
+import com.mentalfrostbyte.jello.module.impl.gui.PotionStatus;
 import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
@@ -65,6 +66,7 @@ public final class ModuleManager {
         this.register(new ModernChat());
         this.register(new NoFall());
         this.register(new NoHurtCam());
+        this.register(new PotionStatus());
         this.register(new Speed());
         this.register(new SuperKnockback());
         this.register(new SuspectList(antiCheat));

@@ -540,6 +540,11 @@ public class Hud {
     }
 
     private void extractEffects(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
+        // Sigma hook: the PotionStatus module draws the effects on SigmaModern's HUD instead, above the ArrayList.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernHud.replacesEffectIcons()) {
+            return;
+        }
+
         Collection<MobEffectInstance> activeEffects = this.minecraft.player.getActiveEffects();
         if (!activeEffects.isEmpty() && (this.minecraft.gui.screen() == null || !this.minecraft.gui.screen().showsActiveEffects())) {
             int beneficialCount = 0;
