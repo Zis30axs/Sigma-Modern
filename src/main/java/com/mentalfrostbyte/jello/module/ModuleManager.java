@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.module;
 
 import com.mentalfrostbyte.jello.module.impl.combat.Criticals;
+import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
 import com.mentalfrostbyte.jello.module.impl.combat.SuperKnockback;
 import com.mentalfrostbyte.jello.module.impl.combat.Velocity;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
@@ -57,6 +58,7 @@ public final class ModuleManager {
         this.register(new CustomTitle());
         this.register(new Derp());
         this.register(new Fullbright());
+        this.register(new KillAura());
         this.register(new LowFire());
         this.register(new ModernChat());
         this.register(new NoFall());
