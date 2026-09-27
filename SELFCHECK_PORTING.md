@@ -238,6 +238,117 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   专门针对 Grim 调的 Grim 模式，在 26.2 上照样被 Simulation 抓：多出来的每个移动包都会被 Grim 当作一个 tick 去模拟。
 - 除了上面两个已排除的场景问题，两轮里的基线和合法模式（Jump、JumpReset）都没有被报，打开实验性检查也一样。
 
+## KillAura、FakePlayer 与跨版本实验（2026-09-27）
+
+### 模块
+- `KillAura`（Combat，自写，不是移植）：
+  - 每 tick 开头选目标、算出这一 tick 的视角；视角射线在攻击距离内碰到目标、且到了该攻击的时候就出手。这些都发生在这一 tick 的移动包之前，和原版点击的顺序一样：先发攻击，瞄准用的视角随同一 tick 的移动包上报。
+  - 攻击走 `MultiPlayerGameMode.attack`，所以 `EventAttack` 的模块（Criticals、SuperKnockback）照常配合。挥手顺序按版本：≤1.8 先挥手后攻击。
+  - Timing：Auto 在 1.9+ 等冷却满，在 1.8 按随机 CPS（默认 8–12）。
+  - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
+  - `Silent` 只改上报的视角；`Movement Fix` 让按键和起跳加速按上报的朝向推（`EventStrafe`、`EventJump`）。
+  - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。
+- `Claude1` / `Claude2` 是暂定名：
+  - `Claude1`：每 tick 走完剩余角度的 60%（至少 3°，横向最多 55°、纵向最多 30°），瞄目标碰撞箱上离眼睛最近的点，再把转角取整到当前鼠标灵敏度的整数步长（`MouseHandler` 的 f³·8·0.15）。
+  - `Claude2`：要攻击时如果正在格挡，这一 tick 先放下，不攻击；下一 tick 攻击，并按原版右键的方式重新举起（先对准星上的实体发交互包，再用物品）。这就是玩家手动格挡攻击时的节奏：原版在使用物品的那一 tick 会丢掉攻击点击。
+- `FakePlayer`（Misc）：只存在于客户端的假人，四种模式：
+  - `Moving`：在圈内随机走动，原版步行速度。
+  - `Jumping`：疾跑加原版跳跃弧线。
+  - `Flying`：在圈上方的空中飞，用来测俯仰角。
+  - `CombatSimulation`：保持在攻击距离、绕着玩家换边横移、偶尔起跳、挥手后后撤（W-tap）。
+  - 任何模式都不会离开以出现点为圆心、半径 `Radius` 的圈，被击退也一样；对打时对手走远了，它就守在圈边离对手最近的地方。
+  - 打它不发攻击包：在包发出前取消，本地变红、击退，并像真打中一样重置攻击冷却。它不能被推动，否则玩家会被一个服务器不知道的东西推开。
+  - 瞄它时发出的视角、格挡、移动都是真的，所以能拿来测 Aim 和移动类检查；需要攻击包的检查（Hitboxes、AutoBlock）仍然用服务器上的真实体。
+- 新钩子：
+  - `EventStrafe`（`Entity.moveRelative`，只对本地玩家）：改按键推动所用的 yaw。
+  - `EventStopUsingItem`（`Minecraft.handleKeybinds`）：右键没按着时原版会松开正在用的物品；取消它就等于一直按着。
+  - `EventMotion.forceRotation()`：本 tick 即使视角和客户端记录的相同，也强制上报。
+
+### 实验环境（沿用上一节，另加一台带插件的 1.8 服）
+- **Paper 1.8.8**（build 445，JDK 21）+ **ViaVersion 5.12.0** + **GrimAC 2.3.74-8eb5f28**。服务器上的 Grim 和 SelfDetection 内嵌的是同一个提交，所以每个场景都有两份判决可以逐项对照。
+  - 服务器打开了 `verbose.print-to-console`：告警要到 `punishments.yml` 的阈值（例如 Simulation 组是 100 VL）才发，逐条对照必须看 verbose。
+  - ViaVersion 设置：`show-shield-when-sword-in-hand: true`，让 1.9+ 客户端拿剑时副手有盾可举；`fix-1_21-placement-rotation: false`，这是 Grim 启动时明确要求关掉的，否则会有误报和绕过。
+  - 客户端版本用 ViaFabricPlus 切换：1.8.x、1.12.2、26.2。
+- **原版 26.2 服**：26.2 客户端直连，只有本地判决。
+- 场景：
+  - `fake`：玩家站着打 FakePlayer，假人半径 3.5，光环瞄准距离 6。
+  - `fake-walk`：边往前走边打，每 1.2 s 传回起点。
+  - `side`：不转头、关射线，打正侧面的僵尸。
+  - `fight`：一只会还手、不吃击退的僵尸或尸壳，困难难度，玩家加 20 级生命提升。结束时从服务器记分板读血量，看格挡在服务器那边算不算。
+  - 每个场景 20 s，默认配置一遍、`experimental-checks: true` 一遍（本地和服务器同时切）。
+- 这台 Paper 服踩过的坑：
+  - `spawn-monsters=false` 时 summon 会打印"成功"，但怪物实体被 CraftBukkit 直接丢掉。
+  - 控制台的 `@e[...]` 选择器不生效，被当成玩家名或 UUID。改成每轮换一块远处的新场地，上一轮的怪留在原地不管。
+  - 不认 `--nogui`，要用 `--nojline nogui`。
+  - **Paper 1.8.8 自带 Netty 4.0**，ViaVersion 5 给 26.2 客户端翻译僵尸、蜘蛛等怪物时会调用 `ByteBuf.writeShortLE`（Netty 4.1 才有），服务器随即把玩家踢掉。猪没问题。所以"26.2 客户端在 1.8 服上用 AutoBlock"在这个环境里测不了。现实里这种组合要靠带新 Netty 的 1.8 分支（如 PandaSpigot），这个会话拿不到 GitHub 上的构件。
+- 脚本层面：
+  - quickPlay 会在客户端打开 SelfDetection 之前就开始连服（见"已知问题"）。每轮核对 SelfCheck 日志里有没有本轮的玩家，以及协议版本对不对，不对就重跑，最多三次。
+  - 原版服也改成每轮换新场地，让假人出现在玩家面前。第一版原版假人实验里，假人离玩家 5–11 格，光环多数时间根本没锁定，那一批数据作废。
+
+### 结果：转头（打 FakePlayer，默认配置，本地 / 服务器端）
+| Rotation | Moving | Jumping | Flying | CombatSimulation |
+|---|---|---|---|---|
+| Snap | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Wrapped（1.8.x @Paper） | AimModulo360 16 / 16 | 20 / 20 | 27 / 27 | 15 / 15 |
+| Wrapped（原版 26.2） | AimModulo360 20 | 28 | 23 | 16 |
+| Smooth | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Claude1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+- 另有零星的单次 GroundSpoof、TimerLimit 等，只在本地出现、服务器端没有对应，没有计入。
+- 1.12.2 和 26.2 客户端经 ViaVersion 连 1.8 服，打 CombatSimulation：Wrapped 两边都是 AimModulo360 15 / 15，Claude1 都是 0 / 0。
+- **AimModulo360 什么时候触发**，规则见 `AimModulo360.java`：
+  - yaw 绝对值小于 360；
+  - 这一 tick 的 yaw 变化超过 320°；
+  - 上一 tick 的变化小于 30°。
+- 发 atan2 算出的 -180..180 yaw 的光环，在目标跨过玩家正北（±180° 那条线）的那一 tick，yaw 会从 179 跳到 -179，差 358°，正好满足。跨线越频繁报得越多，所以飞行、跳跃这类到处跑的目标报得最多。
+- 只要把 yaw 保持连续（`上次上报的 yaw + wrapDegrees(目标 − 上次)`），Snap 这种瞬间转头也不会触发。
+- 另一种触发方式也验证过：玩家先把自己的视角转两圈（yaw≈900），光环再用 Wrapped 锁定时，第一 tick 从 900 跳到 180 左右，同样会报。
+- 单元测试 `KillAuraTest` 用同一条规则复现了"Wrapped 每次跨线都报、连续 yaw 一次都不报"。
+
+### 结果：Hitboxes 与移动修正（默认配置，本地 / 服务器端）
+| 场景 | 1.8.x @Paper | 原版 26.2 |
+|---|---|---|
+| 不转头、关射线，打正侧面的僵尸 | Hitboxes 187 / 187（几乎每一刀） | Hitboxes 36 |
+| 静默转头边走边打，**关**移动修正 | Simulation 268 + AntiKB 146 / Simulation 137 | Simulation 417 |
+| 静默转头边走边打，开修正（Snap / Claude1） | 0 / 0 | 0 |
+
+### 结果：AutoBlock
+对打场景：一只会还手、不吃击退的怪，20 s。
+
+检测（本地 / 服务器端，打开 `experimental-checks` 之后；**默认配置下四种模式在所有版本上都是 0**）：
+
+| AutoBlock | 1.8.x @Paper | 1.12.2 @Paper | 原版 26.2（盾） |
+|---|---|---|---|
+| None | 0 / 0 | 0 / 0 | 0 |
+| Hold | MultiActionsA 188 + MultiActionsE 188 / 同 | MultiActionsA 345 + E 345 + PacketOrderJ 29 / A 239 + E 239 + J 29 | MultiActionsA 35 + E 35 + PacketOrderJ 1 |
+| SameTick | PacketOrderI 376 + PacketOrderJ 188 / 同 | PacketOrderI 268 + J 136 / 同 | PacketOrderI 70 + J 36 |
+| Claude2 | 0 / 0 | 0 / 0 | 0 |
+
+- Hold：原版在使用物品时会丢掉攻击点击，所以"格挡中攻击"（MultiActionsA）和"格挡中挥手"（MultiActionsE）原版客户端发不出来。
+- SameTick：同一 tick 里"放下 → 攻击 → 举起"，原版也做不到（放下的那一 tick 攻击点击同样被丢掉），PacketOrderI 抓的就是这个包序；直接用物品、前面没有对实体的交互包，PacketOrderJ 也会报。
+- Claude2：把放下和攻击拆到两个 tick，再举起时先发实体交互包，包序和原版右键一致，两遍、三个版本都没有任何 flag。
+
+减伤（`fight`，玩家 104 血，20 s 内掉的血）：
+- 原版 26.2 盾牌：None 58–61；Hold 0；SameTick 1；Claude2 5–7（每次攻击前放下的那一 tick 会漏一点）。
+- 1.8 剑挡：单轮数据噪声大（有两轮僵尸根本没打到人），正在对每种模式和原版手动格挡各重复 3 次取平均，结果补在这里。
+
+### 这一轮发现并修掉的问题
+- **传送后静默视角没发出去**：
+  - 服务器传送时，客户端用确认包上报的是镜头视角，但它记录的"上次上报的视角"并没有更新。
+  - 光环的视角恰好等于那个旧记录时，这一 tick 就不发视角，于是服务器按传送的朝向预测移动，玩家却按光环的朝向在走。实测 Claude1 收敛后会出现一串 Simulation。
+  - 修复：`EventMotion.forceRotation()`，光环从所有发出去的移动包（包括传送确认）记录服务器实际知道的视角，不一致就强制上报。没有模块使用时，原版行为不变。
+- **AutoBlock 每 tick 闪一下**：
+  - 原版在右键没按着时会松开正在用的物品。光环在 tick 开头举起格挡，同一 tick 就被原版放下了，服务器看到的格挡一直在闪，伤害照吃不误。
+  - 实验性的 PacketOrderI 因此每 tick 都报（20 s 里约 466 次）。
+  - 修复：`EventStopUsingItem`。另外，1.8 下剑的 `useItem` 返回 PASS（物品堆没变），是否在格挡改为直接读玩家的状态。
+- 实验脚本自身的问题也记在上面的"实验环境"里：史莱姆、选择器、场地位置、版本竞争。
+
+### 已知问题（未修）
+- **quickPlay 启动时序**：`Minecraft.onGameLoadFinished` 先执行 `showScreen`（quickPlay 就在这里发起连接），后执行 `Client.start()`（按配置打开模块）。所以用 `--quickPlayMultiplayer` 启动时，SelfDetection 有时会错过第一个服务器。从多人游戏菜单进服不受影响。
+  - 正确的修法是把 `Client.start` 拆成"打开模块"和"主菜单跳转"两段，前者放到 `showScreen` 之前。但它是带回滚的事务式启动，改动面较大，这次没动。
+- **本地进服阶段的噪声**：本地 SelfDetection 在进服到场景开始之间会报一些 BadPacketsE、Phase、AimDuplicateLook、Timer，服务器端的 Grim 多数没有。这是引擎就绪前扣包、之后集中放行造成的，统计时已排除在外。
+- 原版药水效果图标会盖住右上角的 ArrayList。
+
 ## 状态
 
 - Phase 0：通过（上表）。
