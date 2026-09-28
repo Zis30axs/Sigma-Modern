@@ -39,6 +39,8 @@ final class ModernArrayList {
     // Where the top of the list is, eased toward where it should be.
     private static float listTop = -1F;
     private static float time;
+    // Where the top of a bottom-right list was last drawn; the screen's height while there isn't one.
+    private static int bottomRightTop = Integer.MAX_VALUE;
 
     private ModernArrayList() {}
 
@@ -52,6 +54,7 @@ final class ModernArrayList {
 
     static void render(GuiGraphicsExtractor g) {
         ModuleArrayList list = Modules.enabled(ModuleArrayList.class);
+        bottomRightTop = Integer.MAX_VALUE;
         if (list == null) {
             ROWS.clear();
             lastDraw = 0L;
@@ -105,8 +108,22 @@ final class ModernArrayList {
         };
         listTop = snap || listTop < 0F ? target : ModernStyle.smooth(listTop, target, dt, 14F);
         int top = Math.round(listTop);
+        if (list.getPosition().isBottom()) {
+            float reach = 0F;
+            for (Row row : ROWS.values()) reach = Math.max(reach, row.offset + rowH);
+            bottomRightTop = Math.round(g.guiHeight() - MARGIN - reach);
+        }
         for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH, top);
         for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH, top);
+    }
+
+    /**
+     * How far up a list hanging from the bottom-right corner reached when it was last drawn, or the screen's height
+     * while there's none; what's stacked down the top-right corner (PotionStatus's cards) stops above it. The HUD draws
+     * the effects first, so this is the previous frame's - a frame late, which nothing shows.
+     */
+    static int bottomRightTop(GuiGraphicsExtractor g) {
+        return Math.min(bottomRightTop, g.guiHeight());
     }
 
     private static void drawRow(GuiGraphicsExtractor g, ModuleArrayList list, Module module, Row row, float scale, int rowH, int top) {
