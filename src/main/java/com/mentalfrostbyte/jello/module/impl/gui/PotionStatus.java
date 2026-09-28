@@ -29,8 +29,11 @@ public class PotionStatus extends Module {
     public enum Layout {
         /** A line per effect: icon, name and level, time left, and a bar for how much of it is left. */
         LIST,
-        /** Icons with their time under them, side by side. */
-        COMPACT
+        /**
+         * Lines in the ArrayList's own style (its text size, spacing, background and shadow): name, time and the icon
+         * at the screen edge, so the effects read as the top of the list.
+         */
+        INLINE
     }
 
     public enum Order {
@@ -46,7 +49,7 @@ public class PotionStatus extends Module {
     public record Entry(String name, MobEffectCategory category, int ticks, boolean infinite, boolean ambient, boolean showIcon) {}
 
     private final EnumSetting<Layout> layout = this.register(new EnumSetting<>(
-            "Layout", "LIST: a line per effect with its name. COMPACT: icons with the time under them.", Layout.LIST));
+            "Layout", "LIST: a glass card per effect with a duration bar. INLINE: lines styled like the ArrayList's.", Layout.LIST));
 
     private final EnumSetting<Order> sort = this.register(new EnumSetting<>(
             "Sort", "KIND: good effects first, as vanilla. DURATION: soonest to run out first. NAME: alphabetical.", Order.KIND));
@@ -74,8 +77,8 @@ public class PotionStatus extends Module {
 
     public PotionStatus() {
         super(ModuleCategory.INTERFACE, "PotionStatus", "Lists your status effects above the ArrayList, in place of vanilla's icons");
-        this.showLevel.visibleWhen(() -> this.layout.is(Layout.LIST));
         this.durationBar.visibleWhen(() -> this.layout.is(Layout.LIST));
+        this.background.visibleWhen(() -> this.layout.is(Layout.LIST));
     }
 
     /** Vanilla always shows its effect icons; replacing them with nothing would lose information. */

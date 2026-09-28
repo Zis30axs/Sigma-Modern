@@ -166,13 +166,13 @@ The **PotionStatus** module (Interface category, **on by default**, as vanilla's
 
 `PotionStatus` holds the settings and decides which effects are shown and in what order (`listed`, over a plain `Entry` record so it is tested without a game): effects vanilla gives no icon (`show_icon: false`, e.g. `/effect ... true`) are left out, as vanilla leaves them out. Its settings:
 
-- **Layout** (`LIST` / `COMPACT`): a line per effect (icon, name and level, time left, duration bar), or tiles side by side with the time under the icon, six to a row.
+- **Layout** (`LIST` / `INLINE`): a dark-glass card per effect (icon, name and level, time left, duration bar), or lines in the ArrayList's own style - its text size, line spacing, background and shadow (its defaults while the list is off) - with the name, the time in a dimmer color and the icon at the screen edge, so the icons stand in a column and the effects read as the top of the list; the icons get a shadow like the text's, since no glass is behind them. An earlier `COMPACT` layout (icon tiles side by side, six to a row) was dropped: it was vanilla's grid of squares in new colours. A config that still says `COMPACT` falls back to `LIST`.
 - **Sort** (`KIND`, `DURATION`, `NAME`): good effects first, then neutral, then bad, as vanilla's two rows, and soonest to run out first within each; or soonest first overall (endless ones last); or by name.
-- **Show Level** (default on, `LIST`): the level after the name in Roman numerals (Speed II), none for level I, plain digits past X.
+- **Show Level** (default on): the level after the name in Roman numerals (Speed II), none for level I, plain digits past X.
 - **Show Time** (default on): `MobEffectUtil.formatDuration`, as the inventory shows it (∞ for endless effects). In the last ten seconds it turns amber.
 - **Duration Bar** (default on, `LIST`): a 2 px bar in the icon's color that runs down with the effect. The client is never told a potion's full length, so the bar measures from the longest the effect has had since it started or was last topped up (another potion, a beacon pulse).
 - **Colored Icons** (default on): each icon in its effect's color, mixed toward white until it is bright enough to read on dark glass (`ModernPotionStatus.iconColor`), so blindness's near-black and darkness's grey still show while orange stays orange. Off, the icons are white.
-- **Background** (0–1, default 0.6): the dark glass behind each line or tile; at 0 none, and the text gets a shadow.
+- **Background** (0–1, default 0.6, `LIST`): the dark glass behind each card; at 0 none, and the text gets a shadow. `INLINE` uses the ArrayList's background instead.
 - **Blink Expiring** (default on): the icon pulses in the effect's last ten seconds, quicker and deeper as it runs out, as vanilla's icons blink, but never fades out entirely (`PotionStatus.blink`).
 - **Hide Ambient** (default off): leaves out effects from a beacon or a conduit.
 

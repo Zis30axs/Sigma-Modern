@@ -17,7 +17,8 @@ import net.minecraft.world.effect.MobEffectUtil;
 
 /**
  * SigmaModern's drawing of {@link PotionStatus}: the player's status effects, each with its SVG icon
- * ({@link ModernSvg#effectIcon}), on dark glass above the ArrayList. Drawn from {@link ModernHud#render} before the
+ * ({@link ModernSvg#effectIcon}), above the ArrayList - on dark glass (LIST) or as lines in the list's own style
+ * (INLINE). Drawn from {@link ModernHud#render} before the
  * list, on the side the list hangs from, and claims its height there so the list starts below it.
  *
  * <p>Effects slide in from the screen edge when they start and fade where they were when they end, as the ArrayList's
@@ -32,8 +33,8 @@ final class ModernPotionStatus {
     private static final int ICON = 12;
     private static final float NAME_SCALE = 0.8F;
     private static final float TIME_SCALE = 0.74F;
-    private static final int TILE_W = 28, TILE_H = 30, TILE_ICON = 14, TILES_PER_LINE = 6;
-    private static final float TILE_TIME_SCALE = 0.6F;
+    /** INLINE: space between the text and the icon, and how far a line's background reaches past them. */
+    private static final int INLINE_GAP = 3, INLINE_PAD = 3;
     private static final int SURFACE_RGB = 0x101B26;
     private static final int EXPIRING = 0xFFFFC27A;
     private static final long GAP_NANOS = 250_000_000L;
@@ -111,11 +112,11 @@ final class ModernPotionStatus {
         shownTop = snap || shownTop < 0F ? target : ModernStyle.smooth(shownTop, target, dt, 14F);
         int top = Math.round(shownTop);
 
-        boolean compact = status.getLayout() == PotionStatus.Layout.COMPACT;
         float height = 0F;
-        if (compact) {
-            for (Row row : leaving) height = Math.max(height, drawTile(g, status, row, top, left));
-            for (MobEffectInstance instance : listed) height = Math.max(height, drawTile(g, status, ROWS.get(instance.getEffect()), top, left));
+        if (status.getLayout() == PotionStatus.Layout.INLINE) {
+            Inline look = Inline.of(list);
+            for (Row row : leaving) height = Math.max(height, drawInline(g, status, look, row, top, left));
+            for (MobEffectInstance instance : listed) height = Math.max(height, drawInline(g, status, look, ROWS.get(instance.getEffect()), top, left));
         } else {
             int width = listWidth(status);
             for (Row row : leaving) height = Math.max(height, drawLine(g, status, row, top, width, left));
@@ -195,35 +196,61 @@ final class ModernPotionStatus {
         return (row.slot + row.appear) * (ROW_H + GAP) - GAP * row.appear;
     }
 
-    /** A COMPACT tile: the icon with the time under it, side by side from the screen edge in. */
-    private static float drawTile(GuiGraphicsExtractor g, PotionStatus status, Row row, int top, boolean left) {
-        int tileH = status.showsTime() ? TILE_H : TILE_W - 4;
-        int line = (int)Math.floor(row.slot / TILES_PER_LINE);
-        float column = row.slot - line * TILES_PER_LINE;
-        float step = TILE_W + GAP;
-        float slide = (1F - row.appear) * (TILE_W + MARGIN + 2);
-        float x = left ? MARGIN + column * step - slide : g.guiWidth() - MARGIN - TILE_W - column * step + slide;
-        float y = top + line * (tileH + GAP);
+    /**
+     * How INLINE lines look: the ArrayList's own text size, line spacing, background and shadow, so the effects read
+     * as the top of the list; its defaults while the list is off.
+     */
+    private record Inline(float scale, int rowH, float background, boolean shadow) {
+        static Inline of(ModuleArrayList list) {
+            float size = list == null ? ModuleArrayList.DEFAULT_FONT_SIZE : list.getFontSize();
+            float scale = size / ModernFontRenderer.SIZE;
+            int spacing = list == null ? 0 : list.getSpacing();
+            return new Inline(scale, Math.round(ModernFontRenderer.SIZE * scale) + 1 + spacing,
+                list == null ? 0F : list.getBackground(), list == null || list.hasTextShadow());
+        }
+    }
+
+    /**
+     * An INLINE line: the name, the time in a dimmer color, and the icon at the screen edge, so the icons stand in a
+     * column and the text steps in from them as the ArrayList's does.
+     */
+    private static float drawInline(GuiGraphicsExtractor g, PotionStatus status, Inline look, Row row, int top, boolean left) {
+        float nameW = ModernTypography.width(ModernTypography.Face.TEXT, row.name, look.scale());
+        String time = status.showsTime() ? " " + row.time : "";
+        float timeW = ModernTypography.width(ModernTypography.Face.TEXT, time, look.scale());
+        float icon = look.rowH() - 1;
+        float width = nameW + timeW + INLINE_GAP + icon;
+        float slide = (1F - row.appear) * (width + MARGIN + INLINE_PAD + 2);
+        float x = left ? MARGIN - slide : g.guiWidth() - MARGIN - width + slide;
+        float y = top + row.slot * look.rowH();
         boolean expiring = !row.infinite && row.ticks <= PotionStatus.EXPIRING_TICKS;
         try (ModernStyle.AlphaScope ignored = ModernStyle.alphaScope(row.appear)) {
             g.pose().pushMatrix();
             try {
-                g.pose().translate(Math.round(x), Math.round(y));
-                glass(g, status, TILE_W, tileH);
+                g.pose().translate(x, y);
+                if (look.background() > 0F) {
+                    int alpha = Math.round(look.background() * 0xCC);
+                    ModernStyle.rounded(g, -INLINE_PAD, 0, (int)Math.ceil(width) + INLINE_PAD * 2, look.rowH(), 3, alpha << 24 | SURFACE_RGB);
+                }
+                float textY = (look.rowH() - ModernFontRenderer.SIZE * look.scale()) / 2F;
+                // The icon on the outer edge: after the text on the right side, before it on the left.
+                float iconX = left ? 0F : width - icon;
+                float textX = left ? icon + INLINE_GAP : 0F;
                 float blink = status.blinksExpiring() ? PotionStatus.blink(row.ticks, row.infinite) : 1F;
                 try (ModernStyle.AlphaScope ignoredToo = ModernStyle.alphaScope(blink)) {
-                    ModernSvg.mask(g, row.icon, (TILE_W - TILE_ICON) / 2F, 4F, TILE_ICON, TILE_ICON, row.color);
+                    // No glass behind it here: a shadow like the text's keeps a pale icon apart from a bright sky.
+                    if (look.shadow()) ModernSvg.mask(g, row.icon, iconX + 0.8F, (look.rowH() - icon) / 2F + 0.8F, icon, icon, 0x99000000);
+                    ModernSvg.mask(g, row.icon, iconX, (look.rowH() - icon) / 2F, icon, icon, row.color);
                 }
-                if (status.showsTime()) {
-                    float timeW = ModernTypography.width(ModernTypography.Face.TEXT, row.time, TILE_TIME_SCALE);
-                    ModernTypography.draw(g, row.time, (TILE_W - timeW) / 2F, tileH - 4F - ModernFontRenderer.SIZE * TILE_TIME_SCALE,
-                        TILE_TIME_SCALE, expiring ? EXPIRING : ModernStyle.MUTED, status.getBackground() <= 0F);
+                ModernTypography.draw(g, row.name, textX, textY, look.scale(), ModernStyle.TEXT, look.shadow());
+                if (!time.isEmpty()) {
+                    ModernTypography.draw(g, time, textX + nameW, textY, look.scale(), expiring ? EXPIRING : ModernStyle.MUTED, look.shadow());
                 }
             } finally {
                 g.pose().popMatrix();
             }
         }
-        return (line + 1) * (tileH + GAP) - GAP;
+        return (row.slot + row.appear) * look.rowH();
     }
 
     private static void glass(GuiGraphicsExtractor g, PotionStatus status, int w, int h) {

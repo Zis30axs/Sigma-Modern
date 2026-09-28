@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonPrimitive;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.impl.gui.PotionStatus.Entry;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
@@ -36,6 +37,27 @@ class PotionStatusTest {
         assertEquals(ModuleCategory.INTERFACE, status.getCategory());
         assertEquals("PotionStatus", status.getName());
         assertEquals(PotionStatus.Layout.LIST, status.getLayout());
+    }
+
+    @Test
+    void inlineFollowsTheArrayListsLookSoItsOwnGlassSettingsHide() {
+        PotionStatus status = new PotionStatus();
+        assertTrue(status.setting("Background").orElseThrow().isVisible());
+        assertTrue(status.setting("Duration Bar").orElseThrow().isVisible());
+        layout(status, PotionStatus.Layout.INLINE);
+        assertFalse(status.setting("Background").orElseThrow().isVisible());
+        assertFalse(status.setting("Duration Bar").orElseThrow().isVisible());
+        assertTrue(status.setting("Show Level").orElseThrow().isVisible());
+    }
+
+    @Test
+    void aConfigSavedWithTheDroppedCompactLayoutFallsBackToList() {
+        PotionStatus status = new PotionStatus();
+        layout(status, PotionStatus.Layout.INLINE);
+        assertFalse(status.setting("Layout").orElseThrow().fromJson(new JsonPrimitive("COMPACT")));
+        assertEquals(PotionStatus.Layout.INLINE, status.getLayout(), "an unknown saved value is ignored, not thrown on");
+        assertEquals(List.of(PotionStatus.Layout.LIST, PotionStatus.Layout.INLINE), List.of(PotionStatus.Layout.values()));
+        assertEquals(PotionStatus.Layout.LIST, new PotionStatus().getLayout());
     }
 
     @Test
@@ -97,6 +119,11 @@ class PotionStatusTest {
         for (float t = 200F; t > 180F; t -= 0.25F) early = Math.min(early, PotionStatus.blink(t, false));
         for (float t = 20F; t > 0F; t -= 0.25F) late = Math.min(late, PotionStatus.blink(t, false));
         assertTrue(late < early, early + " then " + late);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void layout(PotionStatus status, PotionStatus.Layout layout) {
+        ((EnumSetting<PotionStatus.Layout>) status.setting("Layout").orElseThrow()).set(layout);
     }
 
     @SuppressWarnings("unchecked")
