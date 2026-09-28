@@ -21,9 +21,10 @@ import net.minecraft.world.effect.MobEffectUtil;
 
 /**
  * SigmaModern's drawing of {@link PotionStatus}: the player's status effects, each with its SVG icon
- * ({@link ModernSvg#effectIcon}), a dark-glass card each. Drawn from {@link ModernHud#render} before the ArrayList,
- * down the top-right corner (the left side under the TabGUI when the list hangs top-left), and claims its height there
- * so a list in the same corner starts below it.
+ * ({@link ModernSvg#effectIcon}), stacked up from the bottom-right corner - a dark-glass card each (LIST) or lines in
+ * the ArrayList's own style (INLINE). Drawn from {@link ModernHud#render} after the ArrayList: the stack stands on a
+ * list hanging from the same corner and stops below a top-right one and F3's right column; when there isn't room for
+ * every effect, cards turn slim and then the effects with most time left fold into a "+N more" entry.
  *
  * <p>Effects slide in from the screen edge when they start and fade where they were when they end, as the ArrayList's
  * lines do. The duration bar runs from the longest this effect has had since it started (or was last topped up), not
@@ -32,13 +33,15 @@ import net.minecraft.world.effect.MobEffectUtil;
 final class ModernPotionStatus {
     private static final int MARGIN = 10;
     private static final int CARD_MIN_W = 128, RADIUS = 7, PAD = 6;
-    /** Space kept between the cards and a list hanging from the bottom-right corner. */
-    private static final int LIST_CLEARANCE = 6;
+    /** Space kept between the stack and the ArrayList (either end of the right side) or F3's text. */
+    private static final int CLEARANCE = 6;
+    /** INLINE: space between the text and the icon, and how far a line's background reaches past them. */
+    private static final int INLINE_GAP = 3, INLINE_PAD = 3;
 
     /**
      * A card's measurements: the icon on a tile in the effect's colour, then the name and the time on one line and the
-     * bar under them. {@link #FULL} normally; {@link #SLIM} when that many full cards would run into a list in the
-     * bottom-right corner.
+     * bar under them. {@link #FULL} normally; {@link #SLIM} when that many full cards wouldn't fit between the
+     * ArrayList and the corner.
      */
     record Size(int height, int gap, int tile, int icon, float nameScale, float timeScale, float textTop, int barH, int barBottom) {
         static final Size FULL = new Size(30, 4, 20, 14, 0.82F, 0.74F, 6F, 3, 6);
@@ -65,8 +68,27 @@ final class ModernPotionStatus {
 
         /** How many of these cards fit in {@code room}. */
         int capacity(int room) {
-            return room < this.height ? 0 : (room + this.gap) / (this.height + this.gap);
+            return ModernPotionStatus.capacity(room, this.height, this.gap);
         }
+    }
+
+    /**
+     * How INLINE lines look: the ArrayList's own text size, line spacing, background and shadow, so the effects read
+     * as part of the list; its defaults while the list is off.
+     */
+    private record Inline(float scale, int rowH, float background, boolean shadow) {
+        static Inline of(ModuleArrayList list) {
+            float size = list == null ? ModuleArrayList.DEFAULT_FONT_SIZE : list.getFontSize();
+            float scale = size / ModernFontRenderer.SIZE;
+            int spacing = list == null ? 0 : list.getSpacing();
+            return new Inline(scale, Math.round(ModernFontRenderer.SIZE * scale) + 1 + spacing,
+                list == null ? 0F : list.getBackground(), list == null || list.hasTextShadow());
+        }
+    }
+
+    /** How many entries {@code height} tall, {@code gap} apart, fit in {@code room}. */
+    static int capacity(int room, int height, int gap) {
+        return room < height ? 0 : (room + gap) / (height + gap);
     }
     private static final int SURFACE_RGB = 0x101B26;
     private static final int EXPIRING = 0xFFFFC27A;
@@ -113,21 +135,22 @@ final class ModernPotionStatus {
         float tickrate = mc.level.tickRateManager().tickrate();
         List<MobEffectInstance> active = status.listed(mc.player.getActiveEffects(), ModernPotionStatus::entry);
 
-        // Down the top-right corner, where vanilla's icons were; down the left under the TabGUI and the keystrokes when
-        // the ArrayList hangs top-left. Below F3's text on that side while it's up.
+        // Up from the bottom-right corner, standing on a list that hangs there; no higher than a top-right list's end,
+        // F3's right column, or vanilla's icons' place. The ArrayList is drawn first, so its extent is this frame's.
         ModuleArrayList list = Modules.enabled(ModuleArrayList.class);
-        boolean left = list != null && list.getPosition() == ModuleArrayList.Corner.TOP_LEFT;
-        int target = left ? Math.max(ModernHud.leftStack(), ModernHud.debugBottom(true) + 6)
-            : Math.max(ModernHud.rightStack(), ModernHud.debugBottom(false) + 6);
-        shownTop = snap || shownTop < 0F ? target : ModernStyle.smooth(shownTop, target, dt, 14F);
-        int top = Math.round(shownTop);
+        int floor = Math.min(g.guiHeight() - MARGIN, ModernArrayList.bottomRightTop(g) - CLEARANCE);
+        int ceiling = Math.max(ModernHud.rightStack(),
+            Math.max(ModernArrayList.topRightBottom() + CLEARANCE, ModernHud.debugBottom(false) + CLEARANCE));
+        int room = floor - ceiling;
 
-        // Down to a list in the bottom-right corner, if one is there: slimmer cards when full ones would reach it, and
-        // when even those don't fit, the effects with the most time left fold into a "+N more" card.
-        int room = (left ? g.guiHeight() : ModernArrayList.bottomRightTop(g) - LIST_CLEARANCE) - top;
-        Size size = shownSize = Size.fitting(active.size(), room, shownSize);
+        // Slimmer cards when full ones don't fit; when even those don't, the effects with the most time left fold
+        // into a "+N more" entry.
+        boolean inline = status.getLayout() == PotionStatus.Layout.INLINE;
+        Inline look = Inline.of(list);
+        Size size = inline ? shownSize : (shownSize = Size.fitting(active.size(), room, shownSize));
+        int itemH = inline ? look.rowH() : size.height(), gap = inline ? 0 : size.gap();
         List<MobEffectInstance> listed = active;
-        int fit = size.capacity(room);
+        int fit = capacity(room, itemH, gap);
         if (active.size() > fit) listed = keepSoonest(active, Math.max(1, fit - 1), ModernPotionStatus::entry);
         int folded = active.size() - listed.size();
 
@@ -155,12 +178,23 @@ final class ModernPotionStatus {
         }
         if (ROWS.isEmpty()) return;
 
-        float height = 0F;
-        int width = cardWidth(status, size);
-        for (Row row : leaving) height = Math.max(height, drawCard(g, status, size, row, top, width, left));
-        for (MobEffectInstance instance : listed) height = Math.max(height, drawCard(g, status, size, ROWS.get(instance.getEffect()), top, width, left));
-        if (folded > 0) height = Math.max(height, drawFolded(g, status, size, folded, listed.size(), top, width, left));
-        ModernHud.claim(left, Math.round(top + height));
+        // In reading order from the top of the stack down to its foot, which sits on the floor; eased, so the stack
+        // rises and sinks rather than jumps as effects come and go.
+        int entries = listed.size() + (folded > 0 ? 1 : 0);
+        int target = floor - (entries == 0 ? 0 : entries * (itemH + gap) - gap);
+        shownTop = snap || shownTop < 0F ? target : ModernStyle.smooth(shownTop, target, dt, 14F);
+        int top = Math.round(shownTop);
+
+        if (inline) {
+            for (Row row : leaving) drawInline(g, status, look, row, top);
+            for (MobEffectInstance instance : listed) drawInline(g, status, look, ROWS.get(instance.getEffect()), top);
+            if (folded > 0) drawFoldedInline(g, look, folded, listed.size(), top);
+        } else {
+            int width = cardWidth(status, size);
+            for (Row row : leaving) drawCard(g, status, size, row, top, width);
+            for (MobEffectInstance instance : listed) drawCard(g, status, size, ROWS.get(instance.getEffect()), top, width);
+            if (folded > 0) drawFolded(g, status, size, folded, listed.size(), top, width);
+        }
     }
 
     /**
@@ -179,8 +213,8 @@ final class ModernPotionStatus {
     }
 
     /** The card standing in for {@code count} effects there was no room for, in slot {@code slot}. */
-    private static float drawFolded(GuiGraphicsExtractor g, PotionStatus status, Size size, int count, int slot, int top, int width, boolean left) {
-        float x = left ? MARGIN : g.guiWidth() - MARGIN - width;
+    private static void drawFolded(GuiGraphicsExtractor g, PotionStatus status, Size size, int count, int slot, int top, int width) {
+        float x = g.guiWidth() - MARGIN - width;
         float y = top + slot * (size.height() + size.gap());
         g.pose().pushMatrix();
         try {
@@ -195,7 +229,25 @@ final class ModernPotionStatus {
         } finally {
             g.pose().popMatrix();
         }
-        return slot * (size.height() + size.gap()) + size.height();
+    }
+
+    /** INLINE's "+N more" line, in slot {@code slot}. */
+    private static void drawFoldedInline(GuiGraphicsExtractor g, Inline look, int count, int slot, int top) {
+        String text = "+" + count + " more";
+        float icon = look.rowH() - 1;
+        float width = ModernTypography.width(ModernTypography.Face.TEXT, text, look.scale()) + INLINE_GAP + icon;
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(g.guiWidth() - MARGIN - width, top + slot * look.rowH());
+            if (look.background() > 0F) {
+                ModernStyle.rounded(g, -INLINE_PAD, 0, (int)Math.ceil(width) + INLINE_PAD * 2, look.rowH(), 3,
+                    Math.round(look.background() * 0xCC) << 24 | SURFACE_RGB);
+            }
+            ModernSvg.mask(g, ModernSvg.effectIcon("generic"), width - icon, (look.rowH() - icon) / 2F, icon, icon, ModernStyle.MUTED);
+            ModernTypography.draw(g, text, 0F, (look.rowH() - ModernFontRenderer.SIZE * look.scale()) / 2F, look.scale(), ModernStyle.MUTED, look.shadow());
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
     private static PotionStatus.Entry entry(MobEffectInstance instance) {
@@ -232,11 +284,11 @@ final class ModernPotionStatus {
 
     /**
      * One effect's card: its icon on a rounded tile tinted with the effect's colour, the name and level with the time
-     * at the far end, and under them the bar. Returns how far below {@code top} it reaches.
+     * at the far end, and under them the bar.
      */
-    private static float drawCard(GuiGraphicsExtractor g, PotionStatus status, Size size, Row row, int top, int width, boolean left) {
+    private static void drawCard(GuiGraphicsExtractor g, PotionStatus status, Size size, Row row, int top, int width) {
         float slide = (1F - row.appear) * (width + MARGIN + 4);
-        float x = left ? MARGIN - slide : g.guiWidth() - MARGIN - width + slide;
+        float x = g.guiWidth() - MARGIN - width + slide;
         float y = top + row.slot * (size.height() + size.gap());
         boolean expiring = !row.infinite && row.ticks <= PotionStatus.EXPIRING_TICKS;
         boolean shadow = status.getBackground() <= 0F;
@@ -280,7 +332,46 @@ final class ModernPotionStatus {
                 g.pose().popMatrix();
             }
         }
-        return (row.slot + row.appear) * (size.height() + size.gap()) - size.gap() * row.appear;
+    }
+
+    /**
+     * An INLINE line: the name, the time in a dimmer color, and the icon at the screen edge, so the icons stand in a
+     * column and the text steps in from them as the ArrayList's does.
+     */
+    private static void drawInline(GuiGraphicsExtractor g, PotionStatus status, Inline look, Row row, int top) {
+        float nameW = ModernTypography.width(ModernTypography.Face.TEXT, row.name, look.scale());
+        String time = status.showsTime() ? " " + row.time : "";
+        float timeW = ModernTypography.width(ModernTypography.Face.TEXT, time, look.scale());
+        float icon = look.rowH() - 1;
+        float width = nameW + timeW + INLINE_GAP + icon;
+        float slide = (1F - row.appear) * (width + MARGIN + INLINE_PAD + 2);
+        float x = g.guiWidth() - MARGIN - width + slide;
+        float y = top + row.slot * look.rowH();
+        boolean expiring = !row.infinite && row.ticks <= PotionStatus.EXPIRING_TICKS;
+        try (ModernStyle.AlphaScope ignored = ModernStyle.alphaScope(row.appear)) {
+            g.pose().pushMatrix();
+            try {
+                g.pose().translate(x, y);
+                if (look.background() > 0F) {
+                    int alpha = Math.round(look.background() * 0xCC);
+                    ModernStyle.rounded(g, -INLINE_PAD, 0, (int)Math.ceil(width) + INLINE_PAD * 2, look.rowH(), 3, alpha << 24 | SURFACE_RGB);
+                }
+                float textY = (look.rowH() - ModernFontRenderer.SIZE * look.scale()) / 2F;
+                float iconX = width - icon;
+                float blink = status.blinksExpiring() ? PotionStatus.blink(row.ticks, row.infinite) : 1F;
+                try (ModernStyle.AlphaScope ignoredToo = ModernStyle.alphaScope(blink)) {
+                    // No glass behind it here: a shadow like the text's keeps a pale icon apart from a bright sky.
+                    if (look.shadow()) ModernSvg.mask(g, row.icon, iconX + 0.8F, (look.rowH() - icon) / 2F + 0.8F, icon, icon, 0x99000000);
+                    ModernSvg.mask(g, row.icon, iconX, (look.rowH() - icon) / 2F, icon, icon, row.color);
+                }
+                ModernTypography.draw(g, row.name, 0F, textY, look.scale(), ModernStyle.TEXT, look.shadow());
+                if (!time.isEmpty()) {
+                    ModernTypography.draw(g, time, nameW, textY, look.scale(), expiring ? EXPIRING : ModernStyle.MUTED, look.shadow());
+                }
+            } finally {
+                g.pose().popMatrix();
+            }
+        }
     }
 
     private static void glass(GuiGraphicsExtractor g, PotionStatus status, int w, int h) {

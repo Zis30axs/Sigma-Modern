@@ -12,21 +12,31 @@ import java.util.function.Function;
 import net.minecraft.world.effect.MobEffectCategory;
 
 /**
- * The player's status effects on SigmaModern's HUD, in place of vanilla's row of icons in the top-right corner: a
- * glass card per effect with its own line-drawn icon, its name and level, the time it has left and a bar running down
- * with it.
+ * The player's status effects on SigmaModern's HUD, in place of vanilla's row of icons in the top-right corner: each
+ * with its own line-drawn icon, its name and level and the time it has left, stacked up from the bottom-right corner
+ * as glass cards with a bar running down ({@link Layout#LIST}) or as lines in the ArrayList's style
+ * ({@link Layout#INLINE}).
  *
  * <p>The drawing is {@code gui.modern.ModernPotionStatus}'s, the same split as {@link ModuleArrayList}: this class
  * holds the settings and decides which effects are shown and in what order. While it is on and the client is in
- * SigmaModern, vanilla's icons are not drawn (a Sigma hook in {@code Hud.extractEffects}). The cards stack down the
- * top-right corner, or down the left under the TabGUI when the ArrayList hangs top-left, and a list hanging in the
- * same corner starts below them. Switched off, vanilla's icons come back and a top-right list moves below those
- * instead.</p>
+ * SigmaModern, vanilla's icons are not drawn (a Sigma hook in {@code Hud.extractEffects}). The stack stands on an
+ * ArrayList hanging from the bottom-right corner and stops short of a top-right one. Switched off, vanilla's icons
+ * come back and a top-right list moves below them instead.</p>
  */
 public class PotionStatus extends Module {
 
     /** Vanilla starts blinking an effect's icon when this many ticks are left (ten seconds). */
     public static final int EXPIRING_TICKS = 200;
+
+    public enum Layout {
+        /** A glass card per effect: the icon on a tile in its colour, name and level, time left, and a bar. */
+        LIST,
+        /**
+         * Lines in the ArrayList's own style (its text size, spacing, background and shadow): name, time and the icon
+         * at the screen edge, so the effects read as part of the list.
+         */
+        INLINE
+    }
 
     public enum Order {
         /** Good effects first, then neutral, then bad, as vanilla's two rows; soonest to run out first within each. */
@@ -39,6 +49,9 @@ public class PotionStatus extends Module {
 
     /** What the ordering and filtering need to know about one active effect. */
     public record Entry(String name, MobEffectCategory category, int ticks, boolean infinite, boolean ambient, boolean showIcon) {}
+
+    private final EnumSetting<Layout> layout = this.register(new EnumSetting<>(
+            "Layout", "LIST: a glass card per effect with a duration bar. INLINE: lines styled like the ArrayList's.", Layout.LIST));
 
     private final EnumSetting<Order> sort = this.register(new EnumSetting<>(
             "Sort", "KIND: good effects first, as vanilla. DURATION: soonest to run out first. NAME: alphabetical.", Order.KIND));
@@ -65,7 +78,9 @@ public class PotionStatus extends Module {
             "Hide Ambient", "Leaves out effects from a beacon or a conduit, which keep coming back while in range.", false));
 
     public PotionStatus() {
-        super(ModuleCategory.INTERFACE, "PotionStatus", "Shows your status effects as cards in the top-right corner, in place of vanilla's icons");
+        super(ModuleCategory.INTERFACE, "PotionStatus", "Shows your status effects in the bottom-right corner, in place of vanilla's icons");
+        this.durationBar.visibleWhen(() -> this.layout.is(Layout.LIST));
+        this.background.visibleWhen(() -> this.layout.is(Layout.LIST));
     }
 
     /** Vanilla always shows its effect icons; replacing them with nothing would lose information. */
@@ -129,6 +144,10 @@ public class PotionStatus extends Module {
         float depth = 0.15F + 0.35F * used;
         float wave = (float) Math.cos(ticks * Math.PI / (6.0F - 3.0F * used));
         return 1.0F - depth * (0.5F - 0.5F * wave);
+    }
+
+    public Layout getLayout() {
+        return this.layout.get();
     }
 
     public boolean showsLevel() {

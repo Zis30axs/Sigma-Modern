@@ -21,8 +21,7 @@ import org.jspecify.annotations.Nullable;
  * {@code gui.modern.ModernArrayList}, which asks {@code Modules.enabled} for this module every frame; this class
  * only holds the settings and decides which modules are listed and in what order, the same split as
  * {@code ModernChat}. It {@linkplain #isEnabledByDefault() starts on}, and switched on untouched it draws what the
- * old list did - every other module that is on, by name - but from the bottom-right corner, leaving the top right to
- * PotionStatus's effect cards.</p>
+ * old list did: every other module that is on, by name, in the top-right corner.</p>
  */
 public class ModuleArrayList extends Module {
 
@@ -61,7 +60,7 @@ public class ModuleArrayList extends Module {
     }
 
     private final EnumSetting<Corner> position = this.register(new EnumSetting<>(
-            "Position", "Which corner of the screen the list hangs from.", Corner.BOTTOM_RIGHT));
+            "Position", "Which corner of the screen the list hangs from.", Corner.TOP_RIGHT));
 
     private final EnumSetting<Order> sort = this.register(new EnumSetting<>(
             "Sort", "ALPHABETICAL by name, or LENGTH for the widest line first.", Order.ALPHABETICAL));

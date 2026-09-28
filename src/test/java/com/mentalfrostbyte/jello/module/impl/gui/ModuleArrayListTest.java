@@ -33,14 +33,11 @@ class ModuleArrayListTest {
         assertEquals("ArrayList", list.getName());
     }
 
-    /**
-     * Switched on untouched, the list must look like the one SigmaModern's HUD always drew - but in the bottom-right
-     * corner, which leaves the top right to PotionStatus's effect cards.
-     */
+    /** Switched on untouched, the list must look like the one SigmaModern's HUD always drew. */
     @Test
-    void defaultsReproduceTheOldListFromTheBottomRight() {
+    void defaultsReproduceTheOldList() {
         ModuleArrayList list = new ModuleArrayList();
-        assertEquals(ModuleArrayList.Corner.BOTTOM_RIGHT, list.getPosition());
+        assertEquals(ModuleArrayList.Corner.TOP_RIGHT, list.getPosition());
         assertEquals(ModuleArrayList.DEFAULT_FONT_SIZE, list.getFontSize());
         assertEquals(0, list.getSpacing());
         assertEquals(0F, list.getBackground());

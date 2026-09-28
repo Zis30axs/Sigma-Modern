@@ -11,7 +11,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 
 /**
  * SigmaModern's in-game HUD decorations: the ArrayList module's list of switched-on modules
- * ({@link ModernArrayList}) with the PotionStatus module's status effects above it ({@link ModernPotionStatus}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
+ * ({@link ModernArrayList}), the PotionStatus module's status effects in the bottom-right corner ({@link ModernPotionStatus}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
  * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
  * ({@link ModernSuspectDrawer}) while it is left out.
  *
@@ -31,8 +31,8 @@ public final class ModernHud {
     // The left side, the old client's way (its EventRender2DOffset): below the brand, each element starts where the one
     // above it ended - TabGUI, then the keystrokes, then a top-left ArrayList. Reset every frame.
     private static int leftStack = BRAND_BOTTOM;
-    // The same down the top-right corner: PotionStatus's effects, then a top-right ArrayList. Reset every frame, to
-    // below vanilla's effect icons while those are drawn there instead.
+    // Where a top-right ArrayList starts: below vanilla's effect icons while those are drawn there (PotionStatus off).
+    // Reset every frame.
     private static int rightStack = RIGHT_TOP;
     // How far down F3's text reached on the left [0] and right [1], and when that was reported.
     private static final int[] debugBottom = new int[2];
@@ -84,15 +84,6 @@ public final class ModernHud {
     /** Where the next element down the top-right corner starts. */
     static int rightStack() {
         return rightStack;
-    }
-
-    /**
-     * Claims one side down to {@code bottom}, for an element that may have started lower than the stack (below F3's
-     * text): the next element starts below it either way.
-     */
-    static void claim(boolean left, int bottom) {
-        if (left) leftStack = Math.max(leftStack, bottom + STACK_GAP);
-        else rightStack = Math.max(rightStack, bottom + STACK_GAP);
     }
 
     /**
@@ -184,9 +175,10 @@ public final class ModernHud {
         rightStack = Math.max(RIGHT_TOP, vanillaEffectsBottom(mc) + STACK_GAP);
         ModernTabGui.render(g);
         drawKeystrokes(g, mc.options);
-        // Before the list, which starts below whatever the effects claimed on its side.
-        ModernPotionStatus.render(g);
+        // After the list: the effects stack up from the bottom-right corner, on a list hanging there and clear of a
+        // top-right one, whose extent the list records as it draws.
         ModernArrayList.render(g);
+        ModernPotionStatus.render(g);
         ModernIsland.render(g);
         ModernSuspectDrawer.renderHud(g);
     }

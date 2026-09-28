@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class ModernPotionStatusTest {
 
     @Test
-    void cardsSlimDownOnlyWhenFullOnesWouldReachAListBelow() {
+    void cardsSlimDownOnlyWhenFullOnesWouldNotFitBesideTheList() {
         ModernPotionStatus.Size full = ModernPotionStatus.Size.FULL, slim = ModernPotionStatus.Size.SLIM;
         assertEquals(0, full.stack(0));
         assertEquals(30, full.stack(1));
@@ -47,6 +47,9 @@ class ModernPotionStatusTest {
         assertEquals(1, slim.capacity(slim.height()));
         assertEquals(5, slim.capacity(slim.stack(5)));
         assertEquals(5, slim.capacity(slim.stack(6) - 1));
+        // INLINE lines touch, as the ArrayList's do.
+        assertEquals(10, ModernPotionStatus.capacity(120, 12, 0));
+        assertEquals(0, ModernPotionStatus.capacity(-40, 12, 0), "no room at all: a top-right list reaches the bottom one");
     }
 
     private static PotionStatus.Entry entry(String name, int ticks, boolean infinite) {
