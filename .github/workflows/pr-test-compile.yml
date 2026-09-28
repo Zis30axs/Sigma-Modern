@@ -1,0 +1,17 @@
+name: Pull Request Compile
+
+on:
+  pull_request:
+
+jobs:
+  test-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Compile main and test tools
+        run: mvn -B -DskipTests test-compile
