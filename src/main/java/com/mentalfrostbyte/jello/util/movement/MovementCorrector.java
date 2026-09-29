@@ -43,11 +43,13 @@ public final class MovementCorrector {
     public static final int DEFAULT_PRIORITY = 0;
 
     /**
-     * How far past the edge of a direction the aim may drift before {@link MovementCorrection#CLAUDE3} lets go of it,
-     * in degrees. Around a third of the band's half-width, which is enough to absorb an aim that wobbles by a degree or
-     * two and small enough that the walk never strays more than about thirty degrees from the way it was meant.
+     * How far past the edge of a direction the aim may drift before {@link MovementCorrection#CLAUDE3} lets go of it, in
+     * degrees. Chosen by simulation (see {@code KeyRemapTest}): with an aim that circles and wobbles a few degrees a tick,
+     * 6 keeps the keys from changing about half as often as {@code SILENT}'s rounding does, while the walk never strays
+     * more than 28.5 degrees from the way it was meant (SILENT's 30) and strays 11.8 on average (SILENT's 12.5). Larger
+     * values change the keys still less often but stray further; below 4 they change about a third more often.
      */
-    static final float HYSTERESIS = 8.0F;
+    static final float HYSTERESIS = 6.0F;
 
     /** A facing that has been asked for this tick. */
     public record Request(Object owner, Rotation look, MovementCorrection mode, int priority) {

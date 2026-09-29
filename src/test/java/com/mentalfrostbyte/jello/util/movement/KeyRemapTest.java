@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import org.junit.jupiter.api.Test;
 
@@ -144,5 +146,54 @@ class KeyRemapTest {
                 assertTrue(nearest.forward() || nearest.backward() || nearest.left() || nearest.right(), "a key is held");
             }
         }
+    }
+
+    /**
+     * The claim on {@link MovementCorrector#HYSTERESIS}: an aim that circles the player and wobbles a few degrees a tick,
+     * with W held and the camera fixed, seen through both remaps. The same seed for both.
+     */
+    @Test
+    void claude3IsNoLessAccurateThanSilentAndChangesTheKeysAboutHalfAsOften() {
+        double[] silent = sweep(false);
+        double[] claude3 = sweep(true);
+        // mean error, max error, key changes per tick
+        assertTrue(claude3[0] < silent[0], "mean error " + claude3[0] + " vs " + silent[0]);
+        assertTrue(claude3[1] < silent[1], "max error " + claude3[1] + " vs " + silent[1]);
+        assertTrue(claude3[2] < 0.6 * silent[2], "key changes " + claude3[2] + " vs " + silent[2]);
+    }
+
+    private static double[] sweep(final boolean nearest) {
+        Random random = new Random(3);
+        float reported = 0.0F;
+        int direction = -1;
+        Input last = null;
+        int changes = 0;
+        double total = 0.0;
+        double worst = 0.0;
+        int ticks = 100_000;
+        for (int tick = 0; tick < ticks; tick++) {
+            reported += 1.5F + (float) (random.nextGaussian() * 4.0);
+            float delta = -reported;
+            Input keys;
+            if (nearest) {
+                KeyRemap.Steered steered = KeyRemap.nearest(W, delta, direction, MovementCorrector.HYSTERESIS);
+                keys = steered.keys();
+                direction = steered.direction();
+            } else {
+                keys = KeyRemap.silent(W, delta);
+            }
+            // The way W was meant to go, in the reported facing's frame, against the way the keys go in it.
+            double meant = Math.toDegrees(Math.atan2(-Math.sin(Math.toRadians(delta)), Math.cos(Math.toRadians(delta))));
+            double made = Math.toDegrees(Math.atan2((keys.left() ? 1 : 0) - (keys.right() ? 1 : 0),
+                    (keys.forward() ? 1 : 0) - (keys.backward() ? 1 : 0)));
+            double error = Math.abs(Mth.wrapDegrees((float) (made - meant)));
+            total += error;
+            worst = Math.max(worst, error);
+            if (last != null && !keys.equals(last)) {
+                changes++;
+            }
+            last = keys;
+        }
+        return new double[]{total / ticks, worst, (double) changes / ticks};
     }
 }
