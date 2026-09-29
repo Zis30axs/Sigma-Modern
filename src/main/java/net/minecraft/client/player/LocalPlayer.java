@@ -1003,9 +1003,10 @@ public class LocalPlayer extends AbstractClientPlayer
         this.input.keyPresses = EventBus.call(new EventMovementInput(this.input.keyPresses)).getInput();
         // Sigma hook: the movement corrector turns the direction keys to the facing the server was told about. After the
         // event, so that a module that presses jump or sneak is not undone; the movement vector is worked out again from
-        // whatever it leaves, and the input packet then reports those keys too.
+        // whatever it leaves, and the input packet then reports those keys too. Not while riding: the mount steers by its
+        // own facing, from these same keys, and turned keys would send it off sideways.
         com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
-        if (corrector != null) {
+        if (corrector != null && !this.isPassenger()) {
             Input corrected = corrector.correct(this.input.keyPresses, this.getYRot());
             if (!corrected.equals(this.input.keyPresses)) {
                 this.input.replaceKeyPresses(corrected);
