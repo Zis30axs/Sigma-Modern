@@ -45,6 +45,12 @@ errors (a source file pulled in transitively that doesn't itself appear in the f
 sources). When that happens, don't guess — compile the suspect file directly with the Java Compiler API (or
 `javac`) to surface the real error.
 
+**Working in a headless container (agents):** use the scripts in `scripts/` instead of assembling the commands
+above by hand — `scripts/setup.sh` (JDK 25, Linux natives, classpath; idempotent), `scripts/build.sh compile|test`,
+`scripts/game.sh` (headless client you can screenshot), `scripts/server.sh` (local vanilla server) and
+`scripts/capture.sh`. `env-agent.md` documents them, the `-Dsigma.debug.*` flags and the pitfalls already hit; keep
+it in step with the scripts when you change either.
+
 ## Porting conventions (read before touching ported-mod code)
 
 These apply to anything under `net.caffeinemc.mods.sodium`, `net.caffeinemc.mods.lithium`, `malte0811.ferritecore`,
