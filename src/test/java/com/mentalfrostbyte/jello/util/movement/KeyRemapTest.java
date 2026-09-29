@@ -149,17 +149,18 @@ class KeyRemapTest {
     }
 
     /**
-     * The claim on {@link MovementCorrector#HYSTERESIS}: an aim that circles the player and wobbles a few degrees a tick,
-     * with W held and the camera fixed, seen through both remaps. The same seed for both.
+     * What {@link MovementCorrector#HYSTERESIS} says of the model: an aim that circles the player and wobbles a few degrees
+     * a tick, with W held and the camera fixed, seen through both remaps (the same seed for both). It is a model - in the
+     * game the price of the hysteresis was higher, which is why the constant is small.
      */
     @Test
-    void claude3IsNoLessAccurateThanSilentAndChangesTheKeysAboutHalfAsOften() {
+    void inTheModelClaude3IsNoLessAccurateThanSilentAndChangesTheKeysLessOften() {
         double[] silent = sweep(false);
         double[] claude3 = sweep(true);
         // mean error, max error, key changes per tick
         assertTrue(claude3[0] < silent[0], "mean error " + claude3[0] + " vs " + silent[0]);
         assertTrue(claude3[1] < silent[1], "max error " + claude3[1] + " vs " + silent[1]);
-        assertTrue(claude3[2] < 0.6 * silent[2], "key changes " + claude3[2] + " vs " + silent[2]);
+        assertTrue(claude3[2] < 0.7 * silent[2], "key changes " + claude3[2] + " vs " + silent[2]);
     }
 
     private static double[] sweep(final boolean nearest) {

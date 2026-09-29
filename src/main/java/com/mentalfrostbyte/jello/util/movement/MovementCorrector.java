@@ -44,12 +44,14 @@ public final class MovementCorrector {
 
     /**
      * How far past the edge of a direction the aim may drift before {@link MovementCorrection#CLAUDE3} lets go of it, in
-     * degrees. Chosen by simulation (see {@code KeyRemapTest}): with an aim that circles and wobbles a few degrees a tick,
-     * 6 keeps the keys from changing about half as often as {@code SILENT}'s rounding does, while the walk never strays
-     * more than 28.5 degrees from the way it was meant (SILENT's 30) and strays 11.8 on average (SILENT's 12.5). Larger
-     * values change the keys still less often but stray further; below 4 they change about a third more often.
+     * degrees. It trades how steady the keys are against how true the walk is, and the two models of that disagree on
+     * the price: in a sweep of an aim that circles and wobbles (see {@code KeyRemapTest}) 3 changes the keys 43% less
+     * often than {@code SILENT}'s rounding does and strays 11.4 degrees on average, 25.5 at most (SILENT's 12.5 and 30);
+     * in the game, walking a sprint with the aura fighting a fake player, the sideways drift after 0.9 s was 0.22 blocks
+     * with none, 0.31 with 3 and 0.47 with 6 (SILENT's 0.28; 30 samples a start, two starts each). 3 is where the walk
+     * is no less true than SILENT's in both; 6, the first choice, was not.
      */
-    static final float HYSTERESIS = 6.0F;
+    static final float HYSTERESIS = 3.0F;
 
     /** A facing that has been asked for this tick. */
     public record Request(Object owner, Rotation look, MovementCorrection mode, int priority) {
