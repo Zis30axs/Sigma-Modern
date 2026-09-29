@@ -22,6 +22,14 @@ SIGMA_JDK_MIN=25
 
 mkdir -p "$SIGMA_WORK" "$SIGMA_LOGS"
 
+# An environment's setup script may run with a bare PATH; Maven is often installed outside it.
+if ! command -v mvn >/dev/null 2>&1; then
+    for _dir in "${MAVEN_HOME:-}/bin" "${M2_HOME:-}/bin" /opt/maven/bin /usr/share/maven/bin /usr/local/maven/bin; do
+        [ -x "$_dir/mvn" ] && { export PATH="$_dir:$PATH"; break; }
+    done
+    unset _dir
+fi
+
 say() { printf '[sigma] %s\n' "$*" >&2; }
 die() { printf '[sigma] error: %s\n' "$*" >&2; exit 1; }
 

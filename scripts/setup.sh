@@ -104,22 +104,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------------- headless display
-# Skia/Mesa need libEGL even under Xvfb; the container image may not ship it.
-if ! ldconfig -p 2>/dev/null | grep -q 'libEGL.so.1'; then
-    if todo "libegl1 (apt)"; then
-        if [ "$(id -u)" -eq 0 ] && command -v apt-get >/dev/null; then
-            { apt-get install -y -q libegl1 || { apt-get update -q && apt-get install -y -q libegl1; }; } >"$SIGMA_LOGS/apt.log" 2>&1 \
-                || say "could not install libegl1 (log: $SIGMA_LOGS/apt.log); tests are fine, the headless game may not start"
-        else
-            say "libegl1 is missing and this isn't root with apt: install it by hand for the headless game"
-        fi
+# Skia/Mesa need libEGL even under Xvfb; a container image may not ship it, nor Xvfb and xdotool.
+packages=()
+# ldconfig lives in /sbin, which a bare PATH (an environment's setup script) may lack.
+{ PATH="$PATH:/sbin:/usr/sbin" ldconfig -p 2>/dev/null | grep -q 'libEGL.so.1'; } || compgen -G '/usr/lib/*/libEGL.so.1' >/dev/null || packages+=(libegl1)
+command -v xvfb-run >/dev/null || packages+=(xvfb)
+command -v xdotool >/dev/null || packages+=(xdotool)
+if [ "${#packages[@]}" -eq 0 ]; then
+    say "headless display ok (libEGL, xvfb, xdotool)"
+elif todo "apt packages for the headless game: ${packages[*]}"; then
+    # Only game.sh and capture.sh need these; building and testing don't, so a failure here is a warning.
+    if [ "$(id -u)" -eq 0 ] && command -v apt-get >/dev/null; then
+        { apt-get install -y -q "${packages[@]}" || { apt-get update -q && apt-get install -y -q "${packages[@]}"; }; } >"$SIGMA_LOGS/apt.log" 2>&1 \
+            && say "installed ${packages[*]}" \
+            || say "could not install ${packages[*]} (log: $SIGMA_LOGS/apt.log); building and testing are fine, the headless game may not start"
+    else
+        say "not root with apt: install by hand for the headless game: apt-get install -y ${packages[*]}"
     fi
-else
-    say "libEGL ok"
 fi
-for tool in xvfb-run xdotool; do
-    command -v "$tool" >/dev/null || { todo "$tool (needed by game.sh / capture.sh only)" || true; say "  apt-get install -y xvfb xdotool"; }
-done
 
 if [ "$CHECK" -eq 1 ]; then
     [ "$missing" -eq 0 ] && say "everything is in place" || exit 1

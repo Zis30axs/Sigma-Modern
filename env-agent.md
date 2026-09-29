@@ -41,7 +41,7 @@ scripts/game.sh stop; scripts/server.sh stop
 
 ## 脚本
 
-**`setup.sh [--check] [--build]`**：`--check` 只报缺什么（缺东西则退出码 1），`--build` 装完顺手编译。要做成环境的启动脚本时，把 `bash scripts/setup.sh` 放进去就行；它检测到齐了就不做任何事。
+**`setup.sh [--check] [--build]`**：`--check` 只报缺什么（缺东西则退出码 1），`--build` 装完顺手编译。JDK、原生库、Maven 依赖之外，root 下还会用 apt 补装无头游戏要的 `libegl1`、`xvfb`、`xdotool`（失败只是警告，编译和测试不受影响）。可以直接当环境的 Setup script 用，见下一节。
 
 **`build.sh compile | test | test-only 类名,类名 | javac 文件... | clean`**：自动选 JDK 25、走离线 Maven（缺依赖时自动联网重试一次）、输出到 `build/`。`test` 给 Skija 补上 Linux 原生库，渲染相关测试需要它。多余参数原样交给 Maven（例如 `build.sh test -Dtest=Foo#method`）。`javac` 模式用来解决“只有 BUILD FAILURE 没有文件行号”：隐式编译错误时 Maven 不报位置，把可疑文件直接交给它就能看到真正的错误。
 
@@ -57,6 +57,30 @@ scripts/game.sh stop; scripts/server.sh stop
 **`server.sh start|cmd|wait-join|log|status|stop|reset`**：官方原版服务器，从 Mojang 的 launcher manifest 下载并校验 sha1。`MC_VERSION`（默认 26.2）、`SERVER_PORT`、`SERVER_MEM` 可调。启动后会关掉自然生成的怪（平坦世界里全是史莱姆，会挡住所有战斗和截图）。**只连本地服务器**，不要把客户端指向别人的服务器。
 
 **`_env.sh`**：被上面所有脚本 `source`。放公共路径、JDK 查找、代理、`sigma_mvn`、进程组停止等函数。
+
+## 接到环境的 Setup script
+
+环境（claude.ai 里的云环境）有一个 Setup script，每个新会话启动时、Claude 开始工作之前运行。把 `setup.sh` 放进去，新会话一开始 JDK、原生库、Maven 缓存就是齐的。这个设置在环境的设置页里，agent 改不了，要用户自己贴：会话标题栏的云环境菜单 → Edit → Setup script。
+
+```bash
+#!/bin/bash
+# SigmaModern: JDK 25, Linux natives, Maven cache, headless packages. Idempotent, and never blocks the session.
+REPO=/home/user/Sigma-Modern
+if [ -f "$REPO/scripts/setup.sh" ]; then
+    bash "$REPO/scripts/setup.sh" || echo "SigmaModern setup failed (exit $?): run scripts/setup.sh inside the session"
+else
+    echo "SigmaModern is not checked out at $REPO yet; skipping its setup"
+fi
+exit 0
+```
+
+- 这段自己不含任何安装逻辑，只调仓库里的 `scripts/setup.sh`，所以以后改安装步骤只改仓库，不用回去改环境设置。它要求 `scripts/setup.sh` 在被克隆的分支上（默认分支 main 上有）。
+- 不会拖垮会话：安装失败只打印一行提示，脚本总是以 0 退出；仓库还没克隆时直接跳过（那种情况下进会话后手动跑一次 `scripts/setup.sh`）。
+- 幂等：东西齐了只花几秒（约 5 秒）。空的工作目录、Maven 缓存已有时约 1.5 分钟；Maven 缓存也是空的话更久，主要是依赖下载。
+- 已在只有 `PATH=/usr/local/bin:/usr/bin:/bin` 的空环境里测过：`mvn` 不在 PATH 上时会去 `/opt/maven/bin` 等常见位置找，`ldconfig` 不在 PATH 上时也能判断 libEGL 在不在。
+- 需要访问的主机见“网络”一节；环境的网络策略如果是限制名单，得先放行这些主机，否则装不下来（此时脚本只提示失败，会话照常启动）。
+- 不包含：游戏的原版资源（456 MB）在第一次 `game.sh start` 时下载；编译也不在里面（要预编译就在 Setup script 里把 `setup.sh` 换成 `setup.sh --build`，多花约 3 分钟，之后的增量编译会快很多）。
+- 文档没说明 Setup script 的结果会不会缓存到下一个会话。缓存的话，工作目录里的东西只装一次；不缓存的话每个新会话都重装一遍。
 
 ## -Dsigma.debug.* 开关
 
