@@ -293,8 +293,10 @@ public abstract class Player extends Avatar implements ContainerUser {
         this.updatePlayerPose();
     }
 
+    // Sigma hook: public (vanilla: protected), so the Rotation module can keep a model's body within the same reach of the
+    // head reported to the server as this keeps the player's own within reach of the camera's.
     @Override
-    protected float getMaxHeadRotationRelativeToBody() {
+    public float getMaxHeadRotationRelativeToBody() {
         // MODIFIED for porting: was VFP limitation.rotation MixinPlayer#dontModifyHeadRotationWhenBlocking (@Redirect isBlocking)
         return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_2) && this.isBlocking()) ? 15.0F : super.getMaxHeadRotationRelativeToBody();
     }

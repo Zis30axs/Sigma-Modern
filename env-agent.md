@@ -137,6 +137,6 @@ exit 0
 
 ## 提交与推送
 
-- 开发分支 `claude/great-goodall-yaafrw`；推到 `main` 只在用户明确说要推的时候做（先 `git fetch`，main 上有新提交就合并进来、重新跑全量测试再推）。用户没要求就不建 PR。
+- 开发分支 `claude/dreamy-mendel-hz9dci`；推到 `main` 只在用户明确说要推的时候做（先 `git fetch`，main 上有新提交就合并进来、重新跑全量测试再推）。用户没要求就不建 PR。
 - 提交信息末尾原样照抄会话给出的署名行（`Co-Authored-By` 和 `Claude-Session`）；除这两行外，提交、注释、文档里不要出现模型名。
 - 改了行为就同步 `SIGMA_MODERN.md`（界面和 HUD）、`PORTING.md`/`VFP_AUDIT.md`（移植状态）、`SELFCHECK_PORTING.md`（反作弊实验）。
