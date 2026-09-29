@@ -35,6 +35,18 @@ public class KeyboardInput extends ClientInput {
             this.options.keyShift.isDown(),
             this.options.keySprint.isDown()
         );
+        this.updateMoveVector();
+    }
+
+    // Sigma hook: the movement vector the direction keys make. Was the tail of tick(); split out so the keys can be
+    // replaced after the fact (see ClientInput#replaceKeyPresses).
+    @Override
+    public void replaceKeyPresses(final Input keys) {
+        this.keyPresses = keys;
+        this.updateMoveVector();
+    }
+
+    private void updateMoveVector() {
         float forwardImpulse = calculateImpulse(this.keyPresses.forward(), this.keyPresses.backward());
         float leftImpulse = calculateImpulse(this.keyPresses.left(), this.keyPresses.right());
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinKeyboardInput (@Redirect <=1_21_4 skip normalize)

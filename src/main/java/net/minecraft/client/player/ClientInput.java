@@ -13,6 +13,12 @@ public class ClientInput {
     public void tick() {
     }
 
+    // Sigma hook: the keys a module chose for this tick (the movement corrector turns the direction keys), from which the
+    // movement vector is worked out again. An input that has no vector of its own to work out only takes the keys.
+    public void replaceKeyPresses(final Input keys) {
+        this.keyPresses = keys;
+    }
+
     public Vec2 getMoveVector() {
         return this.moveVector;
     }

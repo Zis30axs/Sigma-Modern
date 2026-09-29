@@ -246,7 +246,7 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   - 攻击走 `MultiPlayerGameMode.attack`，所以 `EventAttack` 的模块（Criticals、SuperKnockback）照常配合。挥手顺序按版本：≤1.8 先挥手后攻击。
   - Timing：Auto 在 1.9+ 等冷却满，在 1.8 按随机 CPS（默认 8–12）。
   - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
-  - `Silent` 只改上报的视角；`Movement Fix` 让按键和起跳加速按上报的朝向推（`EventStrafe`、`EventJump`）。
+  - `Silent` 只改上报的视角；`Movement Corrector`（原来的 `Movement Fix` 开关，见下面"Movement Corrector"一节）让走路跟上报的朝向对上。
   - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。
 - `Claude1` / `Claude2` 是暂定名：
   - `Claude1`：每 tick 走完剩余角度的 60%（至少 3°，横向最多 55°、纵向最多 30°），瞄目标碰撞箱上离眼睛最近的点，再把转角取整到当前鼠标灵敏度的整数步长（`MouseHandler` 的 f³·8·0.15）。
@@ -310,7 +310,7 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 |---|---|---|
 | 不转头、关射线，打正侧面的僵尸 | Hitboxes 187 / 187（几乎每一刀） | Hitboxes 36 |
 | 静默转头边走边打，**关**移动修正 | Simulation 268 + AntiKB 146 / Simulation 137 | Simulation 417 |
-| 静默转头边走边打，开修正（Snap / Claude1） | 0 / 0 | 0 |
+| 静默转头边走边打，开修正（Snap / Claude1；当时的 `Movement Fix`，现在的 `Strict`） | 0 / 0 | 0 |
 
 原版 26.2 打开实验性检查那一遍，开修正的两轮出现过 Simulation 19 / 35，同时伴有 Timer 6 / 13 和 TimerLimit：那一轮有卡顿（新场地离出生点很远，要现生成区块）。这两个场景各复测两次，都是 0。
 

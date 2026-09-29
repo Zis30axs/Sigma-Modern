@@ -92,9 +92,10 @@ class KillAuraTest {
         assertFalse(this.visible(aura, "Turn Speed"));
         this.choose(aura, "Rotation", KillAura.RotationMode.SMOOTH);
         assertTrue(this.visible(aura, "Turn Speed"));
+        assertTrue(this.visible(aura, "Movement Corrector"), "a silent look is what needs correcting");
         this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
         assertFalse(this.visible(aura, "Silent"), "nothing to hide when it doesn't turn");
-        assertFalse(this.visible(aura, "Movement Fix"));
+        assertFalse(this.visible(aura, "Movement Corrector"));
         this.choose(aura, "Timing", KillAura.Timing.COOLDOWN);
         assertFalse(this.visible(aura, "Min CPS"));
     }

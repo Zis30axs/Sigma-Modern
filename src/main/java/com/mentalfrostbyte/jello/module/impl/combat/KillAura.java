@@ -4,9 +4,7 @@ import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
-import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
-import com.mentalfrostbyte.jello.event.impl.player.movement.EventStrafe;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
@@ -14,6 +12,8 @@ import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Comparator;
@@ -44,18 +44,18 @@ import org.jspecify.annotations.Nullable;
  * Attacks the nearest enemy in reach, turning to face it.
  *
  * <p>Written for this client, not ported: it hangs off the client's own events - the tick, the movement report
- * ({@link EventMotion}), the strafe yaw ({@link EventStrafe}), the jump ({@link EventJump}) and the outgoing packets -
- * and attacks through the same {@code MultiPlayerGameMode.attack} a click goes through, so {@code EventAttack}
+ * ({@link EventMotion}) and the outgoing packets - and attacks through the same {@code MultiPlayerGameMode.attack} a click goes through, so {@code EventAttack}
  * listeners such as Criticals and SuperKnockback work with it.</p>
  *
  * <p>Each tick, at its start, it picks a target, works out this tick's look direction, and - if that look meets the
  * target within reach and an attack is due - attacks, all before the tick's movement report. That is the order a
  * vanilla click keeps: the attack goes out first and the look it was aimed with follows in the same tick's movement
- * packet. With {@code Silent} the look is only reported to the server; the camera stays with the player.</p>
+ * packet. With {@code Silent} the look is only reported to the server; the camera stays with the player, and the walking
+ * is kept in step with the reported look by the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
  *
  * <p>The rotation and AutoBlock modes span both sides of the line an anticheat draws, for {@code SelfDetection} to be
- * tested with; which of them GrimAC flags, and why, is in {@code SELFCHECK_PORTING.md}. {@code Claude1} and
- * {@code Claude2} are experimental modes named after their author for now.</p>
+ * tested with; which of them GrimAC flags, and why, is in {@code SELFCHECK_PORTING.md}. {@code Claude1}, {@code Claude2}
+ * and {@code Claude3} (a {@link MovementCorrection}) are experimental modes named after their author for now.</p>
  */
 public class KillAura extends Module {
 
@@ -132,8 +132,9 @@ public class KillAura extends Module {
     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
             "Turns only what the server is told; your camera stays where you point it.", true));
 
-    private final BooleanSetting movementFix = this.register(new BooleanSetting("Movement Fix",
-            "Silent: walks by the facing the server is told, so the movement matches it.", true));
+    private final EnumSetting<MovementCorrection> movementCorrector = this.register(new EnumSetting<>("Movement Corrector",
+            "Silent look: how the walking is kept to the facing the server is told. Strict walks by that facing, Silent and "
+                    + "Claude3 also turn the keys to keep your direction. Claude3 is experimental.", MovementCorrection.STRICT));
 
     private final BooleanSetting rayTrace = this.register(new BooleanSetting("Ray Trace",
             "Only hits when the look direction actually meets the target.", true));
@@ -165,7 +166,7 @@ public class KillAura extends Module {
         this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH));
         this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
-        this.movementFix.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
+        this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
         this.throughWalls.visibleWhen(this.rayTrace::get);
     }
 
@@ -191,6 +192,10 @@ public class KillAura extends Module {
         this.pendingAttack = false;
         this.rotation = null;
         this.target = null;
+        MovementCorrector corrector = MovementCorrector.current();
+        if (corrector != null) {
+            corrector.release(this);
+        }
     }
 
     public @Nullable LivingEntity getTarget() {
@@ -211,6 +216,7 @@ public class KillAura extends Module {
 
         if (this.target == null) {
             this.rotation = this.returning(from, new Rotation(player.getYRot(), player.getXRot()));
+            this.correctMovement();
             this.lowerBlock(player, gameMode);
             this.pendingAttack = false;
             this.clickBudget = 0.0F;
@@ -222,6 +228,7 @@ public class KillAura extends Module {
             player.setYRot(this.rotation.yaw());
             player.setXRot(this.rotation.pitch());
         }
+        this.correctMovement();
         Rotation look = this.rotation != null ? this.rotation : new Rotation(player.getYRot(), player.getXRot());
         Optional<Vec3> hit = this.reach(player, level, eye, look, this.target);
         boolean due = this.tickClick(player);
@@ -239,19 +246,14 @@ public class KillAura extends Module {
         }
     }
 
-    /** Silent + Movement Fix: the keys push along the reported facing. */
-    @EventTarget
-    public void onStrafe(final EventStrafe event) {
-        if (this.rotation != null && this.silent.get() && this.movementFix.get()) {
-            event.setYaw(this.rotation.yaw());
-        }
-    }
-
-    /** Silent + Movement Fix: so does the sprint-jump boost. */
-    @EventTarget
-    public void onJump(final EventJump event) {
-        if (event.isPre() && this.rotation != null && this.silent.get() && this.movementFix.get()) {
-            event.setYaw(this.rotation.yaw());
+    /**
+     * A silent look is only reported, so the server predicts the walking from it while the client works it out from the
+     * camera. Asked for each tick the look is reported, for that tick: the corrector brings the two together.
+     */
+    private void correctMovement() {
+        MovementCorrector corrector = MovementCorrector.current();
+        if (corrector != null && this.rotation != null && this.silent.get()) {
+            corrector.request(this, this.rotation, this.movementCorrector.get());
         }
     }
 

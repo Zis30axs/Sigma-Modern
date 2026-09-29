@@ -2784,9 +2784,19 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         this.setSharedFlag(7, false);
     }
 
+    // Sigma hook: the look this entity's own movement (the elytra's glide, a swimmer's dive) is worked out from. The
+    // entity's look, except for the local player under a movement correction (see LocalPlayer).
+    protected Vec3 getMovementLookAngle() {
+        return this.getLookAngle();
+    }
+
+    protected float getMovementXRot() {
+        return this.getXRot();
+    }
+
     private Vec3 updateFallFlyingMovement(Vec3 movement) {
-        Vec3 lookAngle = this.getLookAngle();
-        float leanAngle = this.getXRot() * (float) (Math.PI / 180.0);
+        Vec3 lookAngle = this.getMovementLookAngle();
+        float leanAngle = this.getMovementXRot() * (float) (Math.PI / 180.0);
         double lookHorLength = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
         double moveHorLength = movement.horizontalDistance();
         double gravity = this.getEffectiveGravity();
