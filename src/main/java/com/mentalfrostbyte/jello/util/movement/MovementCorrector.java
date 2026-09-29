@@ -7,6 +7,7 @@ import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventStrafe;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import java.util.Objects;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
@@ -60,6 +61,15 @@ public final class MovementCorrector {
     private @Nullable Request active;
     /** CLAUDE3: the direction its keys made last tick, for its hysteresis; -1 for none. */
     private int direction = -1;
+
+    // -Dsigma.debug.correctorStats: every 100 ticks, how much of them the corrector had something to do in, so an
+    // experiment can tell that the facing it was to correct was there at all. Game thread.
+    private static final boolean STATS = Boolean.getBoolean("sigma.debug.correctorStats");
+    private int statTicks;
+    private int statRequested;
+    private int statMoving;
+    private int statTurned;
+    private double statYawDifference;
 
     /**
      * The corrector of the running client, or null before the client has started - the game draws and even ticks a
@@ -141,6 +151,14 @@ public final class MovementCorrector {
      * the camera faces: the same keys unless the mode in force turns them.
      */
     public Input correct(final Input keys, final float cameraYaw) {
+        Input corrected = this.turn(keys, cameraYaw);
+        if (STATS) {
+            this.count(keys, corrected, cameraYaw);
+        }
+        return corrected;
+    }
+
+    private Input turn(final Input keys, final float cameraYaw) {
         Request request = this.correcting();
         if (request == null || !request.mode().turnsKeys()) {
             this.direction = -1;
@@ -155,6 +173,30 @@ public final class MovementCorrector {
         KeyRemap.Steered steered = KeyRemap.nearest(keys, delta, this.direction, HYSTERESIS);
         this.direction = steered.direction();
         return steered.keys();
+    }
+
+    private void count(final Input keys, final Input corrected, final float cameraYaw) {
+        this.statTicks++;
+        Request request = this.active;
+        if (request != null) {
+            this.statRequested++;
+            boolean moving = keys.forward() != keys.backward() || keys.left() != keys.right();
+            if (moving) {
+                this.statMoving++;
+                this.statYawDifference += Math.abs(Mth.wrapDegrees(cameraYaw - request.look().yaw()));
+            }
+        }
+        if (!corrected.equals(keys)) {
+            this.statTurned++;
+        }
+        if (this.statTicks >= 100) {
+            Client.logger.info("Sigma debug: corrector, last {} ticks: {} with a request, {} of them moving (camera differs from the "
+                    + "reported yaw by {} degrees on average), {} with the keys turned", this.statTicks, this.statRequested,
+                    this.statMoving, this.statMoving == 0 ? 0 : Math.round(this.statYawDifference / this.statMoving),
+                    this.statTurned);
+            this.statTicks = this.statRequested = this.statMoving = this.statTurned = 0;
+            this.statYawDifference = 0.0;
+        }
     }
 
     /** The look the elytra and the swimmer are pushed along, or null to leave it to the entity's own. */

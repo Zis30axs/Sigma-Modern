@@ -98,6 +98,7 @@ exit 0
 | `chatInput=`、`chatType=`、`chatLines=N`、`chatCloseAfterFrames=N` | 聊天框相关截图 |
 | `screenshotAfterFrames=N` | 渲染 N 帧后截图（`capture.sh` 用它） |
 | `musicOffline`（脚本默认开）、`musicSearch=`、`musicAutoplay`、`musicPreview`、`musicPage=fx\|lyrics`、`musicDrawer=open`、`musicLyrics=文件`、`musicMuted` | 音乐播放器截图 |
+| `correctorStats` | 每 100 tick 记一行 Movement Corrector 的统计：有请求的 tick 数、其中在按方向键的、相机与上报 yaw 的平均差、按键被改了几次。跑 SelfDetection 对照实验时用来确认"要修正的朝向确实在" |
 | `islandActivity`、`modernMenuDock`、`selectFirst`、`smoke`、`screenSmoke`、`frameTiming`、`maximizeAfterFrames=N`、`logMode` | 其他截图和性能辅助，见 `Client.java` 里的注释 |
 
 ## 验证一个 HUD 或界面改动
