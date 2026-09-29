@@ -248,7 +248,7 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
   - `Silent` 只改上报的视角；`Movement Corrector`（原来的 `Movement Fix` 开关，见下面"Movement Corrector"一节）让走路跟上报的朝向对上。
   - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。
-- `Claude1` / `Claude2` 是暂定名：
+- `Claude1` / `Claude2`（以及后面 Movement Corrector 的 `Claude3`）是暂定名：
   - `Claude1`：每 tick 走完剩余角度的 60%（至少 3°，横向最多 55°、纵向最多 30°），瞄目标碰撞箱上离眼睛最近的点，再把转角取整到当前鼠标灵敏度的整数步长（`MouseHandler` 的 f³·8·0.15）。
   - `Claude2`：要攻击时如果正在格挡，这一 tick 先放下，不攻击；下一 tick 攻击，并按原版右键的方式重新举起（先对准星上的实体发交互包，再用物品）。这就是玩家手动格挡攻击时的节奏：原版在使用物品的那一 tick 会丢掉攻击点击。
 - `FakePlayer`（Misc）：只存在于客户端的假人，四种模式：
@@ -370,6 +370,94 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   - 正确的修法是把 `Client.start` 拆成"打开模块"和"主菜单跳转"两段，前者放到 `showScreen` 之前。但它是带回滚的事务式启动，改动面较大，这次没动。
 - **本地进服阶段的噪声**：本地 SelfDetection 在进服到场景开始之间会报一些 BadPacketsE、Phase、AimDuplicateLook、Timer，服务器端的 Grim 多数没有。这是引擎就绪前扣包、之后集中放行造成的，统计时已排除在外。
 - ~~原版药水效果图标会盖住右上角的 ArrayList。~~ 已修：PotionStatus 模块在 SigmaModern 下代替原版图标，画在右下角（ArrayList 也在右下角时叠在它上方）；模块关闭时，右上角的 ArrayList 让到原版图标下面（见 `SIGMA_MODERN.md` 的 PotionStatus 一节）。
+
+## Movement Corrector（2026-09-29）
+
+静默转头（KillAura 的 `Silent`，以后还有 Scaffold）只改上报给服务器的视角。服务器按这个视角预测走路，客户端却按镜头走，两边对不上，Simulation 每个 tick 都报。
+以前这件事是 KillAura 里的 `Movement Fix` 开关；现在是一个独立的服务，KillAura 的 `Movement Fix` 已删，换成 `Movement Corrector` 设置。
+
+### 接口（给 Scaffold 这类以后的模块用）
+`com.mentalfrostbyte.jello.util.movement.MovementCorrector`，由 `Client` 持有并注册到 EventBus（`MovementCorrector.current()` 在客户端启动前返回 null）：
+- `request(owner, look, mode[, priority])`：模块在每个 tick 的开头（`EventTick` PRE），知道这个 tick 要上报的视角之后调用。**请求只在这个 tick 有效**，`EventTick` POST 时清掉，所以模块不再请求就等于不再修正，不会有残留。
+- `release(owner)`：模块关掉时撤回。同一个 tick 有多个请求时，`priority` 高的生效，相同则先来的生效。
+- 视角必须是**同一个 tick 的移动包**上报的那个：服务器按每个 tick 的包里的视角预测那个 tick 的移动。
+
+### 模式（`MovementCorrection`）
+| 模式 | 做什么 | 来源 |
+|---|---|---|
+| `Off` | 不修正，按镜头走 | — |
+| `Strict` | 按键的推力、疾跑起跳的加速、鞘翅和游泳读的视线，都用上报的视角。走路方向变成"朝上报的方向"，不再是玩家按的方向 | LiquidBounce nextgen `STRICT`（原来的 `Movement Fix` 只有前两项） |
+| `Silent` | `Strict`，再把方向键按"相机 yaw − 上报 yaw"旋转，每个分量各自四舍五入成一个键，玩家还是大致往想走的方向走 | LiquidBounce nextgen `MixinKeyboardInput.transformDirection` |
+| `Claude3` | `Strict`，再把旋转后的方向取成键盘能按出的 8 个方向里**角度最近**的一个；方向只是在两个方向的边界附近晃动时，沿用上一 tick 的 | 本客户端（暂定名） |
+
+KillAura 默认 `Strict`（就是原来 `Movement Fix` 开着的行为）。LiquidBounce 的第四种 `ChangeLook`（直接改玩家真正的视角）没有移植：它会动相机，不再是"静默"。
+LiquidBounce 部分是 GPL-3.0，Copyright (c) 2015 - 2026 CCBlueX，来源 `nextgen` 分支 2026-09-29；`Silent` 与上游的一处差别：对着按的两个相反的键（W+S）原样返回，不把它们都松开（移动都是零，但发给服务器的输入包保持玩家按的键）。
+
+### 游戏里的钩子
+- `KeyboardInput.tick` 里算移动向量的那一段拆成 `updateMoveVector()`，`ClientInput.replaceKeyPresses(keys)` 换掉按键后重算移动向量。
+  原来 `EventMovementInput` 触发时移动向量已经算好，方向键只能读；现在在它**之后**调用 Corrector，先让模块按跳/蹲，再改方向键。
+- 输入包（1.21.2+）发的是 `keyPresses`，所以服务器收到的是换过之后的键，和实际的移动向量一致。这一点是 Grim 的要求：26.2 上 `PredictionEngine.loopVectors` 直接用 input 包里的键，不再穷举 9 种组合；疾跑时前向恒为 +1（"stop omni-sprint"）。所以疾跑只能和有前向分量的键同时存在，换键后没有前向了，原版逻辑会自己把疾跑停掉。
+- `LivingEntity.getMovementLookAngle()` / `getMovementXRot()`：鞘翅滑翔和游泳（`Player.travel`）读视线的地方，`LocalPlayer` 在修正下改成上报的视角。
+- `Player.getMaxHeadRotationRelativeToBody` 之前已因 `Rotation` 模块改成 public。
+
+没修正的：三叉戟的激流、烟花火箭加速、`startAutoSpinAttack`（它们读的是实体自己的视角，服务器另有算法）。
+
+### 实验
+**环境**：本地原版 26.2 服（离线、超平坦、关刷怪）。`FakePlayer` 用 `CombatSimulation`、`Radius 3.5`；`KillAura` 用 `Silent` + `Snap`、`Aim Range 6`，只换 `Movement Corrector`；`SelfDetection` 用 Grim 默认配置，另外再开 `experimental-checks`。
+玩家按住键 12 s，服务器每 1.2 s 把玩家传回出生点。四个场景：疾跑（Ctrl+W）、疾跑连跳（Ctrl+W+空格）、疾跑斜向（Ctrl+W+D）、不疾跑斜向（W+A）。每个模式一次启动，每个场景重复。客户端 640×360，减少软件渲染的卡顿。
+
+**这一轮吃过的亏**（数据作废过两次，所以记下来）：
+- 每次进服的出生点是随机的（原版出生半径），而 `FakePlayer` 在"出生点前方 3 格"生成，玩家却总被传回同一个坐标：出生点偏远的那几轮，假人离玩家太远，光环从头到尾没有目标，`SILENT` 和 `CLAUDE3` 的第一批数据就是这样"全 0"的。
+  修法：`setworldspawn -5 -60 6`，`gamerule respawn_radius 0`（26.2 里这条规则叫 `respawn_radius`，不是 `spawn_radius`）。
+- "没有 flag"不是证据。加了 `-Dsigma.debug.correctorStats`（见 `env-agent.md`），每个窗口都要看：有请求的 tick 数（约 200–300 / 窗口）、其中在按方向键的（约 200–250）、相机与上报 yaw 的平均差（25–50°）。每次启动后先跑 4 s 探测，请求数或按键数不够就重启。
+- 键盘事件要靠 `xdotool keydown` 按住；`scripts/game.sh key` 只能单击。
+
+**结果**（一个窗口 = 12 s；"被标记"= 窗口里有任何违规）：
+
+| Movement Corrector | 默认配置 | 实验性检查 |
+|---|---|---|
+| 不开光环（对照） | 1 / 17 | 0 / 10 |
+| `Off` | **7 / 7**，每个窗口 244–250 次 Simulation（几乎每个 tick） | **10 / 10**，243–256 次 |
+| `Strict` | 2 / 17 | 0 / 10 |
+| `Silent` | 2 / 17 | 0 / 10 |
+| `Claude3`（迟滞 8°，第一版） | 2 / 17 | 0 / 10 |
+| `Claude3`（迟滞 6°，现在的） | 1 / 10 | 2 / 10 |
+
+- **`Off` 被抓，其他都过**：`Off` 每个窗口都有稳定的 Simulation（窗口里的最大偏差 0.2–1.3，几乎每个 tick 都报）；修正过的三种和不开光环的对照没有可以区分的差别。
+- **零星的违规是卡顿，不是方向对不上**：被标记的 10 个窗口（对照、`Strict` 里也有）都是同一个样子：先是一串 Timer（2–15 个，客户端 tick 追赶），然后一个 0.2–2.2 的 Simulation，再按约 0.5 的比例逐 tick 衰减；其中 4 个是启动后的第一个窗口（预热）。和 `Off` 那种几乎每个 tick 都有的稳定偏差完全两样。SILENT 有一个窗口是另一个样子（GroundSpoof 加缓慢衰减的 Simulation），出现在连跳场景，是服务器在空中传送、客户端上报离地状态的时序，`Off` 的连跳窗口里也有 GroundSpoof。
+- **诚实的结论**：Grim 默认配置和实验性检查都判不出 `Strict` / `Silent` / `Claude3` 谁更"隐蔽"，它们都被判成合法走路。所以 `Claude3` 没有"比 `Silent` 更难被 Grim 检测"这一说；它的价值不在这里，见下。
+
+**方向**（`dir`：相机朝南、按住 Ctrl+W 走 0.9 s，光环在转，之后读服务器上的横向偏移 dx，单位格，每种模式 5 次）：
+
+| | 平均 \|dx\| |
+|---|---|
+| `Off` | 0.0（按镜头直走） |
+| `Strict` | 1.5–1.7（朝着目标走，不再是想走的方向） |
+| `Silent` | 0.25–0.30 |
+| `Claude3`（迟滞 6°） | 0.41–0.50 |
+
+每种模式只有 5 次样本、目标的角度又是随机的，`Silent` 和 `Claude3` 的差别在噪声里，这里得不出谁更准。`Strict` 和另外三种的差别是明确的。
+
+### Claude3 的取舍（离线模拟，`KeyRemapTest`）
+用"光环绕着玩家转，每 tick 转 1.5° 再加 4° 的抖动、按住 W、相机不动"扫 20–30 万 tick（`KeyRemapTest` 里是 10 万），比较按出的键和玩家想走的方向：
+
+| | 平均偏差 | 最大偏差 | 每 100 tick 换键次数（抖动 4° / 10°） |
+|---|---|---|---|
+| `Silent`（逐分量四舍五入） | 12.5° | 30° | 7.7 / 18.1 |
+| 只取最近方向，没有迟滞 | 11.25° | 22.5° | 7.5 / 17.9 |
+| `Claude3`，迟滞 4° | 11.5° | 26.5° | 4.0 / 11.7 |
+| `Claude3`，迟滞 **6°（现在的）** | 11.8° | 28.5° | **3.6 / 9.8** |
+| `Claude3`，迟滞 8°（第一版） | 12.2° | 30.5° | 3.5 / 8.5 |
+
+- `Silent` 的四舍五入让 4 个正方向各占 60° 的区间、4 个斜向各只占 30°；取最近方向是每个方向 45°。
+- 第一版取的 8° 换键最少，但最大偏差回到 30.5°，并不比 `Silent` 准，所以不值得单独成一个模式；6° 在偏差和换键两项上都不比 `Silent` 差，换键少一半左右。`KeyRemapTest` 里有同一个扫描，把常量改到外面这个范围就会失败。
+- 换键少不是为了躲 Grim（上面已经说了，Grim 分不出），而是别的检测不一定像 Grim 只看物理：每 tick 来回翻键、疾跑随之开开停停，对人和对统计都不自然。这一点这里**没有测**，也没有别的反作弊可以测。
+
+### 没有测的、局限
+- 只测了 26.2 协议。≤1.21.2 没有输入包，Grim 走穷举；≤1.21.4 疾跑要求前向 ≥ 0.8（`vfpIsWalking1_21_4`），斜向不归一化（`KeyboardInput` 里的 ≤1.21.4 分支）；这些规则本地测不到。
+- 只测了 GrimAC `8eb5f28`，本地实验环境，默认配置和 `experimental-checks` 两种。
+- 游泳、鞘翅的修正只有代码，没有做实验：没有相应的场景。
+- 环境的卡顿噪声（约每 10 个窗口 1–2 个）不能消除，所以"没有违规"只能读成"和对照没有区别"。
 
 ## 状态
 
