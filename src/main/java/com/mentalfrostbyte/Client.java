@@ -414,6 +414,10 @@ public class Client implements MinecraftInstance {
                 this.seedDebugAccounts();
                 yield new com.mentalfrostbyte.jello.gui.account.ClassicAltManagerScreen(parent);
             }
+            // Jello's in-game pages: the options, the Keybind Manager and the credits.
+            case "JELLO_OPTIONS" -> new com.mentalfrostbyte.jello.gui.jello.JelloOptionsScreen(parent);
+            case "KEYBINDS" -> new com.mentalfrostbyte.jello.gui.jello.JelloKeybindScreen();
+            case "CREDITS" -> new com.mentalfrostbyte.jello.gui.jello.JelloCreditsScreen(parent);
             // A plain vanilla sub-page, for checking how a presentation skins vanilla widgets.
             case "SOUND" -> new net.minecraft.client.gui.screens.options.SoundOptionsScreen(options, mc.options);
             default -> null;

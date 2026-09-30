@@ -1,0 +1,38 @@
+Development by Sigma Production
+
+LeakedPvP
+Omikron
+
+
+*Sigma-Modern*
+
+This client is free software, licensed under the GNU General Public License, version 3.
+See the LICENSE file. The Minecraft source it is built from is a decompilation; see MCP-License.
+
+
+*What is ported into it, and where it comes from*
+
+Sodium, Lithium - CaffeineMC - LGPL-3.0
+Iris - IrisShaders - LGPL-3.0
+Sodium Extra - FlashyReese - LGPL-3.0
+FerriteCore - malte0811 - MIT
+ViaFabricPlus and the ViaVersion family - ViaVersion contributors - GPL-3.0 and their own licences
+GrimAC - GrimAnticheat - GPL-3.0
+PacketEvents - retrooper - GPL-3.0
+LiquidBounce (the Speed, combat and packet modules) - CCBlueX - GPL-3.0
+
+
+*Libraries it uses*
+
+Skija - JetBrains / HumbleUI - Apache-2.0
+ZXing - the ZXing authors - Apache-2.0
+JLayer - JavaZOOM - LGPL
+
+
+*Fonts*
+
+The Jello and Classic presentations use the typefaces the original client shipped
+(Helvetica Neue and SF UI Display). They belong to their owners.
+
+
+Jello for Sigma, and the Classic presentation, are the work of Sigma Production.

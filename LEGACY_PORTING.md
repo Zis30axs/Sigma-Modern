@@ -38,6 +38,13 @@
   搜索，以及登录后的每日推荐和我的歌单。**登录界面（二维码）没搬**，要在 SigmaModern 的音乐窗口里登录；旧版的 "Open Folder"、Local Music、
   重复模式和频谱按钮也没搬（后端没有对应的东西）。`-Dsigma.debug.jelloMusic=demo` 开着窗口并列一批假歌曲，截图不用联网。
 
+- **暂停菜单里的 Jello 页面**：`PauseScreen` 里一行钩子在 Jello 下多出 "Jello for Sigma Options" 按钮（位置同旧版：底部居中 204×20），打开
+  `JelloOptionsScreen`（版本号、ClickGUI 绑的键、Keybind Manager / ClickGUI / Credits 三个入口，缩放进出）。
+  - `JelloKeybindScreen` + `JelloKeys`（Keybind Manager）：1060×357 的虚拟键盘（键位表是旧 `Keys` 原样，按下时下沉 3px），点一个键（或按真实按键，或鼠标侧键/中键）
+    弹出 250×330 的卡片列出绑在这个键上的模块、垃圾桶解除、Add 打开 500×600 的选择列表（搜索：前缀匹配排前面，再是包含匹配）。直接读写模块自己的 `Keybind`，
+    所以跟 ClickGUI 里的绑定按钮是同一份数据；关闭时存配置。旧版还能把 *界面*（Click GUI、Maps、Snake……）绑到键上，这里没有界面绑定的存储，没搬。
+  - `JelloCreditsScreen`：`assets/minecraft/sigma/credits.txt`，**内容是重写的**，不是旧版那段 746 行的依赖许可证（那是旧客户端当时依赖的列表，放在这里会是错的）。
+  - 调试：`-Dsigma.debug.openScreen=JELLO_OPTIONS|KEYBINDS|CREDITS`。
 - **游戏内 HUD** `gui.legacy.hud`（`LegacyHud` 从 `Hud` 的钩子进来，只在 JELLO/CLASSIC 下画）：
   - 水印：170×104 的图片，F3 时移到顶部居中。
   - ActiveMods `JelloActiveMods`：右上角白色 Helvetica Neue Light，文字后面是黑色柔光（`shadow.png`），按名字宽度（20 号字）从宽到窄排；
