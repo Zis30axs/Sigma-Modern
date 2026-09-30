@@ -63,7 +63,28 @@ public enum LegacyTexture {
     CLASSIC_LANGUAGE("classic/language.png", 200, 200),
     CLASSIC_ACCOUNTS("classic/accounts.png", 200, 200),
     CLASSIC_SWITCH("classic/switch.png", 200, 200),
-    CLASSIC_EXIT("classic/exit.png", 200, 200);
+    CLASSIC_EXIT("classic/exit.png", 200, 200),
+
+    // Classic ClickGUI
+    GUI_CHECKBOX("classic/gui_checkbox.png", 800, 18),
+    GUI_COMBAT("classic/gui_combat.png", 128, 128),
+    GUI_COMBAT_HOVER("classic/gui_combat2.png", 128, 128),
+    GUI_MOVEMENT("classic/gui_movement.png", 128, 128),
+    GUI_MOVEMENT_HOVER("classic/gui_movement2.png", 128, 128),
+    GUI_WORLD("classic/gui_world.png", 128, 128),
+    GUI_WORLD_HOVER("classic/gui_world2.png", 128, 128),
+    GUI_PLAYER("classic/gui_player.png", 128, 128),
+    GUI_PLAYER_HOVER("classic/gui_player2.png", 128, 128),
+    GUI_VISUALS("classic/gui_visuals.png", 128, 128),
+    GUI_VISUALS_HOVER("classic/gui_visuals2.png", 128, 128),
+    GUI_OTHERS("classic/gui_others.png", 128, 128),
+    GUI_OTHERS_HOVER("classic/gui_others2.png", 128, 128),
+    GUI_XMARK("classic/gui_xmark.png", 128, 128),
+    GUI_XMARK_HOVER("classic/gui_xmark2.png", 128, 128),
+    GUI_GEAR("classic/gui_gear.png", 128, 128),
+    GUI_GEAR_HOVER("classic/gui_gear2.png", 128, 128),
+    GUI_UPARROW("classic/gui_uparrow.png", 128, 128),
+    GUI_DOWNARROW("classic/gui_downarrow.png", 128, 128);
 
     public final Identifier id;
     public final int width;

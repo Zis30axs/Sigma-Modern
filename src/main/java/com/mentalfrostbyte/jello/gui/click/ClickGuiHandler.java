@@ -35,8 +35,10 @@ public final class ClickGuiHandler {
         if (mc.gui.screen() instanceof com.mentalfrostbyte.jello.gui.TextEntryScreen entry && entry.isTypingText()) {
             return false;
         }
-        if (mc.gui.screen() instanceof SigmaClickGui) {
-            close();
+        if (mc.gui.screen() instanceof SigmaClickGui gui) {
+            if (!gui.beginClose()) {
+                close();
+            }
         } else {
             previousScreen = mc.gui.screen();
             mc.gui.setScreen(client.getPresentationManager().createClickGui(client.getModuleManager()));

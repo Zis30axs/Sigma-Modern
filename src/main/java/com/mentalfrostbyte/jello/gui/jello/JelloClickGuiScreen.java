@@ -1,97 +1,92 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
-import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
-import com.mentalfrostbyte.jello.gui.ModeSelectScreen;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
+import com.mentalfrostbyte.jello.gui.TextEntryScreen;
+import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.click.ClickGuiHandler;
-
+import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyScroll;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
+import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
+import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
-import com.mentalfrostbyte.jello.setting.BooleanSetting;
-import com.mentalfrostbyte.jello.setting.ColorSetting;
-import com.mentalfrostbyte.jello.setting.EnumSetting;
-import com.mentalfrostbyte.jello.setting.NumberSetting;
-import com.mentalfrostbyte.jello.setting.Setting;
-import com.mentalfrostbyte.jello.setting.TextSetting;
+import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
+import com.mentalfrostbyte.jello.util.math.Easing;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.jspecify.annotations.Nullable;
+import org.lwjgl.glfw.GLFW;
 
 /**
- * Jello functional ClickGUI skeleton.
+ * Jello's ClickGUI, as the old client drew it ({@code ClickGuiScreen} + {@code PanelGroup} + {@code ModListView}).
  *
- * <p>This is intentionally not the final Jello visual identity yet. It is a working Screen that reads the
- * existing {@link ModuleManager} and the modules' {@link SettingHolder} views, supports the full current
- * Setting surface and keybind capture, and can be iterated on for the real Jello presentation later.</p>
+ * <p>The world behind blurs and dims (20 %), and one white card per module category floats over it in a
+ * grid - 200 px wide, 350 tall, a soft white glow round the edge - with the category's name in light grey type
+ * at the top and its modules as 30 px rows underneath. A module that is on is a blue row with white text; one
+ * that is off is plain with dark text. Left-click switches a module, right-click opens its settings
+ * ({@link JelloSettingsPage}). Cards can be dragged by their heading and scroll when they hold more than fits.</p>
  *
- * <p>The layout is currently a simple three-panel skeleton - categories, modules, settings - and will be
- * replaced/refined by the real Jello visual pass in a later phase.</p>
+ * <p>The GUI opens by flying its cards in: they start half again as large and pushed out from the middle, and
+ * shrink into place with a springy overshoot as they fade up. Closing plays a quick fade back. The old client's
+ * 4-card rows assumed six categories; with nine, the cards wrap by the width of the window instead.</p>
  */
-public class JelloClickGuiScreen extends Screen implements SigmaClickGui {
+public class JelloClickGuiScreen extends Screen implements SigmaClickGui, ModernBlurredBackdrop, TextEntryScreen {
+    static final int PANEL_W = 200;
+    static final int PANEL_H = 350;
+    static final int HEADER = 60;
+    static final int ROW = 30;
+    static final int WHITE = 0xFFFEFEFE;
+    static final int BLACK = 0xFF010101;
+    static final int BLUE = 0xFF29A6FF;
+    static final int BLUE_HOVER = 0xFF29B8FF;
+    private static final int OFF_ROW = 0x70F5F5F5;
+    private static final int OFF_ROW_HOVER = 0x00CACACA;
 
-    private static final int PANEL_BG = 0xC0081420;
-    private static final int PANEL_BORDER = 0xFF2A6E8A;
-    private static final int HEADER_BG = 0xD00E2A3A;
-    private static final int SELECTED_BG = 0xFF1E5F7A;
-    private static final int HOVER_BG = 0x30FFFFFF;
-    private static final int TEXT = 0xFFE0F0FF;
-    private static final int TEXT_DIM = 0xFF8FB5C9;
-    private static final int TEXT_ENABLED = 0xFF66D9FF;
-    private static final int TEXT_DISABLED = 0xFFD0D0D0;
-
-    private static final int ROW_HEIGHT = 24;
-    private static final int PANEL_TOP = 36;
-    private static final int PANEL_BOTTOM_MARGIN = 8;
-    private static final int CATEGORY_X = 8;
-    private static final int CATEGORY_WIDTH = 130;
-    private static final int MODULE_X = 146;
-    private static final int MODULE_WIDTH = 170;
-    private static final int SETTINGS_X = 324;
-    private static final int SETTINGS_WIDTH = 260;
+    /** Where each card was left, kept for the session so reopening puts them back. */
+    private static final Map<ModuleCategory, int[]> POSITIONS = new EnumMap<>(ModuleCategory.class);
 
     private final ModuleManager modules;
-
     private final ClickGuiInteractions interactions = new ClickGuiInteractions();
-
-    private ModuleCategory selectedCategory;
-    private Module selectedModule;
-
-    private int categoryScroll;
-    private int moduleScroll;
-    private int settingScroll;
+    private final List<Panel> panels = new ArrayList<>();
+    private final Animation open = new Animation(450, 125, Animation.Direction.FORWARDS);
+    private JelloSettingsPage page;
+    private boolean closing;
+    private int layoutWidth = -1;
+    private int layoutHeight = -1;
+    private Panel dragged;
+    private float dragOffsetX;
+    private float dragOffsetY;
+    private Panel scrollDragged;
 
     public JelloClickGuiScreen(final ModuleManager modules) {
         super(Component.literal("Jello ClickGUI"));
         this.modules = modules;
-    }
-
-    @Override
-    protected void init() {
-        if (this.selectedCategory == null) {
-            for (ModuleCategory category : ModuleCategory.values()) {
-                if (!this.modules.byCategory(category).isEmpty()) {
-                    this.selectedCategory = category;
-                    break;
-                }
+        for (ModuleCategory category : ModuleCategory.values()) {
+            List<Module> mods = modules.byCategory(category);
+            if (!mods.isEmpty()) {
+                this.panels.add(new Panel(category, mods));
             }
         }
-
-        if (this.selectedCategory == null) {
-            this.selectedCategory = ModuleCategory.MISC;
-        }
-
-        if (this.selectedModule == null || this.selectedModule.getCategory() != this.selectedCategory) {
-            List<Module> categoryModules = this.modules.byCategory(this.selectedCategory);
-            this.selectedModule = categoryModules.isEmpty() ? null : categoryModules.get(0);
+        // -Dsigma.debug.jelloSettings=<Module>: start with that module's settings open.
+        String debug = System.getProperty("sigma.debug.jelloSettings");
+        if (debug != null) {
+            for (Module module : modules.all()) {
+                if (module.getName().equalsIgnoreCase(debug)) {
+                    this.page = new JelloSettingsPage(this, module, this.interactions);
+                }
+            }
         }
     }
 
@@ -101,67 +96,163 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui {
     }
 
     @Override
-    public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
-        graphics.fill(0, 0, this.width, this.height, 0x90000000);
-        graphics.fill(0, 0, this.width, 26, 0xFF0E2A3A);
-        graphics.text(this.font, "JELLO", 8, 8, TEXT_ENABLED);
-        String modeText = "Mode: " + Client.getInstance().getClientModeManager().get().name();
-        graphics.text(this.font, modeText, this.width - this.font.width(modeText) - 8, 8, TEXT_ENABLED);
-        graphics.text(this.font, "RShift: close | Left click: toggle/select | Right click keybind: cycle mode", 8, 30, TEXT_DIM);
-        this.drawCategoryPanel(graphics, mouseX, mouseY);
-        this.drawModulePanel(graphics, mouseX, mouseY);
-        this.drawSettingsPanel(graphics, mouseX, mouseY);
+    public boolean isTypingText() {
+        return this.page != null && this.page.typing();
+    }
+
+    ModuleManager modules() {
+        return this.modules;
+    }
+
+    /** The world behind is blurred here, once, before anything of the GUI is drawn. */
+    @Override
+    public void extractBackground(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+        GuiVisuals.blurBackground(graphics);
+    }
+
+    // ------------------------------------------------------------------ animation
+
+    private float factor() {
+        float p = this.open.calcPercent();
+        return this.closing ? Easing.easeOutQuad(p, 0.0F, 1.0F, 1.0F)
+            : (float) (Math.pow(2.0, -10.0F * p) * Math.sin((p - 0.25F) * (Math.PI * 2)) + 1.0);
     }
 
     @Override
+    public boolean beginClose() {
+        if (this.closing) {
+            return true;
+        }
+        this.closing = true;
+        this.open.changeDirection(Animation.Direction.BACKWARDS);
+        return true;
+    }
+
+    @Override
+    public void onClose() {
+        if (!this.beginClose()) {
+            ClickGuiHandler.close();
+        }
+    }
+
+    @Override
+    public void tick() {
+        if (this.closing && this.open.calcPercent() <= 0.0F) {
+            ClickGuiHandler.close();
+        }
+    }
+
+    // ------------------------------------------------------------------ layout
+
+    private void layout(final int width, final int height) {
+        if (width == this.layoutWidth && height == this.layoutHeight) {
+            return;
+        }
+        this.layoutWidth = width;
+        this.layoutHeight = height;
+        int perRow = Math.max(1, (width - 30) / (PANEL_W + 10));
+        int rows = (this.panels.size() + perRow - 1) / perRow;
+        int panelH = rows <= 2 ? PANEL_H : Math.max(200, (height - 60 + 20 * (rows - 1)) / rows);
+        int index = 0;
+        for (Panel panel : this.panels) {
+            panel.h = panelH;
+            int[] saved = POSITIONS.get(panel.category);
+            if (saved != null) {
+                panel.x = Math.min(saved[0], Math.max(0, width - PANEL_W));
+                panel.y = Math.min(saved[1], Math.max(0, height - 60));
+            } else {
+                panel.x = 30 + (index % perRow) * (PANEL_W + 10);
+                panel.y = 30 + (index / perRow) * (panelH - 20);
+            }
+            index++;
+        }
+    }
+
+    // ------------------------------------------------------------------ drawing
+
+    @Override
+    public void extractRenderState(final GuiGraphicsExtractor graphics, final int guiMouseX, final int guiMouseY, final float partialTick) {
+        try (LegacyCanvas c = new LegacyCanvas(graphics)) {
+            int w = c.width();
+            int h = c.height();
+            this.layout(w, h);
+            double mx = LegacyCanvas.mouseX();
+            double my = LegacyCanvas.mouseY();
+            float af = this.factor();
+            float alpha = Math.max(0.0F, Math.min(1.0F, af));
+
+            c.fill(0, 0, w, h, LegacyCanvas.alpha(BLACK, 0.2F * Math.max(0.0F, af)));
+
+            // The cards dim a little while a module's settings are open in front of them.
+            float behind = 1.0F - (this.page == null ? 0.0F : this.page.visibility() * 0.1F);
+            boolean interactive = this.page == null || !this.page.visible();
+            for (Panel panel : this.panels) {
+                float cx = panel.x + PANEL_W / 2.0F;
+                float cy = panel.y + panel.h / 2.0F;
+                float scale = 1.5F - af * 0.5F;
+                c.push();
+                c.translate((cx - w / 2.0F) * (1.0F - af) * 0.5F, (cy - h / 2.0F) * (1.0F - af) * 0.5F);
+                c.scaleAbout(scale, scale, cx, cy);
+                panel.draw(c, interactive ? mx : -10_000, interactive ? my : -10_000, alpha * behind);
+                c.pop();
+            }
+
+            if (this.page != null) {
+                this.page.draw(c, mx, my, alpha);
+                if (this.page.finished()) {
+                    this.page = null;
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ input
+
+    @Override
     public boolean mouseClicked(final MouseButtonEvent event, final boolean doubleClick) {
+        if (this.closing) {
+            return true;
+        }
         if (this.interactions.mouseClickedBinding(event)) {
             return true;
         }
-
-        int button = event.button();
-        int x = (int) event.x();
-        int y = (int) event.y();
-
-        if (this.isOverModeButton(x, y)) {
-            this.cycleMode();
+        double mx = LegacyCanvas.toLegacy(event.x());
+        double my = LegacyCanvas.toLegacy(event.y());
+        if (this.page != null) {
+            this.page.mouseClicked(mx, my, event, this.width * this.minecraft.getWindow().getGuiScale(), this.height * this.minecraft.getWindow().getGuiScale());
             return true;
         }
 
-        Integer categoryIndex = this.hitCategory(x, y);
-        if (categoryIndex != null) {
-            this.selectedCategory = ModuleCategory.values()[categoryIndex];
-            this.moduleScroll = 0;
-            this.settingScroll = 0;
-            List<Module> categoryModules = this.modules.byCategory(this.selectedCategory);
-            this.selectedModule = categoryModules.isEmpty() ? null : categoryModules.get(0);
-            return true;
-        }
-
-        Integer moduleIndex = this.hitModule(x, y);
-        if (moduleIndex != null) {
-            Module module = this.modules.byCategory(this.selectedCategory).get(moduleIndex);
-            this.selectedModule = module;
-            this.settingScroll = 0;
-            module.toggle();
-            return true;
-        }
-
-        if (this.selectedModule != null && this.isInsideSettingsPanel(x, y)) {
-            if (this.hitKeybindRow(y)) {
-                this.interactions.handleKeybindClick(this.selectedModule, button);
-                return true;
+        for (int i = this.panels.size() - 1; i >= 0; i--) {
+            Panel panel = this.panels.get(i);
+            if (!panel.contains(mx, my)) {
+                continue;
             }
-
-            Setting<?> setting = this.hitSetting(x, y);
-            if (setting != null) {
-                if (button == 0) {
-                    this.interactions.handleSettingClick(setting, x, SETTINGS_X + 4, SETTINGS_X + SETTINGS_WIDTH - 4);
+            // The card that was pressed comes to the front.
+            this.panels.remove(i);
+            this.panels.add(panel);
+            if (my < panel.y + HEADER) {
+                if (event.button() == 0) {
+                    this.dragged = panel;
+                    this.dragOffsetX = (float) (mx - panel.x);
+                    this.dragOffsetY = (float) (my - panel.y);
                 }
                 return true;
             }
+            if (event.button() == 0 && panel.scroll.press(mx, my, panel.x + PANEL_W, panel.y + HEADER, panel.h - HEADER, panel.contentHeight(), panel.h - HEADER)) {
+                this.scrollDragged = panel;
+                return true;
+            }
+            Module module = panel.moduleAt(my);
+            if (module != null) {
+                if (event.button() == 0) {
+                    module.toggle();
+                } else if (event.button() == 1) {
+                    this.page = new JelloSettingsPage(this, module, this.interactions);
+                }
+            }
+            return true;
         }
-
         return super.mouseClicked(event, doubleClick);
     }
 
@@ -170,52 +261,80 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui {
         if (this.interactions.mouseDragged(event)) {
             return true;
         }
-
+        double mx = LegacyCanvas.toLegacy(event.x());
+        double my = LegacyCanvas.toLegacy(event.y());
+        if (this.page != null) {
+            this.page.mouseDragged(mx, my);
+            return true;
+        }
+        if (this.dragged != null) {
+            int w = this.width * this.minecraft.getWindow().getGuiScale();
+            int h = this.height * this.minecraft.getWindow().getGuiScale();
+            this.dragged.x = (int) Math.max(0, Math.min(w - PANEL_W, mx - this.dragOffsetX));
+            this.dragged.y = (int) Math.max(0, Math.min(h - HEADER, my - this.dragOffsetY));
+            POSITIONS.put(this.dragged.category, new int[] {this.dragged.x, this.dragged.y});
+            return true;
+        }
+        if (this.scrollDragged != null) {
+            Panel p = this.scrollDragged;
+            p.scroll.drag(my, p.y + HEADER, p.h - HEADER, p.contentHeight(), p.h - HEADER);
+            return true;
+        }
         return super.mouseDragged(event, dx, dy);
     }
 
     @Override
     public boolean mouseReleased(final MouseButtonEvent event) {
         this.interactions.mouseReleased();
+        this.dragged = null;
+        if (this.scrollDragged != null) {
+            this.scrollDragged.scroll.release();
+            this.scrollDragged = null;
+        }
+        if (this.page != null) {
+            this.page.mouseReleased();
+        }
         return super.mouseReleased(event);
     }
 
     @Override
     public boolean mouseScrolled(final double x, final double y, final double scrollX, final double scrollY) {
-        int direction = (int) Math.signum(scrollY);
-        if (this.isInsideCategoryPanel((int) x, (int) y)) {
-            this.categoryScroll -= direction;
-            this.categoryScroll = Math.max(0, Math.min(this.categoryScroll, this.maxCategoryScroll()));
+        double mx = LegacyCanvas.toLegacy(x);
+        double my = LegacyCanvas.toLegacy(y);
+        if (this.page != null) {
+            this.page.wheel(mx, my, scrollY);
             return true;
         }
-
-        if (this.isInsideModulePanel((int) x, (int) y)) {
-            this.moduleScroll -= direction;
-            this.moduleScroll = Math.max(0, Math.min(this.moduleScroll, this.maxModuleScroll()));
-            return true;
+        for (int i = this.panels.size() - 1; i >= 0; i--) {
+            Panel panel = this.panels.get(i);
+            if (panel.contains(mx, my)) {
+                panel.scroll.wheel(scrollY, panel.contentHeight(), panel.h - HEADER);
+                return true;
+            }
         }
-
-        if (this.isInsideSettingsPanel((int) x, (int) y)) {
-            this.settingScroll -= direction;
-            this.settingScroll = Math.max(0, Math.min(this.settingScroll, this.maxSettingScroll()));
-            return true;
-        }
-
         return super.mouseScrolled(x, y, scrollX, scrollY);
     }
-
 
     @Override
     public boolean keyPressed(final KeyEvent event) {
         if (this.interactions.keyPressed(event)) {
             return true;
         }
-
-        if (InputConstants.getKey(event).equals(ClickGuiHandler.OPEN_KEY)) {
-            this.onClose();
+        if (this.page != null && this.page.keyPressed(event)) {
             return true;
         }
-
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            if (this.page != null) {
+                this.page.close();
+            } else {
+                this.beginClose();
+            }
+            return true;
+        }
+        if (InputConstants.getKey(event).equals(ClickGuiHandler.OPEN_KEY) && this.page == null) {
+            this.beginClose();
+            return true;
+        }
         return super.keyPressed(event);
     }
 
@@ -224,288 +343,77 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui {
         if (this.interactions.charTyped(event)) {
             return true;
         }
-
-        return super.charTyped(event);
+        return this.page != null && this.page.charTyped(event) || super.charTyped(event);
     }
 
-    @Override
-    public void onClose() {
-        ClickGuiHandler.close();
-    }
+    // ------------------------------------------------------------------ one card
 
-    private boolean isOverModeButton(final int x, final int y) {
-        String modeText = "Mode: " + Client.getInstance().getClientModeManager().get().name();
-        int right = this.width - 8;
-        int left = right - this.font.width(modeText) - 6;
-        return x >= left && x < right && y >= 4 && y < 18;
-    }
+    /** One category's card ({@code PanelGroup}). */
+    static final class Panel {
+        final ModuleCategory category;
+        final List<Module> modules;
+        final LegacyScroll scroll = new LegacyScroll(LegacyScroll.Style.JELLO);
+        final Map<Module, Float> hover = new HashMap<>();
+        int x;
+        int y;
+        int h = PANEL_H;
+        private long lastNanos;
 
-    private void cycleMode() {
-        this.minecraft.gui.setScreen(new ModeSelectScreen(this));
-    }
-
-    private void drawCategoryPanel(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
-        int x = CATEGORY_X;
-        int y = PANEL_TOP;
-        int w = CATEGORY_WIDTH;
-        int h = this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN;
-        this.drawPanel(graphics, x, y, w, h, "Categories");
-
-        int listTop = y + 16;
-        int visibleRows = this.visibleRows(h);
-        ModuleCategory[] categories = ModuleCategory.values();
-        for (int row = 0; row < visibleRows; row++) {
-            int index = row + this.categoryScroll;
-            if (index >= categories.length) {
-                break;
-            }
-
-            int rowY = listTop + row * ROW_HEIGHT;
-            ModuleCategory category = categories[index];
-            boolean selected = category == this.selectedCategory;
-            boolean hovered = mouseX >= x + 1 && mouseX < x + w - 1 && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
-            if (selected) {
-                graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, SELECTED_BG);
-                graphics.fill(x + 1, rowY, x + 3, rowY + ROW_HEIGHT - 1, TEXT_ENABLED);
-            } else if (hovered) {
-                graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, HOVER_BG);
-            }
-
-            graphics.text(this.font, category.getDisplayName(), x + 8, rowY + 6, selected ? TEXT : TEXT_DIM);
-        }
-    }
-
-    private void drawModulePanel(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
-        int x = MODULE_X;
-        int y = PANEL_TOP;
-        int w = MODULE_WIDTH;
-        int h = this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN;
-        this.drawPanel(graphics, x, y, w, h, "Modules");
-
-        if (this.selectedCategory == null) {
-            return;
+        Panel(final ModuleCategory category, final List<Module> modules) {
+            this.category = category;
+            this.modules = modules;
         }
 
-        List<Module> categoryModules = this.modules.byCategory(this.selectedCategory);
-        int listTop = y + 16;
-        int visibleRows = this.visibleRows(h);
-        for (int row = 0; row < visibleRows; row++) {
-            int index = row + this.moduleScroll;
-            if (index >= categoryModules.size()) {
-                break;
-            }
+        boolean contains(final double mx, final double my) {
+            return mx >= this.x && mx < this.x + PANEL_W && my >= this.y && my < this.y + this.h;
+        }
 
-            int rowY = listTop + row * ROW_HEIGHT;
-            Module module = categoryModules.get(index);
-            boolean selected = module == this.selectedModule;
-            boolean hovered = mouseX >= x + 1 && mouseX < x + w - 1 && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
-            if (selected) {
-                graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, SELECTED_BG);
-            } else if (hovered) {
-                graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, HOVER_BG);
-            }
+        int contentHeight() {
+            return this.modules.size() * ROW;
+        }
 
-            if (module.isEnabled()) {
-                graphics.fill(x + 1, rowY, x + 3, rowY + ROW_HEIGHT - 1, TEXT_ENABLED);
-            }
+        Module moduleAt(final double my) {
+            int index = (int) ((my - this.y - HEADER + this.scroll.offset()) / ROW);
+            return index >= 0 && index < this.modules.size() && my >= this.y + HEADER ? this.modules.get(index) : null;
+        }
 
-            int nameColor = module.isEnabled() ? TEXT_ENABLED : TEXT_DISABLED;
-            graphics.text(this.font, module.getName(), x + 8, rowY + 6, nameColor);
-            if (module.isEnabled()) {
-                graphics.text(this.font, "ON", x + w - this.font.width("ON") - 4, rowY + 5, TEXT_ENABLED);
+        void draw(final LegacyCanvas c, final double mx, final double my, final float alpha) {
+            long now = System.nanoTime();
+            float dt = this.lastNanos == 0 ? 0.0F : Math.min(0.1F, (now - this.lastNanos) / 1.0E9F);
+            this.lastNanos = now;
+
+            c.outerGlow(this.x, this.y, PANEL_W, this.h, 20, alpha);
+            c.fill(this.x, this.y, this.x + PANEL_W, this.y + this.h, LegacyCanvas.alpha(WHITE, alpha));
+            float titleH = c.textHeight(Face.JELLO_LIGHT, 25);
+            c.text(Face.JELLO_LIGHT, 25, this.category.getDisplayName(), this.x + 20, this.y + 30 - titleH / 2.0F, LegacyCanvas.alpha(BLACK, alpha * 0.5F));
+
+            int viewH = this.h - HEADER;
+            this.scroll.clamp(this.contentHeight(), viewH);
+            c.scissor(this.x, this.y + HEADER, this.x + PANEL_W, this.y + this.h);
+            for (int i = 0; i < this.modules.size(); i++) {
+                Module module = this.modules.get(i);
+                int top = this.y + HEADER + i * ROW - this.scroll.offset();
+                if (top + ROW < this.y + HEADER || top > this.y + this.h) {
+                    continue;
+                }
+                boolean hovered = mx >= this.x && mx < this.x + PANEL_W && my >= Math.max(top, this.y + HEADER) && my < Math.min(top + ROW, this.y + this.h);
+                float h = this.hover.getOrDefault(module, 0.0F);
+                h = Math.max(0.0F, Math.min(1.0F, h + (hovered ? 6.0F : -6.0F) * dt));
+                this.hover.put(module, h);
+
+                boolean on = module.isEnabled();
+                int row = LegacyCanvas.shiftTowardsOther(on ? BLUE : OFF_ROW, on ? BLUE_HOVER : OFF_ROW_HOVER, 1.0F - h);
+                c.fill(this.x, top, this.x + PANEL_W, top + ROW, LegacyCanvas.fade(row, alpha));
+                float textH = c.textHeight(Face.JELLO_LIGHT, 20);
+                c.text(Face.JELLO_LIGHT, 20, module.getName(), this.x + (on ? 30 : 22), top + ROW / 2.0F - textH / 2.0F,
+                    LegacyCanvas.alpha(on ? WHITE : BLACK, alpha));
+            }
+            c.unscissor();
+
+            this.scroll.draw(c, this.x + PANEL_W, this.y + HEADER, viewH, this.contentHeight(), viewH, this.contains(mx, my), alpha);
+            if (this.scroll.offset() > 0) {
+                c.image(LegacyTexture.SHADOW_BOTTOM, this.x, this.y + HEADER, PANEL_W, 18, LegacyCanvas.alpha(WHITE, alpha * 0.5F));
             }
         }
-    }
-
-    private void drawSettingsPanel(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY) {
-        int x = SETTINGS_X;
-        int y = PANEL_TOP;
-        int w = SETTINGS_WIDTH;
-        int h = this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN;
-        this.drawPanel(graphics, x, y, w, h, "Settings");
-
-        if (this.selectedModule == null) {
-            graphics.text(this.font, "Select a module", x + 4, y + 24, TEXT_DIM);
-            return;
-        }
-
-        Module module = this.selectedModule;
-        int keybindY = y + 20;
-        String keybindText = this.interactions.isBinding(module)
-            ? "Press a key... (Esc cancel, Del unbind)"
-            : "Bind: " + this.interactions.keybindDisplay(module.getKeybind());
-        graphics.text(this.font, keybindText, x + 4, keybindY + 5, this.interactions.isBinding(module) ? 0xFFFFFF55 : TEXT);
-        String modeText = module.getKeybind().mode().name();
-        graphics.text(this.font, modeText, x + w - this.font.width(modeText) - 4, keybindY + 5, TEXT_DIM);
-
-        List<Setting<?>> visibleSettings = module.settings().stream().filter(Setting::isVisible).toList();
-        int listTop = keybindY + ROW_HEIGHT + 2;
-        int visibleRows = this.visibleRows(h - (listTop - y));
-        for (int row = 0; row < visibleRows; row++) {
-            int index = row + this.settingScroll;
-            if (index >= visibleSettings.size()) {
-                break;
-            }
-
-            int rowY = listTop + row * ROW_HEIGHT;
-            Setting<?> setting = visibleSettings.get(index);
-            if (rowY + ROW_HEIGHT > y + h) {
-                break;
-            }
-
-            boolean hovered = mouseX >= x + 1 && mouseX < x + w - 1 && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
-            if (hovered) {
-                graphics.fill(x + 1, rowY, x + w - 1, rowY + ROW_HEIGHT - 1, HOVER_BG);
-            }
-
-            this.drawSetting(graphics, setting, x, rowY, w, mouseX);
-        }
-    }
-
-    private void drawSetting(final GuiGraphicsExtractor graphics, final Setting<?> setting, final int panelX, final int y, final int panelWidth, final int mouseX) {
-        if (setting instanceof BooleanSetting bool) {
-            String label = bool.getName() + ": " + (bool.get() ? "ON" : "OFF");
-            graphics.text(this.font, label, panelX + 4, y + 5, bool.get() ? TEXT_ENABLED : TEXT_DIM);
-            int boxX = panelX + panelWidth - 16;
-            graphics.fill(boxX, y + 3, boxX + 10, y + 13, bool.get() ? 0xFF2E7D32 : 0xFF555555);
-            graphics.outline(boxX, y + 3, 10, 10, PANEL_BORDER);
-            return;
-        }
-
-        if (setting instanceof NumberSetting number) {
-            String label = number.getName() + ": " + String.format(Locale.ROOT, "%." + number.getDecimalPlaces() + "f", number.get());
-            graphics.text(this.font, label, panelX + 4, y + 1, TEXT);
-            int trackX = panelX + 4;
-            int trackY = y + 12;
-            int trackWidth = panelWidth - 8;
-            float numberRange = number.getMax() - number.getMin();
-            int fillWidth = numberRange <= 0.0F ? trackWidth
-                : (int) ((number.get() - number.getMin()) / numberRange * trackWidth);
-            graphics.fill(trackX, trackY, trackX + trackWidth, trackY + 3, 0xFF333333);
-            graphics.fill(trackX, trackY, trackX + fillWidth, trackY + 3, 0xFF4A6FA5);
-            return;
-        }
-
-        if (setting instanceof EnumSetting<?> enumSetting) {
-            String label = setting.getName() + ": " + enumSetting.get().name();
-            graphics.text(this.font, label, panelX + 4, y + 5, TEXT);
-            graphics.text(this.font, ">", panelX + panelWidth - 10, y + 5, TEXT_DIM);
-            return;
-        }
-
-        if (setting instanceof ColorSetting color) {
-            String value = this.interactions.displayValue(setting);
-            graphics.text(this.font, setting.getName() + ": " + value, panelX + 4, y + 5, TEXT);
-            int swatchX = panelX + panelWidth - 16;
-            graphics.fill(swatchX, y + 3, swatchX + 10, y + 13, color.get());
-            graphics.outline(swatchX, y + 3, 10, 10, PANEL_BORDER);
-            return;
-        }
-
-        if (setting instanceof TextSetting) {
-            String value = this.interactions.displayValue(setting);
-            graphics.text(this.font, setting.getName() + ": " + value, panelX + 4, y + 5, TEXT);
-        }
-    }
-
-    private void drawPanel(final GuiGraphicsExtractor graphics, final int x, final int y, final int w, final int h, final String title) {
-        graphics.fill(x, y, x + w, y + h, PANEL_BG);
-        graphics.outline(x, y, w, h, PANEL_BORDER);
-        graphics.fill(x, y, x + w, y + 14, HEADER_BG);
-        graphics.text(this.font, title, x + 4, y + 3, TEXT);
-    }
-
-    private int visibleRows(final int panelHeight) {
-        return Math.max(0, (panelHeight - 16) / ROW_HEIGHT);
-    }
-
-    private int maxCategoryScroll() {
-        return Math.max(0, ModuleCategory.values().length - this.visibleRows(this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN));
-    }
-
-    private int maxModuleScroll() {
-        if (this.selectedCategory == null) {
-            return 0;
-        }
-
-        int panelHeight = this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN;
-        return Math.max(0, this.modules.byCategory(this.selectedCategory).size() - this.visibleRows(panelHeight));
-    }
-
-    private int maxSettingScroll() {
-        if (this.selectedModule == null) {
-            return 0;
-        }
-
-        int panelHeight = this.height - PANEL_TOP - PANEL_BOTTOM_MARGIN;
-        int listTopOffset = 20 + ROW_HEIGHT + 2;
-        int visibleRows = this.visibleRows(panelHeight - listTopOffset);
-        long settingCount = this.selectedModule.settings().stream().filter(Setting::isVisible).count();
-        return Math.max(0, (int) settingCount - visibleRows);
-    }
-
-    private boolean isInsideCategoryPanel(final int x, final int y) {
-        return x >= CATEGORY_X && x < CATEGORY_X + CATEGORY_WIDTH && y >= PANEL_TOP && y < this.height - PANEL_BOTTOM_MARGIN;
-    }
-
-    private boolean isInsideModulePanel(final int x, final int y) {
-        return x >= MODULE_X && x < MODULE_X + MODULE_WIDTH && y >= PANEL_TOP && y < this.height - PANEL_BOTTOM_MARGIN;
-    }
-
-    private boolean isInsideSettingsPanel(final int x, final int y) {
-        return x >= SETTINGS_X && x < SETTINGS_X + SETTINGS_WIDTH && y >= PANEL_TOP && y < this.height - PANEL_BOTTOM_MARGIN;
-    }
-
-    private @Nullable Integer hitCategory(final int x, final int y) {
-        if (!this.isInsideCategoryPanel(x, y)) {
-            return null;
-        }
-
-        int listTop = PANEL_TOP + 16;
-        int row = (y - listTop) / ROW_HEIGHT + this.categoryScroll;
-        if (row < 0 || row >= ModuleCategory.values().length) {
-            return null;
-        }
-
-        int rowY = listTop + (row - this.categoryScroll) * ROW_HEIGHT;
-        return y >= rowY && y < rowY + ROW_HEIGHT ? row : null;
-    }
-
-    private @Nullable Integer hitModule(final int x, final int y) {
-        if (!this.isInsideModulePanel(x, y) || this.selectedCategory == null) {
-            return null;
-        }
-
-        int listTop = PANEL_TOP + 16;
-        int row = (y - listTop) / ROW_HEIGHT + this.moduleScroll;
-        List<Module> categoryModules = this.modules.byCategory(this.selectedCategory);
-        if (row < 0 || row >= categoryModules.size()) {
-            return null;
-        }
-
-        int rowY = listTop + (row - this.moduleScroll) * ROW_HEIGHT;
-        return y >= rowY && y < rowY + ROW_HEIGHT ? row : null;
-    }
-
-    private boolean hitKeybindRow(final int y) {
-        int keybindY = PANEL_TOP + 20;
-        return y >= keybindY && y < keybindY + ROW_HEIGHT;
-    }
-
-    private @Nullable Setting<?> hitSetting(final int x, final int y) {
-        if (this.selectedModule == null || !this.isInsideSettingsPanel(x, y)) {
-            return null;
-        }
-
-        int keybindY = PANEL_TOP + 20;
-        int listTop = keybindY + ROW_HEIGHT + 2;
-        int row = (y - listTop) / ROW_HEIGHT + this.settingScroll;
-        List<Setting<?>> visibleSettings = this.selectedModule.settings().stream().filter(Setting::isVisible).toList();
-        if (row < 0 || row >= visibleSettings.size()) {
-            return null;
-        }
-
-        int rowY = listTop + (row - this.settingScroll) * ROW_HEIGHT;
-        return y >= rowY && y < rowY + ROW_HEIGHT ? visibleSettings.get(row) : null;
     }
 }

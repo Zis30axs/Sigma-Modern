@@ -404,6 +404,9 @@ public class Client implements MinecraftInstance {
                 this.seedDebugAccounts();
                 yield new com.mentalfrostbyte.jello.gui.account.JelloAltManagerScreen(parent);
             }
+            case "ALTS_CLASSIC_ADD" -> new com.mentalfrostbyte.jello.gui.account.ClassicAltPromptScreen(parent,
+                com.mentalfrostbyte.jello.gui.account.ClassicAltPromptScreen.Mode.ADD, new com.mentalfrostbyte.jello.gui.account.AccountOps(() -> {
+                }));
             case "ALTS_CLASSIC" -> {
                 this.seedDebugAccounts();
                 yield new com.mentalfrostbyte.jello.gui.account.ClassicAltManagerScreen(parent);
