@@ -34,9 +34,11 @@
   开关/滑条/枚举下拉/文本/HSV 取色）。`-Dsigma.debug.jelloSettings=<Module>`。
 - **音乐窗口** `JelloMusicPanel`（ClickGUI 右下角的 "Music" 按钮开关；窗口够宽时默认打开，卡片会让到它左边）：800×600 的旧版布局——黑色左栏（来源列表，
   当前歌曲的封面横跨左栏和底栏）、右边 3 列封面网格、底部暗紫色控制条（上一首/播放暂停/下一首、右侧音量竖线、底边进度线和两端的时间）。
-  数据和播放走 SigmaModern 音乐窗口用的同一套后端（`MusicLibrary` / `MusicPlayer`），所以两边看到的是同一个队列。来源是网易云的几个榜单和一位歌手、
-  搜索，以及登录后的每日推荐和我的歌单。**登录界面（二维码）没搬**，要在 SigmaModern 的音乐窗口里登录；旧版的 "Open Folder"、Local Music、
-  重复模式和频谱按钮也没搬（后端没有对应的东西）。`-Dsigma.debug.jelloMusic=demo` 开着窗口并列一批假歌曲，截图不用联网。
+  浏览逻辑用的是 SigmaModern 那一套：分类、搜索框文字和结果、打开的歌单、点一行做什么，都在 `gui.modern.MusicBrowse`（从 `ModernMusicBrowser` 里
+  抽出来的无界面模型，静态状态），两个窗口只是两种画法——在一边搜过的词、停留的分类，换到另一边还在；往 `MusicBrowse.CATEGORIES` 加一行两边都多一个来源。
+  播放走同一个 `MusicPlayer`，所以两边是同一个队列。来源是网易云的几个榜单和一位歌手、搜索，以及登录后的每日推荐和我的歌单（左栏用 Modern 的短名字）。
+  **登录界面（二维码）没搬**，要在 SigmaModern 的音乐窗口里登录；旧版的 "Open Folder"、Local Music、重复模式和频谱按钮也没搬（后端没有对应的东西）。
+  `-Dsigma.debug.musicDemo=1` 让榜单和歌手列一批假歌曲、Jello 的窗口默认打开，截图不用联网（取代了之前的 `jelloMusic=demo`）。
 
 - **暂停菜单里的 Jello 页面**：`PauseScreen` 里一行钩子在 Jello 下多出 "Jello for Sigma Options" 按钮（位置同旧版：底部居中 204×20），打开
   `JelloOptionsScreen`（版本号、ClickGUI 绑的键、Keybind Manager / ClickGUI / Credits 三个入口，缩放进出）。

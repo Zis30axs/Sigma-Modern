@@ -6,7 +6,6 @@ import com.mentalfrostbyte.jello.music.MusicLibrary;
 import com.mentalfrostbyte.jello.music.MusicPlayer;
 import com.mentalfrostbyte.jello.music.Spectrum;
 import com.mentalfrostbyte.jello.music.Track;
-import com.mentalfrostbyte.jello.music.netease.NeteaseAccount;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -175,7 +174,7 @@ final class ModernMusicView {
         List<RailItem> items = new ArrayList<>();
         items.add(new RailItem("player", ModernText.t("Playing", "播放")));
         if (Client.getInstance().getMusicLibrary().isOnline()) {
-            for (ModernMusicBrowser.Category category : ModernMusicBrowser.categories(signedIn())) {
+            for (MusicBrowse.Category category : MusicBrowse.categories(signedIn())) {
                 items.add(new RailItem(category.key(), category.label()));
             }
         }
@@ -183,8 +182,7 @@ final class ModernMusicView {
     }
 
     static boolean signedIn() {
-        NeteaseAccount account = Client.getInstance().getMusicLibrary().account();
-        return account != null && account.state().phase() == NeteaseAccount.Phase.SIGNED_IN;
+        return MusicBrowse.signedIn();
     }
 
     private static Box railItem(Frame f, int index) {
@@ -194,7 +192,7 @@ final class ModernMusicView {
     private static @Nullable String activeRailKey() {
         return switch (page) {
             case PLAYER -> "player";
-            case BROWSE -> ModernMusicBrowser.category();
+            case BROWSE -> MusicBrowse.category();
             default -> null;
         };
     }

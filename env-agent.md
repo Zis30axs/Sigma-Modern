@@ -97,7 +97,7 @@ exit 0
 | `openScreen=`、`openScreenDelayFrames=` | 打开某个界面 |
 | `chatInput=`、`chatType=`、`chatLines=N`、`chatCloseAfterFrames=N` | 聊天框相关截图 |
 | `screenshotAfterFrames=N` | 渲染 N 帧后截图（`capture.sh` 用它） |
-| `musicOffline`（脚本默认开）、`musicSearch=`、`musicAutoplay`、`musicPreview`、`musicPage=fx\|lyrics`、`musicDrawer=open`、`musicLyrics=文件`、`musicMuted` | 音乐播放器截图 |
+| `musicOffline`（脚本默认开）、`musicSearch=`、`musicDemo`（榜单列假歌曲，Jello 音乐窗口默认打开）、`musicAutoplay`、`musicPreview`、`musicPage=fx\|lyrics`、`musicDrawer=open`、`musicLyrics=文件`、`musicMuted` | 音乐播放器截图 |
 | `islandActivity`、`modernMenuDock`、`selectFirst`、`smoke`、`screenSmoke`、`frameTiming`、`maximizeAfterFrames=N`、`logMode` | 其他截图和性能辅助，见 `Client.java` 里的注释 |
 
 ## 验证一个 HUD 或界面改动
