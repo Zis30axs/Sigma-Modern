@@ -29,7 +29,8 @@ import javazoom.jl.decoder.SampleBuffer;
 public final class LegacySounds {
     public enum Cue {
         ACTIVATE("activate"),
-        DEACTIVATE("deactivate");
+        DEACTIVATE("deactivate"),
+        POP("pop");
 
         private final String resource;
 

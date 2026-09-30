@@ -416,6 +416,9 @@ public class Client implements MinecraftInstance {
             }
             // Jello's in-game pages: the options, the Keybind Manager and the credits.
             case "JELLO_OPTIONS" -> new com.mentalfrostbyte.jello.gui.jello.JelloOptionsScreen(parent);
+            case "SPOTLIGHT" -> new com.mentalfrostbyte.jello.gui.jello.JelloSpotlightScreen();
+            case "SNAKE" -> new com.mentalfrostbyte.jello.gui.jello.JelloSnakeScreen();
+            case "BIRD" -> new com.mentalfrostbyte.jello.gui.jello.JelloBirdScreen();
             case "KEYBINDS" -> new com.mentalfrostbyte.jello.gui.jello.JelloKeybindScreen();
             case "CREDITS" -> new com.mentalfrostbyte.jello.gui.jello.JelloCreditsScreen(parent);
             // A plain vanilla sub-page, for checking how a presentation skins vanilla widgets.

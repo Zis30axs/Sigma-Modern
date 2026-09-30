@@ -37,6 +37,7 @@ public final class LegacyTextField {
     private String placeholder = "";
     private boolean censor;
     private int ink;
+    private boolean underline = true;
     private boolean focused;
     private int maxLength = 256;
     private float scroll;
@@ -88,6 +89,11 @@ public final class LegacyTextField {
 
     public void setCensored(final boolean censor) {
         this.censor = censor;
+    }
+
+    /** Whether the Jello style draws its line under the text; a field that sits in a bar of its own does without. */
+    public void setUnderline(final boolean underline) {
+        this.underline = underline;
     }
 
     /** The colour of the text and caret, for a field over a dark backdrop; the style's own (dark on Jello) when unset. */
@@ -217,7 +223,7 @@ public final class LegacyTextField {
         }
         c.unscissor();
 
-        if (jello) {
+        if (jello && this.underline) {
             c.fill(this.x, this.y + this.h - 2, this.x + this.w, this.y + this.h, LegacyCanvas.fade(0xCACACACA, (this.focusFade / 2.0F + 0.5F) * alpha));
         }
     }

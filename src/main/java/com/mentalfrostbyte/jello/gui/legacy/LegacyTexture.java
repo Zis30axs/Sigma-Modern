@@ -47,6 +47,13 @@ public enum LegacyTexture {
     MUSIC_PREVIOUS("music/backwards.png", 46, 46),
     MUSIC_BAR("music/bg.png", 653, 77),
 
+    // The bird game
+    BIRD_BACKGROUND("games/bg.png", 288, 512),
+    BIRD_GROUND("games/fg.png", 336, 112),
+    BIRD_PIPE_TOP("games/pipe.png", 52, 320),
+    BIRD_PIPE_BOTTOM("games/pipe2.png", 52, 320),
+    BIRD("games/bird.png", 102, 24),
+
     // In-game HUD
     /** The old {@code jello_watermark@2x.png}: shown at half this size, 170x104 framebuffer pixels. */
     JELLO_WATERMARK("jello/watermark.png", 340, 208),

@@ -44,7 +44,14 @@
     弹出 250×330 的卡片列出绑在这个键上的模块、垃圾桶解除、Add 打开 500×600 的选择列表（搜索：前缀匹配排前面，再是包含匹配）。直接读写模块自己的 `Keybind`，
     所以跟 ClickGUI 里的绑定按钮是同一份数据；关闭时存配置。旧版还能把 *界面*（Click GUI、Maps、Snake……）绑到键上，这里没有界面绑定的存储，没搬。
   - `JelloCreditsScreen`：`assets/minecraft/sigma/credits.txt`，**内容是重写的**，不是旧版那段 746 行的依赖许可证（那是旧客户端当时依赖的列表，放在这里会是错的）。
-  - 调试：`-Dsigma.debug.openScreen=JELLO_OPTIONS|KEYBINDS|CREDITS`。
+  - 调试：`-Dsigma.debug.openScreen=JELLO_OPTIONS|KEYBINDS|CREDITS|SPOTLIGHT|SNAKE|BIRD`。
+- **Spotlight / Snake / Bird**：旧版把这些界面绑到键上；这里每个是一个 INTERFACE 模块（`Spotlight`、`Snake`、`Bird`，继承 `ScreenLauncher`），
+  打开它就在下一个 tick 开界面并把自己关掉，所以可以用 Keybind Manager / ClickGUI / TabGUI 绑键和打开，不需要另一套存储。
+  - `JelloSpotlightScreen`：屏幕 25% 处一条 675×60 的白色搜索条，输入模块名前缀，灰字补全成 "Speed - Disabled"，回车切换第一个匹配并关闭。
+  - `JelloSnakeScreen` + `SnakeGame`：48×27 格、14px 一格、70ms 一步，移动键或方向键转向；规则（不能掉头、两步之间只转一次、吃苹果长一格、撞墙/自己重来）是纯逻辑，有测试。
+  - `JelloBirdScreen` + `BirdGame`：背景、管子、滚动的地面、三帧的鸟是旧版的图。**旧版这个游戏没有碰撞也不计分**，而且下落是匀速 600px/s，这里补成了能玩的：
+    重力加速度、按空格给固定向上速度、碰管子或地面重来、过一根管子得一分。物理是新写的，不是旧数字。
+  - 两个游戏共用 `JelloGameScreen` 的外框（白卡、标题、"Max | Score"、弹出动画），吃苹果有 `pop` 音效。
 - **游戏内 HUD** `gui.legacy.hud`（`LegacyHud` 从 `Hud` 的钩子进来，只在 JELLO/CLASSIC 下画）：
   - 水印：170×104 的图片，F3 时移到顶部居中。
   - ActiveMods `JelloActiveMods`：右上角白色 Helvetica Neue Light，文字后面是黑色柔光（`shadow.png`），按名字宽度（20 号字）从宽到窄排；
