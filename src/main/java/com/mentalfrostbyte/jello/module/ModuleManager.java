@@ -10,6 +10,7 @@ import com.mentalfrostbyte.jello.module.impl.gui.Compass;
 import com.mentalfrostbyte.jello.module.impl.gui.Coords;
 import com.mentalfrostbyte.jello.module.impl.gui.InfoHud;
 import com.mentalfrostbyte.jello.module.impl.gui.KeyStrokes;
+import com.mentalfrostbyte.jello.module.impl.gui.Maps;
 import com.mentalfrostbyte.jello.module.impl.gui.MiniMap;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
@@ -78,6 +79,7 @@ public final class ModuleManager {
         this.register(new KeyStrokes());
         this.register(new KillAura());
         this.register(new LowFire());
+        this.register(new Maps());
         this.register(new MiniMap());
         this.register(new ModernChat());
         this.register(new NoFall());

@@ -69,6 +69,7 @@ public enum LegacyTexture {
     // Components
     CHECK("component/check.png", 60, 60),
     TRASHCAN("component/trashcan.png", 22, 26),
+    WAYPOINT("component/waypoint.png", 32, 46),
     SCROLLBAR_TOP("component/verticalscrollbartop.png", 11, 5),
     SCROLLBAR_BOTTOM("component/verticalscrollbarbottom.png", 11, 5),
 

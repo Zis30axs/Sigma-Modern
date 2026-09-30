@@ -241,6 +241,24 @@ public final class LegacyCanvas implements AutoCloseable {
         return LegacyFonts.width(face, text, size);
     }
 
+    /** {@code text} cut with an ellipsis to fit {@code width} pixels. */
+    public String fit(final LegacyFonts.Face face, final float size, final String text, final float width) {
+        if (text == null) {
+            return "";
+        }
+
+        if (this.textWidth(face, size, text) <= width) {
+            return text;
+        }
+
+        String cut = text;
+        while (!cut.isEmpty() && this.textWidth(face, size, cut + "…") > width) {
+            cut = cut.substring(0, cut.length() - 1);
+        }
+
+        return cut + "…";
+    }
+
     public float textHeight(final LegacyFonts.Face face, final float size) {
         return LegacyFonts.height(face, size);
     }

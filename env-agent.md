@@ -45,7 +45,7 @@ scripts/game.sh stop; scripts/server.sh stop
 
 **`build.sh compile | test | test-only 类名,类名 | javac 文件... | clean`**：自动选 JDK 25、走离线 Maven（缺依赖时自动联网重试一次）、输出到 `build/`。`test` 给 Skija 补上 Linux 原生库，渲染相关测试需要它。多余参数原样交给 Maven（例如 `build.sh test -Dtest=Foo#method`）。`javac` 模式用来解决“只有 BUILD FAILURE 没有文件行号”：隐式编译错误时 Maven 不报位置，把可疑文件直接交给它就能看到真正的错误。
 
-**`game.sh start|wait-ready|shot|key|type|click|move|log|status|stop`**：Xvfb + 软件渲染（llvmpipe，约 20 帧），用 xdotool 操作。
+**`game.sh start|wait-ready|shot|key|type|click|rclick|hold|release|scroll|move|log|status|stop`**：Xvfb + 软件渲染（llvmpipe，约 20 帧），用 xdotool 操作。
 - `SERVER=host:port` 启动即进服（quick play），`WORLD=存档名` 进单人存档。
 - `start` 后面的参数原样给 JVM，`-Dsigma.debug.*` 见下。
 - 分辨率默认 1280×720，界面缩放固定 2（首次启动时写入 `run/options.txt`），所以截图坐标是窗口像素。

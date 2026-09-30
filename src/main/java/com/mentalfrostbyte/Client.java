@@ -36,6 +36,8 @@ public class Client implements MinecraftInstance {
 
     private final Path directory;
     private final SigmaAccountManager accountManager;
+    // The explored maps and waypoints of the world being played (Jello's Maps page), under sigma5/maps.
+    private final com.mentalfrostbyte.jello.map.MapManager mapManager;
     private final ModuleManager moduleManager = new ModuleManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
@@ -83,6 +85,7 @@ public class Client implements MinecraftInstance {
     private Client() {
         this.directory = mc.gameDirectory.toPath().resolve("sigma5");
         this.accountManager = new SigmaAccountManager(this.directory.resolve("accounts.json"));
+        this.mapManager = new com.mentalfrostbyte.jello.map.MapManager(this.directory.resolve("maps"));
         if (this.musicOffline) {
             this.musicLibrary = new com.mentalfrostbyte.jello.music.MusicLibrary(null);
             this.musicPlayer = new com.mentalfrostbyte.jello.music.MusicPlayer(
@@ -157,6 +160,7 @@ public class Client implements MinecraftInstance {
             EventBus.register(this.islandActivity);
             EventBus.register(this.musicEnvironment);
             EventBus.register(this.legacyToggleSound);
+            EventBus.register(this.mapManager);
             // -Dsigma.debug.musicPreview: start the (silent) player a third of the way in, so captures show it playing.
             if (Boolean.getBoolean("sigma.debug.musicPreview")) {
                 this.musicPlayer.play();
@@ -213,6 +217,7 @@ public class Client implements MinecraftInstance {
      * is deliberately not retryable; fixing the list is the correct response, not a rollback.</p>
      */
     private void rollbackFailedStart() {
+        EventBus.unregister(this.mapManager);
         EventBus.unregister(this.legacyToggleSound);
         EventBus.unregister(this.islandActivity);
         EventBus.unregister(this.musicEnvironment);
@@ -419,6 +424,7 @@ public class Client implements MinecraftInstance {
             case "SPOTLIGHT" -> new com.mentalfrostbyte.jello.gui.jello.JelloSpotlightScreen();
             case "SNAKE" -> new com.mentalfrostbyte.jello.gui.jello.JelloSnakeScreen();
             case "BIRD" -> new com.mentalfrostbyte.jello.gui.jello.JelloBirdScreen();
+            case "MAPS" -> new com.mentalfrostbyte.jello.gui.jello.JelloMapsScreen();
             case "KEYBINDS" -> new com.mentalfrostbyte.jello.gui.jello.JelloKeybindScreen();
             case "CREDITS" -> new com.mentalfrostbyte.jello.gui.jello.JelloCreditsScreen(parent);
             // A plain vanilla sub-page, for checking how a presentation skins vanilla widgets.
@@ -588,6 +594,8 @@ public class Client implements MinecraftInstance {
         }
 
         try {
+            EventBus.unregister(this.mapManager);
+            this.mapManager.flush();
             EventBus.unregister(this.legacyToggleSound);
             EventBus.unregister(this.islandActivity);
             EventBus.unregister(this.musicEnvironment);
@@ -645,6 +653,10 @@ public class Client implements MinecraftInstance {
 
     public com.mentalfrostbyte.jello.lang.Translations getTranslations() {
         return this.translations;
+    }
+
+    public com.mentalfrostbyte.jello.map.MapManager getMapManager() {
+        return this.mapManager;
     }
 
     public ModuleManager getModuleManager() {

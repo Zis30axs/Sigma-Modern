@@ -178,10 +178,10 @@ final class JelloMusicPanel {
         ModernCovers.draw(c.graphics(), track, coverX, H - 170, 114.0F, 0.12F, LegacyCanvas.alpha(WHITE, a));
         String title = track == null ? "Jello Music" : track.title();
         String line = track == null ? null : ModernLyricSweep.sungLine(this.player);
-        c.textCentered(Face.JELLO_LIGHT, 18.0F, this.fit(c, Face.JELLO_LIGHT, 18.0F, line != null ? line : title, RAIL - 40), RAIL / 2.0F, H - 42.0F,
+        c.textCentered(Face.JELLO_LIGHT, 18.0F, c.fit(Face.JELLO_LIGHT, 18.0F, line != null ? line : title, RAIL - 40), RAIL / 2.0F, H - 42.0F,
             LegacyCanvas.alpha(WHITE, a));
         if (track != null && !track.artist().isEmpty()) {
-            c.textCentered(Face.JELLO_LIGHT, 14.0F, this.fit(c, Face.JELLO_LIGHT, 14.0F, track.artist(), RAIL - 40), RAIL / 2.0F, H - 20.0F,
+            c.textCentered(Face.JELLO_LIGHT, 14.0F, c.fit(Face.JELLO_LIGHT, 14.0F, track.artist(), RAIL - 40), RAIL / 2.0F, H - 20.0F,
                 LegacyCanvas.alpha(WHITE, 0.6F * a));
         }
     }
@@ -197,7 +197,7 @@ final class JelloMusicPanel {
             top = GRID_TOP + 6;
         } else {
             String label = MusicBrowse.heading(current);
-            c.text(Face.JELLO_LIGHT, 25.0F, this.fit(c, Face.JELLO_LIGHT, 25.0F, label, W - GRID_X - 90), GRID_X, 24, LegacyCanvas.alpha(WHITE, a));
+            c.text(Face.JELLO_LIGHT, 25.0F, c.fit(Face.JELLO_LIGHT, 25.0F, label, W - GRID_X - 90), GRID_X, 24, LegacyCanvas.alpha(WHITE, a));
         }
 
         List<Track> songs = MusicBrowse.tracks(current);
@@ -258,9 +258,9 @@ final class JelloMusicPanel {
             if (hover) {
                 c.rounded(Math.round(x), Math.round(y), CARD_W, CARD_W, 13, LegacyCanvas.alpha(WHITE, 0.1F * a));
             }
-            c.text(Face.JELLO_LIGHT, 16.0F, this.fit(c, Face.JELLO_LIGHT, 16.0F, title, CARD_W), x, y + CARD_W + 6,
+            c.text(Face.JELLO_LIGHT, 16.0F, c.fit(Face.JELLO_LIGHT, 16.0F, title, CARD_W), x, y + CARD_W + 6,
                 LegacyCanvas.alpha(current ? BLUE : WHITE, a));
-            c.text(Face.JELLO_LIGHT, 14.0F, this.fit(c, Face.JELLO_LIGHT, 14.0F, detail, CARD_W), x, y + CARD_W + 28, LegacyCanvas.alpha(WHITE, 0.55F * a));
+            c.text(Face.JELLO_LIGHT, 14.0F, c.fit(Face.JELLO_LIGHT, 14.0F, detail, CARD_W), x, y + CARD_W + 28, LegacyCanvas.alpha(WHITE, 0.55F * a));
         }
 
         if (max > 0.0F) {
@@ -498,20 +498,6 @@ final class JelloMusicPanel {
     }
 
     // ------------------------------------------------------------------ text
-
-    /** {@code text} cut with an ellipsis to fit {@code width} pixels. */
-    private String fit(final LegacyCanvas c, final Face face, final float size, final String text, final float width) {
-        if (text == null || c.textWidth(face, size, text) <= width) {
-            return text == null ? "" : text;
-        }
-
-        String cut = text;
-        while (!cut.isEmpty() && c.textWidth(face, size, cut + "…") > width) {
-            cut = cut.substring(0, cut.length() - 1);
-        }
-
-        return cut + "…";
-    }
 
     static String time(final long millis) {
         long seconds = Math.max(0L, millis / 1000L);

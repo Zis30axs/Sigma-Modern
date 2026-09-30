@@ -46,7 +46,7 @@
     弹出 250×330 的卡片列出绑在这个键上的模块、垃圾桶解除、Add 打开 500×600 的选择列表（搜索：前缀匹配排前面，再是包含匹配）。直接读写模块自己的 `Keybind`，
     所以跟 ClickGUI 里的绑定按钮是同一份数据；关闭时存配置。旧版还能把 *界面*（Click GUI、Maps、Snake……）绑到键上，这里没有界面绑定的存储，没搬。
   - `JelloCreditsScreen`：`assets/minecraft/sigma/credits.txt`，**内容是重写的**，不是旧版那段 746 行的依赖许可证（那是旧客户端当时依赖的列表，放在这里会是错的）。
-  - 调试：`-Dsigma.debug.openScreen=JELLO_OPTIONS|KEYBINDS|CREDITS|SPOTLIGHT|SNAKE|BIRD`。
+  - 调试：`-Dsigma.debug.openScreen=JELLO_OPTIONS|KEYBINDS|CREDITS|SPOTLIGHT|SNAKE|BIRD|MAPS`。
 - **Spotlight / Snake / Bird**：旧版把这些界面绑到键上；这里每个是一个 INTERFACE 模块（`Spotlight`、`Snake`、`Bird`，继承 `ScreenLauncher`），
   打开它就在下一个 tick 开界面并把自己关掉，所以可以用 Keybind Manager / ClickGUI / TabGUI 绑键和打开，不需要另一套存储。
   - `JelloSpotlightScreen`：屏幕 25% 处一条 675×60 的白色搜索条，输入模块名前缀，灰字补全成 "Speed - Disabled"，回车切换第一个匹配并关闭。
@@ -54,6 +54,24 @@
   - `JelloBirdScreen` + `BirdGame`：背景、管子、滚动的地面、三帧的鸟是旧版的图。**旧版这个游戏没有碰撞也不计分**，而且下落是匀速 600px/s，这里补成了能玩的：
     重力加速度、按空格给固定向上速度、碰管子或地面重来、过一根管子得一分。物理是新写的，不是旧数字。
   - 两个游戏共用 `JelloGameScreen` 的外框（白卡、标题、"Max | Score"、弹出动画），吃苹果有 `pop` 音效。
+- **Jello Maps / 路标** `JelloMapsScreen`（`Maps` 模块，INTERFACE，`ScreenLauncher`；调试 `-Dsigma.debug.openScreen=MAPS`，要在世界里，配 `openGuiInWorld=true`）：
+  旧版 `MapsScreen` + `MapPanel` + `MapFrame` + `Zoom` + `WaypointPanel` + `WaypointList` 的布局原样——白色 0.88 的圆角板（最大 850×550，窗口小就缩，
+  上面留 70px 放标题），左边 260px 是 "Waypoints" 列，右边是地图；标题 "Jello Maps"（Medium 40）在板子左上方，世界名（"local - 存档名" / "server - 地址"）右对齐在它右边；
+  缩放进场（0.8→1，`easeOutBack`）、背景整屏模糊、ESC 关。
+  - **地图**：北在上（+X 右、+Z 下）。拖动平移，滚轮每格一级，右下角 40×90 的玻璃控件上半放大、下半缩小（按住连续缩，带涟漪）；缩放范围 3–33，起始 8（旧版数字，
+    一屏 `(zoom-1)*2` 个区块宽）。右键地图弹出添加路标的小卡（214×170：名字、7 种颜色、可改的坐标、Add；点卡外或 ESC 收起）。路标在地图上是 `waypoint.png` 按颜色染的图钉，
+    玩家是一个按朝向转的箭头（**旧版没有玩家标记**，打开时地图本来就以玩家为中心，这里加了一个，方便拖走之后找回来）。
+  - **路标列表**：70px 一行（颜色点、名字、`x: z:`，右边三条杠是把手）。点一行把地图移到那里；按住把手拖到别处换位置（别的行让开），拖到左下角滑出的垃圾桶上松手删除（行滑出去）。
+    空的时候会提示 "Right-click the map to add a waypoint"（旧版没有，空白一片）。
+  - **存储**（`com.mentalfrostbyte.jello.map`，全是纯逻辑、有测试）：`sigma5/maps/<local|server>/<名字>/`。`waypoints.json` 是旧版的格式
+    （`{"waypoints":[{name,color,x,z}]}`，旧版写的文件原样能读）加一个可选的 `dim`（主世界不写，所以旧客户端读新文件也没事），路标按维度分，地图只显示当前维度的；
+    每个维度一个文件夹，里面是 8×8 区块一个的 `r.<x>.<z>.jmap`（gzip，每列 3 字节 RGB）。**旧版的 `.jmap` 是 Java 序列化的它自己的类，没法读，地图从头开始记。**
+    路标改一次存一次；地图每 20 秒、离开世界、关页面、退出游戏时存，写临时文件再改名，坏文件当空区域。
+  - **记录** `MapManager`（`Client` 里注册，挂在 `EventTick`）：只在 JELLO 下记，每 4 个 tick 给玩家周围 12 区块内还没记的区块上色（最多 6 个，最近的先来），
+    颜色用的是 MiniMap 的那套（`map.ChunkColours`，从 `JelloMiniMap` 里挪出来，两边共用）；一个区块要等南北两边的区块也加载了才记（阴影要读隔壁的列，早记会在边上留一条黑线；
+    所以视距最外一圈的南北边缘要等玩家走近才进地图，旧版也是这样），卸载后再回来会重记，所以建了东西之后地图会跟上。有天花板的维度（下界）不记——顶上是基岩，地图什么也说明不了。打开页面时先记一批，刚进的世界不是空白。
+  - 旧版的 `field36375` 之类的缓存、每 140 tick 换出区域这些没搬，`ExploredMap` 自己留最近 128 个区域。
+
 - **游戏内 HUD** `gui.legacy.hud`（`LegacyHud` 从 `Hud` 的钩子进来，只在 JELLO/CLASSIC 下画）：
   - 水印：170×104 的图片，F3 时移到顶部居中。
   - ActiveMods `JelloActiveMods`：右上角白色 Helvetica Neue Light，文字后面是黑色柔光（`shadow.png`），按名字宽度（20 号字）从宽到窄排；
@@ -91,7 +109,6 @@
 
 | 项 | 旧客户端里 | 为什么没搬 |
 |---|---|---|
-| Jello Maps / Waypoints | 探索过的世界地图（逐区块存盘）、缩放拖动、路标列表 | `WaypointsManager` + `MapFrame` + `Zoom` 一共 1100 多行，要自己的区块存储和路标文件；MiniMap 只画眼前的区块，不需要这些 |
 | Jello Radar（WarThunderRadar） | "战争雷霆"风格雷达，带威胁检测和警报声 | 这是旧仓库后来加的东西，不是 Jello 原版的；2000 行，带投射物弹道推演和音频 |
 | TargetHUD、RearView、ShulkerInfo、MusicParticles、YsmGUI | 旧仓库里的其它模块 | TargetHUD 在旧仓库里就是个空壳（"渲染逻辑待实现"）；其余同样是后加的，不是 Jello 原版的 |
 | Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
@@ -113,7 +130,7 @@
 
 ## 验证方式
 
-- 单元测试：`LegacyTextureTest`（每个枚举项都指向存在的文件、尺寸对得上、带线性过滤的 `.mcmeta`）、`LegacyCanvasColorsTest`、`LegacyScrollTest`、`LegacyBlurredImageTest`。
+- 单元测试：`MusicBrowseTest`（两个音乐窗口共用的浏览模型）、`map.*`（`WaypointStoreTest`、`ExploredMapTest`、`MapWorldTest`、`MapViewportTest`、`ListOrderTest`……），`LegacyTextureTest`（每个枚举项都指向存在的文件、尺寸对得上、带线性过滤的 `.mcmeta`）、`LegacyCanvasColorsTest`、`LegacyScrollTest`、`LegacyBlurredImageTest`。
 - 截图：`CLIENT_MODE=JELLO|CLASSIC scripts/capture.sh out.png 300 -Dsigma.debug.openGui=<JELLO|CLASSIC>`（ClickGUI）或 `-Dsigma.debug.openScreen=<ALTS|ALTS_CLASSIC|ALTS_CLASSIC_ADD>`（Alt Manager；帧数给够，前 40 帧还是加载界面），
   在世界里用 `scripts/server.sh start` + `scripts/game.sh start -Dsigma.debug.openGuiInWorld=true`。
-- 全量：`scripts/build.sh test` → 330 个测试 0 失败（1 个跳过）。
+- 全量：`scripts/build.sh test` → 408 个测试 0 失败（1 个跳过）。
