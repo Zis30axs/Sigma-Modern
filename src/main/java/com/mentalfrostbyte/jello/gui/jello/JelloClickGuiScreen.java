@@ -13,6 +13,8 @@ import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.gui.BrainFreeze;
 import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
 import com.mentalfrostbyte.jello.util.math.Easing;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -71,6 +73,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
     private float dragOffsetY;
     private Panel scrollDragged;
     private final JelloMusicPanel music = new JelloMusicPanel();
+    private final JelloSnow snow = new JelloSnow();
     private long lastFrame;
 
     public JelloClickGuiScreen(final ModuleManager modules) {
@@ -189,6 +192,12 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
             float alpha = Math.max(0.0F, Math.min(1.0F, af));
 
             c.fill(0, 0, w, h, LegacyCanvas.alpha(BLACK, 0.2F * Math.max(0.0F, af)));
+
+            long frame = System.nanoTime();
+            float frameSeconds = this.lastFrame == 0L ? 0.0F : Math.min(0.05F, (frame - this.lastFrame) / 1.0E9F);
+            if (Modules.enabled(BrainFreeze.class) != null) {
+                this.snow.draw(c, alpha, frameSeconds);
+            }
 
             // The cards dim a little while a module's settings are open in front of them.
             float behind = 1.0F - (this.page == null ? 0.0F : this.page.visibility() * 0.1F);

@@ -10,6 +10,7 @@ import com.mentalfrostbyte.jello.module.impl.gui.Coords;
 import com.mentalfrostbyte.jello.module.impl.gui.InfoHud;
 import com.mentalfrostbyte.jello.module.impl.gui.InfoHud.Coordinates;
 import com.mentalfrostbyte.jello.module.impl.gui.KeyStrokes;
+import com.mentalfrostbyte.jello.module.impl.gui.MiniMap;
 import com.mentalfrostbyte.jello.util.math.Easing;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -42,6 +43,7 @@ final class JelloWidgets {
     private JelloWidgets() {}
 
     static void reset() {
+        JelloMiniMap.reset();
         RIPPLES.clear();
         java.util.Arrays.fill(HELD, false);
     }
@@ -54,6 +56,13 @@ final class JelloWidgets {
         LocalPlayer player = mc.player;
         int y = top;
         if (!debug) {
+            if (Modules.enabled(MiniMap.class) != null) {
+                JelloMiniMap.render(c, mc, 10, y);
+                y += JelloMiniMap.SIZE + 10;
+            } else {
+                JelloMiniMap.reset();
+            }
+
             if (Modules.enabled(KeyStrokes.class) != null) {
                 keyStrokes(c, mc.options, y);
                 y += 160;

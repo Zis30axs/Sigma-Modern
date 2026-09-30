@@ -30,7 +30,7 @@
   排序下拉、搜索、Add+、删除/选项/添加弹窗。后端仍是 `SigmaAccountManager`（微软设备码 + 离线名），不存邮箱密码。
   调试 `-Dsigma.debug.openScreen=ALTS`（空库时塞几个离线账号）、`-Dsigma.debug.altSelect=<行>`、`-Dsigma.debug.altDialog=add|delete|options`。
 - **ClickGUI** `JelloClickGuiScreen` + `JelloSettingsPage`：白色 200×350 分类卡片带外发光、30px 模块行（开=`0xFF29A6FF`）、拖标题移动、每卡独立滚动、
-  弹性打开动画（`Animation(450,125)`）和关闭动画（`SigmaClickGui.beginClose()`）、位置会话内记忆；右键模块进设置页（500px 白卡：名字/说明/Keybind 胶囊/
+  弹性打开动画（`Animation(450,125)`）和关闭动画（`SigmaClickGui.beginClose()`）、位置会话内记忆；`BrainFreeze` 模块开着时卡片后面下雪（`JelloSnow`，屏幕宽度一半数量的小白点）；右键模块进设置页（500px 白卡：名字/说明/Keybind 胶囊/
   开关/滑条/枚举下拉/文本/HSV 取色）。`-Dsigma.debug.jelloSettings=<Module>`。
 - **音乐窗口** `JelloMusicPanel`（ClickGUI 右下角的 "Music" 按钮开关；窗口够宽时默认打开，卡片会让到它左边）：800×600 的旧版布局——黑色左栏（来源列表，
   当前歌曲的封面横跨左栏和底栏）、右边 3 列封面网格、底部暗紫色控制条（上一首/播放暂停/下一首、右侧音量竖线、底边进度线和两端的时间）。
@@ -59,7 +59,9 @@
   - TabGUI `JelloTabGui`：左边 150 宽的分类面板（一次 5 行，选中行文字右移 14px，光带滑动），右边 170 宽的模块面板（开的模块用 Medium 字重）。
     键位逻辑是 `TabGui` 模块自己的，这里只画。
   - 位置和旧版一样：TabGUI 从 y=99 开始，`LegacyHud.leftBottom()` 是下面元素该从哪开始。列表会让开原版的药水图标和 F3 右栏。
-  - 小部件 `JelloWidgets`（各是一个 INTERFACE 模块，默认关，只有 Jello 画）：`KeyStrokes`（WASD + 左右键，按下变亮、松开时从中心扩散一圈涟漪）、
+  - 小部件 `JelloWidgets`（各是一个 INTERFACE 模块，默认关，只有 Jello 画）：`MiniMap`（`JelloMiniMap`：150px 方块，TabGUI 下面，周围 10×10 个区块的地表，
+    **朝向永远在上**，中间一个箭头，另一个淡箭头指移动方向，边缘有内羽化和外阴影。颜色就是旧版的办法：每列最上面那块的地图色，雪下白色、熔岩下熔岩色、含水方块水色，
+    北/南邻列是空气就压暗/提亮 60%；一个区块等南北邻居都到了再上色，每帧最多 4 个，图是一张 160×160 的动态纹理，约 20Hz 重拼），`KeyStrokes`（WASD + 左右键，按下变亮、松开时从中心扩散一圈涟漪）、
     `Coords`（x=85，静止时暗，走动时亮并弹一下）、`Compass`（顶部居中的方位条，S/W/N/E 用 Medium 40 号字，其余是刻度和度数）、
     `InfoHUD`（左下角：角色小模型、护甲和耐久条、坐标；`Move Chat Up` 通过 `ChatComponent` 里的一行钩子把聊天往上抬，绘制和点击共用）。
   - 开关声音：`LegacyToggleSound` 订阅 `EventModuleToggle`，Jello 播 `activate/deactivate.mp3`（JLayer 解码成 PCM，Java Sound 播，后台线程；
@@ -87,13 +89,15 @@
 
 | 项 | 旧客户端里 | 为什么没搬 |
 |---|---|---|
-| Jello 的 MiniMap / Radar（含 WarThunderRadar） | 旧版各是一个 Jello 专用模块 | 还没搬，要采样区块，比其它小部件重得多 |
+| Jello Maps / Waypoints | 探索过的世界地图（逐区块存盘）、缩放拖动、路标列表 | `WaypointsManager` + `MapFrame` + `Zoom` 一共 1100 多行，要自己的区块存储和路标文件；MiniMap 只画眼前的区块，不需要这些 |
+| Jello Radar（WarThunderRadar） | "战争雷霆"风格雷达，带威胁检测和警报声 | 这是旧仓库后来加的东西，不是 Jello 原版的；2000 行，带投射物弹道推演和音频 |
+| TargetHUD、RearView、ShulkerInfo、MusicParticles、YsmGUI | 旧仓库里的其它模块 | TargetHUD 在旧仓库里就是个空壳（"渲染逻辑待实现"）；其余同样是后加的，不是 Jello 原版的 |
 | Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
 | 通知 | Jello/Classic 的右下角通知卡片 | 旧版里是各个模块自己发的；这里没有通知系统，也没有模块在发，先不加 |
-| 游戏内 Jello 页面 | Maps、Snake、Bird、Spotlight、Waypoints（IRC 按你说的不搬） | 旧版靠“把界面绑到键上”打开，这里没有这套存储 |
-| Jello ClickGUI 附属面板 | 配置面板（右下角 "more" 按钮和配置名）、BrainFreeze 遮罩 | 这里没有配置档案；仓库里没有 BrainFreeze 模块。IRC 按你说的不搬 |
+| Jello ClickGUI 的配置面板 | 右下角 "more" 按钮和配置名 | 这里没有配置档案。IRC 按你说的不搬 |
 | Jello Alt 信息面板的 Bans 列表 | 账号封禁记录 | 没有数据源 |
 | Classic 的 Edit Alt | 旧版能改邮箱密码 | 现在账号不存邮箱密码，按钮换成了 "Launcher" |
+| 把界面绑到键上 | Keybind Manager 里能把 Click GUI、Maps 等绑到键 | 这里界面是通过模块（`ScreenLauncher`）进的，绑的是模块的键；Click GUI 的键仍是固定的右 Shift |
 
 ## 已知取舍
 

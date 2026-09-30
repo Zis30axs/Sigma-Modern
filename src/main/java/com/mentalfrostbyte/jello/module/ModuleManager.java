@@ -5,10 +5,12 @@ import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
 import com.mentalfrostbyte.jello.module.impl.combat.SuperKnockback;
 import com.mentalfrostbyte.jello.module.impl.combat.Velocity;
 import com.mentalfrostbyte.jello.module.impl.gui.Bird;
+import com.mentalfrostbyte.jello.module.impl.gui.BrainFreeze;
 import com.mentalfrostbyte.jello.module.impl.gui.Compass;
 import com.mentalfrostbyte.jello.module.impl.gui.Coords;
 import com.mentalfrostbyte.jello.module.impl.gui.InfoHud;
 import com.mentalfrostbyte.jello.module.impl.gui.KeyStrokes;
+import com.mentalfrostbyte.jello.module.impl.gui.MiniMap;
 import com.mentalfrostbyte.jello.module.impl.gui.ModernChat;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
 import com.mentalfrostbyte.jello.module.impl.gui.PotionStatus;
@@ -63,6 +65,7 @@ public final class ModuleManager {
         this.register(new ModuleSelfDetection());
         this.register(new BlockAnimation());
         this.register(new Bird());
+        this.register(new BrainFreeze());
         this.register(new CameraNoClip());
         this.register(new Compass());
         this.register(new Coords());
@@ -75,6 +78,7 @@ public final class ModuleManager {
         this.register(new KeyStrokes());
         this.register(new KillAura());
         this.register(new LowFire());
+        this.register(new MiniMap());
         this.register(new ModernChat());
         this.register(new NoFall());
         this.register(new NoHurtCam());
