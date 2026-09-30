@@ -83,7 +83,7 @@
 | Jello 的 MiniMap / Radar（含 WarThunderRadar） | 旧版各是一个 Jello 专用模块 | 还没搬，要采样区块，比其它小部件重得多 |
 | Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
 | 通知 | Jello/Classic 的右下角通知卡片 | 旧版里是各个模块自己发的；这里没有通知系统，也没有模块在发，先不加 |
-| 游戏内 Jello 页面 | Keyboard、Maps、Snake、Bird、Spotlight、IRC、Options/Credits、Waypoints | 不是渲染效果，是功能；没有对应模块 |
+| 游戏内 Jello 页面 | Maps、Snake、Bird、Spotlight、Waypoints（IRC 按你说的不搬） | 旧版靠“把界面绑到键上”打开，这里没有这套存储 |
 | Jello ClickGUI 附属面板 | 配置面板（右下角 "more" 按钮和配置名）、BrainFreeze 遮罩 | 这里没有配置档案；仓库里没有 BrainFreeze 模块。IRC 按你说的不搬 |
 | Jello Alt 信息面板的 Bans 列表 | 账号封禁记录 | 没有数据源 |
 | Classic 的 Edit Alt | 旧版能改邮箱密码 | 现在账号不存邮箱密码，按钮换成了 "Launcher" |
