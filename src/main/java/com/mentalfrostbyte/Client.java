@@ -399,6 +399,15 @@ public class Client implements MinecraftInstance {
             // Through VFP's own singleton, so the router sees exactly what a real "open" hands it.
             case "PROTOCOL" -> com.viaversion.viafabricplus.screen.impl.ProtocolSelectionScreen.INSTANCE.get(parent);
             case "MODES" -> new ModeSelectScreen(parent);
+            // The Jello / Classic alt managers, over a few offline accounts made up in the game directory's own store.
+            case "ALTS" -> {
+                this.seedDebugAccounts();
+                yield new com.mentalfrostbyte.jello.gui.account.JelloAltManagerScreen(parent);
+            }
+            case "ALTS_CLASSIC" -> {
+                this.seedDebugAccounts();
+                yield new com.mentalfrostbyte.jello.gui.account.ClassicAltManagerScreen(parent);
+            }
             // A plain vanilla sub-page, for checking how a presentation skins vanilla widgets.
             case "SOUND" -> new net.minecraft.client.gui.screens.options.SoundOptionsScreen(options, mc.options);
             default -> null;
@@ -410,6 +419,16 @@ public class Client implements MinecraftInstance {
         mc.gui.setScreen(screen);
         logger.info("Sigma debug: opened {} as {}", requested, mc.gui.screen().getClass().getSimpleName());
         return true;
+    }
+
+    /** {@code -Dsigma.debug.openScreen=ALTS}: a handful of offline accounts, only when the store is empty. */
+    private void seedDebugAccounts() {
+        if (!this.accountManager.accounts().isEmpty()) {
+            return;
+        }
+        for (String name : new String[] {"Notch", "jeb_", "Dinnerbone", "Steve_123", "Alex_Cat", "Herobrine"}) {
+            this.accountManager.addOffline(name);
+        }
     }
 
     /** Sample chat lines covering what a chat skin has to handle: colors, bold, a link, a wrapping line, Chinese. */

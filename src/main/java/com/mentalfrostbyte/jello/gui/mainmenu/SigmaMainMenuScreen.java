@@ -17,6 +17,11 @@ public abstract class SigmaMainMenuScreen extends Screen {
         super(title);
     }
 
+    /** The screen paints its whole backdrop itself, so vanilla's panorama and blur stay out of it. */
+    @Override
+    public void extractBackground(final net.minecraft.client.gui.GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float a) {
+    }
+
     @Override
     public final boolean isPauseScreen() {
         return false;
