@@ -160,6 +160,36 @@ public final class LegacyCanvas implements AutoCloseable {
         }
     }
 
+    /**
+     * A gradient running left to right (the old {@code drawQuad} with its corners set that way). It is cut into
+     * strips of about a colour step each, which at 8 bits a channel cannot be told from a smooth one.
+     */
+    public void gradientH(final int x0, final int y0, final int x1, final int y1, final int left, final int right) {
+        int width = x1 - x0;
+        if (width <= 0 || y1 <= y0) {
+            return;
+        }
+
+        int strips = Math.min(width, 64);
+        for (int i = 0; i < strips; i++) {
+            int from = x0 + width * i / strips;
+            int to = x0 + width * (i + 1) / strips;
+            this.fill(from, y0, to, y1, ModernStyle.mix(left, right, (i + 0.5F) / strips));
+        }
+    }
+
+    /**
+     * A triangle pointing left: its tip at {@code (tipX, cy)}, {@code size} wide and {@code size} tall, in one-pixel
+     * columns (the old {@code renderCategoryBox}, which drew it with GL_TRIANGLES).
+     */
+    public void pointerLeft(final float tipX, final float cy, final float size, final int color) {
+        int columns = Math.round(size);
+        for (int j = 0; j < columns; j++) {
+            float half = size / 2.0F * (j + 0.5F) / columns;
+            this.fill(Math.round(tipX) + j, Math.round(cy - half), Math.round(tipX) + j + 1, Math.round(cy + half), color);
+        }
+    }
+
     public void rounded(final int x, final int y, final int w, final int h, final int radius, final int color) {
         ModernStyle.rounded(this.graphics, x, y, w, h, radius, color);
     }

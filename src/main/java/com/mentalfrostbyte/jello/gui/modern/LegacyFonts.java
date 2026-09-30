@@ -20,7 +20,9 @@ public final class LegacyFonts {
     public enum Face {
         JELLO_LIGHT("/assets/minecraft/font/sigma/helvetica_neue_light.ttf"),
         JELLO_MEDIUM("/assets/minecraft/font/sigma/helvetica_neue_medium.ttf"),
-        CLASSIC("/assets/minecraft/font/sigma/regular.ttf");
+        CLASSIC("/assets/minecraft/font/sigma/regular.ttf"),
+        /** Classic's in-game HUD: the module list, TabGUI and watermark, all in SF UI Display Bold. */
+        CLASSIC_BOLD("/assets/minecraft/font/sigma/sf_ui_display_bold.ttf");
 
         private final String resource;
         private ModernFontRenderer renderer;

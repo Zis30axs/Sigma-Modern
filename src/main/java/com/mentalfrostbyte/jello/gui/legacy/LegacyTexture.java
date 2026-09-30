@@ -40,6 +40,10 @@ public enum LegacyTexture {
     JELLO_OPTIONS("jello/options.png", 110, 82),
     DVD("jello/dvd.png", 201, 90),
 
+    // In-game HUD
+    /** The old {@code jello_watermark@2x.png}: shown at half this size, 170x104 framebuffer pixels. */
+    JELLO_WATERMARK("jello/watermark.png", 340, 208),
+
     // Alt manager
     ALT_ACTIVE("alt/active.png", 17, 13),
     ALT_RING("alt/cercle.png", 100, 100),

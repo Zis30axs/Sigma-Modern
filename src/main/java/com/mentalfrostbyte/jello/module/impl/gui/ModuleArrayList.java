@@ -50,6 +50,40 @@ public class ModuleArrayList extends Module {
         LENGTH
     }
 
+    /** How far Jello's list steps down in text size: the old client's 20, 18 and 14 point faces. */
+    public enum Size {
+        NORMAL(20F),
+        SMALL(18F),
+        TINY(14F);
+
+        private final float points;
+
+        Size(final float points) {
+            this.points = points;
+        }
+
+        public float points() {
+            return this.points;
+        }
+    }
+
+    /** Which edges of Classic's list carry the rainbow bar. */
+    public enum Outline {
+        ALL,
+        LEFT,
+        RIGHT,
+        NONE
+    }
+
+    /** How a line of Classic's list comes and goes while {@code Animations} is on. */
+    public enum Transition {
+        /** The line grows from nothing, pushing the ones below it down. */
+        SMOOTH,
+        /** The line slides in from the edge of the screen. */
+        SLIDE,
+        BOTH
+    }
+
     public enum ColorMode {
         /** Every line in {@code Color}. */
         STATIC,
@@ -95,6 +129,15 @@ public class ModuleArrayList extends Module {
     private final BooleanSetting animations = this.register(new BooleanSetting(
             "Animations", "Slides lines in and out as modules are switched, and eases the rest into place.", true));
 
+    private final EnumSetting<Size> size = this.register(new EnumSetting<>(
+            "Size", "Jello: the size of the text.", Size.NORMAL));
+
+    private final EnumSetting<Outline> outline = this.register(new EnumSetting<>(
+            "Outline", "Classic: which edges of the list get a bar in the rainbow.", Outline.ALL));
+
+    private final EnumSetting<Transition> transition = this.register(new EnumSetting<>(
+            "Transition", "Classic: how a line enters and leaves, with Animations on.", Transition.SMOOTH));
+
     public ModuleArrayList() {
         super(ModuleCategory.INTERFACE, "ArrayList", "Lists the modules that are switched on down the side of the screen");
         this.color.visibleWhen(() -> !this.colorMode.is(ColorMode.RAINBOW));
@@ -122,6 +165,15 @@ public class ModuleArrayList extends Module {
                 .toList();
     }
 
+    /**
+     * Whether the old Jello and Classic lists name this module: every module but this one and the interface's own,
+     * minus Render and Interface modules under {@code Hide Visuals}. They draw all of these, on or off, and let a
+     * line fade out as its module is switched off, so - unlike {@link #listed} - this does not look at the switch.
+     */
+    public boolean lists(final Module module) {
+        return module != this && module.getCategory() != ModuleCategory.INTERFACE && !this.hidden(module);
+    }
+
     private boolean hidden(final Module module) {
         return this.hideVisuals.get()
                 && (module.getCategory() == ModuleCategory.RENDER || module.getCategory() == ModuleCategory.INTERFACE);
@@ -132,10 +184,11 @@ public class ModuleArrayList extends Module {
      * ({@code LEGIT_HOP} becomes "Legit Hop"). Null with {@code Suffix} off or for a module without such a setting.
      */
     public @Nullable String suffixOf(final Module module) {
-        if (!this.suffix.get()) {
-            return null;
-        }
+        return this.suffix.get() ? modeOf(module) : null;
+    }
 
+    /** A module's first choice setting, worded for reading; null for a module that has none. */
+    public static @Nullable String modeOf(final Module module) {
         for (Setting<?> setting : module.settings()) {
             if (setting instanceof EnumSetting<?> choice) {
                 return EnumSetting.label(choice.get());
@@ -179,5 +232,17 @@ public class ModuleArrayList extends Module {
 
     public boolean isAnimated() {
         return this.animations.get();
+    }
+
+    public Size getSize() {
+        return this.size.get();
+    }
+
+    public Outline getOutline() {
+        return this.outline.get();
+    }
+
+    public Transition getTransition() {
+        return this.transition.get();
     }
 }

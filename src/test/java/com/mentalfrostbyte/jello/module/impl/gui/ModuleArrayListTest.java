@@ -104,6 +104,44 @@ class ModuleArrayListTest {
         assertFalse(color.isVisible());
     }
 
+    /** Jello and Classic draw every module, on or off, and fade a line out as its module is switched off. */
+    @Test
+    void theOldListsNameEveryModuleButTheInterfaceOnesWhetherOnOrOff() {
+        ModuleArrayList list = new ModuleArrayList();
+        Module speed = new Probe("Speed", ModuleCategory.MOVEMENT, true);
+        Module render = new Probe("Render", ModuleCategory.RENDER, false);
+        Module chat = new Probe("Chat", ModuleCategory.INTERFACE, false);
+
+        assertTrue(list.lists(speed), "off is still listed: its line is on its way out");
+        assertTrue(list.lists(render));
+        assertFalse(list.lists(chat), "the old GUI category was never listed");
+        assertFalse(list.lists(list), "nor is the list itself");
+
+        ((BooleanSetting) list.setting("Hide Visuals").orElseThrow()).set(true);
+        assertFalse(list.lists(render));
+        assertTrue(list.lists(speed));
+    }
+
+    @Test
+    void classicShowsTheModeWhateverTheSuffixSettingSays() {
+        ModuleArrayList list = new ModuleArrayList();
+        Module speed = new Probe("Speed", ModuleCategory.MOVEMENT, true);
+        assertNull(list.suffixOf(speed));
+        assertEquals("Legit Hop", ModuleArrayList.modeOf(speed));
+        assertNull(ModuleArrayList.modeOf(new Probe("NoHurtCam", ModuleCategory.RENDER, false)));
+    }
+
+    @Test
+    void theOldStylesStartWhereTheOldClientHadThem() {
+        ModuleArrayList list = new ModuleArrayList();
+        assertEquals(ModuleArrayList.Size.NORMAL, list.getSize());
+        assertEquals(20F, list.getSize().points());
+        assertEquals(18F, ModuleArrayList.Size.SMALL.points());
+        assertEquals(14F, ModuleArrayList.Size.TINY.points());
+        assertEquals(ModuleArrayList.Outline.ALL, list.getOutline());
+        assertEquals(ModuleArrayList.Transition.SMOOTH, list.getTransition());
+    }
+
     private <M extends Module> M on(final M module) {
         module.setEnabled(true);
         this.switchedOn.add(module);

@@ -33,7 +33,19 @@
   弹性打开动画（`Animation(450,125)`）和关闭动画（`SigmaClickGui.beginClose()`）、位置会话内记忆；右键模块进设置页（500px 白卡：名字/说明/Keybind 胶囊/
   开关/滑条/枚举下拉/文本/HSV 取色）。`-Dsigma.debug.jelloSettings=<Module>`。
 
+- **游戏内 HUD** `gui.legacy.hud`（`LegacyHud` 从 `Hud` 的钩子进来，只在 JELLO/CLASSIC 下画）：
+  - 水印：170×104 的图片，F3 时移到顶部居中。
+  - ActiveMods `JelloActiveMods`：右上角白色 Helvetica Neue Light，文字后面是黑色柔光（`shadow.png`），按名字宽度（20 号字）从宽到窄排；
+    开关时 150ms 缩放淡入淡出并把下面的行挤开。`ArrayList` 模块的 `Size`（Normal/Small/Tiny = 20/18/14）、`Animations`、`Suffix`、`Hide Visuals` 生效。
+  - TabGUI `JelloTabGui`：左边 150 宽的分类面板（一次 5 行，选中行文字右移 14px，光带滑动），右边 170 宽的模块面板（开的模块用 Medium 字重）。
+    键位逻辑是 `TabGui` 模块自己的，这里只画。
+  - 位置和旧版一样：TabGUI 从 y=99 开始，`LegacyHud.leftBottom()` 是下面元素该从哪开始。列表会让开原版的药水图标和 F3 右栏。
+
 ### Classic
+- **游戏内 HUD**：水印（深色底板 + "Sigma" + 彩虹版本号）、ActiveMods `ClassicActiveMods`（深色框 + SF UI Display Bold 名字 + 灰色模式，
+  色相沿列表往下走，2 秒转一圈；`Outline` All/Left/Right/None 和 `Transition` Smooth/Slide/Both 是新加的设置）、
+  TabGUI `ClassicTabGui`（三级面板：分类 → 模块 → 设置，深蓝到亮蓝的光带，Right 进入设置，再按 Right 编辑值，
+  编辑时出现指向说明框的三角；4 秒不按键整体暗到一半）。设置这一级是 `TabGui.Layout(settings=true)` 打开的，SigmaModern 不受影响。
 - **主菜单** `ClassicMainMenuScreen` + `ClassicParticles` + `ClassicButton`：三层鼠标视差（背景 /200、分组 /40、粒子 /12，每帧追 5.5%）、漂浮粒子、
   按钮 300ms 弹簧插值（带过冲）、进场上浮 5px。
 - **Alt Manager** `ClassicAltManagerScreen` + `ClassicAltPromptScreen`(ADD/DIRECT)：列表 + 工具栏 + Add/Direct Login 页。调试 `-Dsigma.debug.openScreen=ALTS_CLASSIC` / `ALTS_CLASSIC_ADD`。
@@ -50,9 +62,10 @@
 
 | 项 | 旧客户端里 | 为什么没搬 |
 |---|---|---|
-| Jello / Classic 游戏内 HUD | Jello `ActiveMods`（白色轻字 + 阴影光晕，缩放入场）、`TabGUI`；Classic `ActiveMods`/`TabGUI`；Compass/Coords/KeyStrokes/InfoHUD/MiniMap/Radar/TargetHUD | `ModernHud` 只在 `SIGMA_MODERN` 下画，Jello/Classic 下 ArrayList/TabGUI/PotionStatus 目前**什么都不显示**。这是下一个最大缺口 |
+| Jello 的 Compass / Coords / KeyStrokes / InfoHUD / MiniMap / Radar | 旧版各是一个 Jello 专用模块 | 还没搬：这里没有对应的模块，要连模块一起加 |
+| Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
 | 加载界面 | `LoadingScreen`：logo + 进度条叠在模糊 `back.png` 上 | 26.2 的加载覆盖层另有一套，需要单独接 |
-| 通知 | Jello/Classic 的通知卡片 | 依赖 HUD 层 |
+| 通知 | Jello/Classic 的右下角通知卡片 | 旧版里是各个模块自己发的；这里没有通知系统，也没有模块在发，先不加 |
 | 游戏内 Jello 页面 | Keyboard、Maps、Snake、Bird、Spotlight、IRC、Options/Credits、Waypoints | 不是渲染效果，是功能；没有对应模块 |
 | Jello ClickGUI 附属面板 | 音乐播放器、IRC、配置面板、BrainFreeze 遮罩 | 仓库里没有 BrainFreeze 模块 |
 | Jello Alt 信息面板的 Bans 列表 | 账号封禁记录 | 没有数据源 |
@@ -60,8 +73,11 @@
 
 ## 已知取舍
 
-- **字体版权**：`assets/minecraft/font/sigma/helvetica_neue_{light,medium}.ttf` 是从旧仓库原样拷来的，Helvetica Neue 是商业字体。
-  如果这个仓库要公开发布，换成免费替代（如 Inter / Helvetica 兼容字体），只需要替换这两个文件，`LegacyFonts` 只按度量取基线。
+- **字体版权**：`assets/minecraft/font/sigma/helvetica_neue_{light,medium}.ttf` 和 `sf_ui_display_bold.ttf`（Classic HUD 用）是从旧仓库原样拷来的，
+  Helvetica Neue 和 SF UI Display 都是商业字体。
+  如果这个仓库要公开发布，换成免费替代（如 Inter），只需要替换这几个文件，`LegacyFonts` 只按度量取基线。
+- **面板没有毛玻璃**：旧 Jello 的 TabGUI 面板是背后世界的模糊图。26.2 的 GUI 只能整屏模糊，切不出一块矩形，所以面板是半透明深色板加同样的柔边。
+- **Classic 的 Slide 过渡**：旧版只把文字滑出去，深色框留在原地（看着像个 bug），这里整行一起滑。
 - **`Animation` 曲线**：Jello 的弹性打开用仓库已有的 `Animation`，没有逐帧对照旧曲线；肉眼一致，数值没验过。
 - **Classic 的文字**：用原版字体放大 2 倍，不是旧版的位图字，字形会有差别。
 
