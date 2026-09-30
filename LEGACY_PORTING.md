@@ -32,6 +32,11 @@
 - **ClickGUI** `JelloClickGuiScreen` + `JelloSettingsPage`：白色 200×350 分类卡片带外发光、30px 模块行（开=`0xFF29A6FF`）、拖标题移动、每卡独立滚动、
   弹性打开动画（`Animation(450,125)`）和关闭动画（`SigmaClickGui.beginClose()`）、位置会话内记忆；右键模块进设置页（500px 白卡：名字/说明/Keybind 胶囊/
   开关/滑条/枚举下拉/文本/HSV 取色）。`-Dsigma.debug.jelloSettings=<Module>`。
+- **音乐窗口** `JelloMusicPanel`（ClickGUI 右下角的 "Music" 按钮开关；窗口够宽时默认打开，卡片会让到它左边）：800×600 的旧版布局——黑色左栏（来源列表，
+  当前歌曲的封面横跨左栏和底栏）、右边 3 列封面网格、底部暗紫色控制条（上一首/播放暂停/下一首、右侧音量竖线、底边进度线和两端的时间）。
+  数据和播放走 SigmaModern 音乐窗口用的同一套后端（`MusicLibrary` / `MusicPlayer`），所以两边看到的是同一个队列。来源是网易云的几个榜单和一位歌手、
+  搜索，以及登录后的每日推荐和我的歌单。**登录界面（二维码）没搬**，要在 SigmaModern 的音乐窗口里登录；旧版的 "Open Folder"、Local Music、
+  重复模式和频谱按钮也没搬（后端没有对应的东西）。`-Dsigma.debug.jelloMusic=demo` 开着窗口并列一批假歌曲，截图不用联网。
 
 - **游戏内 HUD** `gui.legacy.hud`（`LegacyHud` 从 `Hud` 的钩子进来，只在 JELLO/CLASSIC 下画）：
   - 水印：170×104 的图片，F3 时移到顶部居中。
@@ -72,7 +77,7 @@
 | Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
 | 通知 | Jello/Classic 的右下角通知卡片 | 旧版里是各个模块自己发的；这里没有通知系统，也没有模块在发，先不加 |
 | 游戏内 Jello 页面 | Keyboard、Maps、Snake、Bird、Spotlight、IRC、Options/Credits、Waypoints | 不是渲染效果，是功能；没有对应模块 |
-| Jello ClickGUI 附属面板 | 音乐播放器、IRC、配置面板、BrainFreeze 遮罩 | 仓库里没有 BrainFreeze 模块 |
+| Jello ClickGUI 附属面板 | 配置面板（右下角 "more" 按钮和配置名）、BrainFreeze 遮罩 | 这里没有配置档案；仓库里没有 BrainFreeze 模块。IRC 按你说的不搬 |
 | Jello Alt 信息面板的 Bans 列表 | 账号封禁记录 | 没有数据源 |
 | Classic 的 Edit Alt | 旧版能改邮箱密码 | 现在账号不存邮箱密码，按钮换成了 "Launcher" |
 

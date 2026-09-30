@@ -36,6 +36,7 @@ public final class LegacyTextField {
     private String text = "";
     private String placeholder = "";
     private boolean censor;
+    private int ink;
     private boolean focused;
     private int maxLength = 256;
     private float scroll;
@@ -87,6 +88,11 @@ public final class LegacyTextField {
 
     public void setCensored(final boolean censor) {
         this.censor = censor;
+    }
+
+    /** The colour of the text and caret, for a field over a dark backdrop; the style's own (dark on Jello) when unset. */
+    public void setInk(final int argb) {
+        this.ink = argb;
     }
 
     public void setMaxLength(final int maxLength) {
@@ -166,7 +172,7 @@ public final class LegacyTextField {
         int cursor = Math.min(this.helper.getCursorPos(), shown.length());
         int selection = Math.min(this.helper.getSelectionPos(), shown.length());
         boolean jello = this.style == Style.JELLO;
-        int ink = jello ? 0xFF010101 : 0xFFFEFEFE;
+        int ink = this.ink != 0 ? this.ink : jello ? 0xFF010101 : 0xFFFEFEFE;
         int inner = this.x + 4;
         int innerWidth = this.w - 8;
 

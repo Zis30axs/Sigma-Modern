@@ -13,8 +13,14 @@ import org.jspecify.annotations.Nullable;
  * (NetEase YRC, QQ Music QRC) sweep through each word as it is sung; line-timed ones (LRC) light the whole
  * line at once. The sweep's edge moves through a glyph rather than jumping from one to the next.
  */
-final class ModernLyricSweep {
+public final class ModernLyricSweep {
     private ModernLyricSweep() {}
+
+    /** The text of the line being sung now, for a display that shows it plain; null between lines and without lyrics. */
+    public static @Nullable String sungLine(MusicPlayer player) {
+        Now now = now(player);
+        return now == null ? null : now.line().text().strip();
+    }
 
     /** The line being sung: {@code progress} is 0..1 through it (always 1 for line-timed lyrics). */
     record Now(Lyrics lyrics, int index, Lyrics.Line line, float progress) {}

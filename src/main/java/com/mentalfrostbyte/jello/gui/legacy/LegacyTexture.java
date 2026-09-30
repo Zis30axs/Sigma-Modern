@@ -40,6 +40,13 @@ public enum LegacyTexture {
     JELLO_OPTIONS("jello/options.png", 110, 82),
     DVD("jello/dvd.png", 201, 90),
 
+    // Jello's music panel
+    MUSIC_PLAY("music/play.png", 38, 38),
+    MUSIC_PAUSE("music/pause.png", 38, 38),
+    MUSIC_NEXT("music/forwards.png", 46, 46),
+    MUSIC_PREVIOUS("music/backwards.png", 46, 46),
+    MUSIC_BAR("music/bg.png", 653, 77),
+
     // In-game HUD
     /** The old {@code jello_watermark@2x.png}: shown at half this size, 170x104 framebuffer pixels. */
     JELLO_WATERMARK("jello/watermark.png", 340, 208),

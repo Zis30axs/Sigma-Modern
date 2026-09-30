@@ -30,7 +30,7 @@ import org.jspecify.annotations.Nullable;
  * title - which also stands in while a remote cover ({@code https://...}) downloads in the background. Rasters
  * are kept in a small LRU and their textures released when they fall out of it.
  */
-final class ModernCovers {
+public final class ModernCovers {
     private static final int[] BUCKETS = {24, 32, 48, 64, 96, 128, 192, 256, 384, 512};
     private static final int CACHE_SIZE = 40;
     private static final Map<Key, Identifier> CACHE = new java.util.LinkedHashMap<>(16, 0.75F, true) {
@@ -60,7 +60,7 @@ final class ModernCovers {
      * Draws {@code track}'s cover in a {@code size} square at ({@code x}, {@code y}), with corners rounded by
      * {@code radius} (a fraction of the size, 0..0.5), multiplied by {@code color}.
      */
-    static void draw(GuiGraphicsExtractor g, @Nullable Track track, float x, float y, float size, float radius, int color) {
+    public static void draw(GuiGraphicsExtractor g, @Nullable Track track, float x, float y, float size, float radius, int color) {
         color = ModernStyle.a(color);
         if ((color >>> 24) == 0 || size <= 0) return;
         float transform = Math.max((float)Math.hypot(g.pose().m00(), g.pose().m01()), (float)Math.hypot(g.pose().m10(), g.pose().m11()));

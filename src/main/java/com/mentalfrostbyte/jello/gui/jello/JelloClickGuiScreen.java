@@ -65,10 +65,13 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
     private boolean closing;
     private int layoutWidth = -1;
     private int layoutHeight = -1;
+    private boolean layoutMusic;
     private Panel dragged;
     private float dragOffsetX;
     private float dragOffsetY;
     private Panel scrollDragged;
+    private final JelloMusicPanel music = new JelloMusicPanel();
+    private long lastFrame;
 
     public JelloClickGuiScreen(final ModuleManager modules) {
         super(Component.literal("Jello ClickGUI"));
@@ -97,7 +100,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
 
     @Override
     public boolean isTypingText() {
-        return this.page != null && this.page.typing();
+        return this.page != null && this.page.typing() || this.music.typing();
     }
 
     ModuleManager modules() {
@@ -145,12 +148,16 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
     // ------------------------------------------------------------------ layout
 
     private void layout(final int width, final int height) {
-        if (width == this.layoutWidth && height == this.layoutHeight) {
+        // The cards keep to the space beside the music window while it is out, as they did in the old client.
+        boolean music = this.music.isOpen(width);
+        if (width == this.layoutWidth && height == this.layoutHeight && music == this.layoutMusic) {
             return;
         }
         this.layoutWidth = width;
         this.layoutHeight = height;
-        int perRow = Math.max(1, (width - 30) / (PANEL_W + 10));
+        this.layoutMusic = music;
+        int usable = music ? Math.max(PANEL_W + 60, width - JelloMusicPanel.W - 40) : width;
+        int perRow = Math.max(1, (usable - 30) / (PANEL_W + 10));
         int rows = (this.panels.size() + perRow - 1) / perRow;
         int panelH = rows <= 2 ? PANEL_H : Math.max(200, (height - 60 + 20 * (rows - 1)) / rows);
         int index = 0;
@@ -197,6 +204,12 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
                 c.pop();
             }
 
+            long now = System.nanoTime();
+            float dt = this.lastFrame == 0L ? 0.0F : Math.min(0.05F, (now - this.lastFrame) / 1.0E9F);
+            this.lastFrame = now;
+            this.music.draw(c, interactive ? mx : -10_000, interactive ? my : -10_000, alpha * behind, dt);
+            this.musicButton(c, interactive ? mx : -10_000, interactive ? my : -10_000, alpha * behind);
+
             if (this.page != null) {
                 this.page.draw(c, mx, my, alpha);
                 if (this.page.finished()) {
@@ -204,6 +217,23 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
                 }
             }
         }
+    }
+
+    /** The button in the bottom-right corner that brings the music window out and puts it away. */
+    private void musicButton(final LegacyCanvas c, final double mx, final double my, final float alpha) {
+        int w = c.width();
+        int h = c.height();
+        int x = w - 146;
+        int y = h - 55;
+        boolean hover = mx >= x && mx < x + 70 && my >= y && my < y + 41;
+        c.rounded(x, y, 70, 41, 10, LegacyCanvas.alpha(WHITE, (hover ? 0.2F : 0.1F) * alpha));
+        c.textCentered(Face.JELLO_LIGHT, 18.0F, "Music", x + 35.0F, y + 20.5F, LegacyCanvas.alpha(WHITE, alpha));
+    }
+
+    private boolean musicButtonHit(final double mx, final double my) {
+        int x = this.width * this.minecraft.getWindow().getGuiScale() - 146;
+        int y = this.height * this.minecraft.getWindow().getGuiScale() - 55;
+        return mx >= x && mx < x + 70 && my >= y && my < y + 41;
     }
 
     // ------------------------------------------------------------------ input
@@ -220,6 +250,13 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
         double my = LegacyCanvas.toLegacy(event.y());
         if (this.page != null) {
             this.page.mouseClicked(mx, my, event, this.width * this.minecraft.getWindow().getGuiScale(), this.height * this.minecraft.getWindow().getGuiScale());
+            return true;
+        }
+        if (event.button() == 0 && this.musicButtonHit(mx, my)) {
+            this.music.toggle();
+            return true;
+        }
+        if (this.music.mouseClicked(mx, my, event.button())) {
             return true;
         }
 
@@ -267,6 +304,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
             this.page.mouseDragged(mx, my);
             return true;
         }
+        this.music.mouseDragged(mx, my);
         if (this.dragged != null) {
             int w = this.width * this.minecraft.getWindow().getGuiScale();
             int h = this.height * this.minecraft.getWindow().getGuiScale();
@@ -286,6 +324,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
     @Override
     public boolean mouseReleased(final MouseButtonEvent event) {
         this.interactions.mouseReleased();
+        this.music.mouseReleased();
         this.dragged = null;
         if (this.scrollDragged != null) {
             this.scrollDragged.scroll.release();
@@ -305,6 +344,9 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
             this.page.wheel(mx, my, scrollY);
             return true;
         }
+        if (this.music.mouseScrolled(mx, my, scrollY)) {
+            return true;
+        }
         for (int i = this.panels.size() - 1; i >= 0; i--) {
             Panel panel = this.panels.get(i);
             if (panel.contains(mx, my)) {
@@ -321,6 +363,9 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
             return true;
         }
         if (this.page != null && this.page.keyPressed(event)) {
+            return true;
+        }
+        if (this.music.keyPressed(event)) {
             return true;
         }
         if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
@@ -343,7 +388,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
         if (this.interactions.charTyped(event)) {
             return true;
         }
-        return this.page != null && this.page.charTyped(event) || super.charTyped(event);
+        return this.page != null && this.page.charTyped(event) || this.music.charTyped(event) || super.charTyped(event);
     }
 
     // ------------------------------------------------------------------ one card
