@@ -40,6 +40,11 @@
   - TabGUI `JelloTabGui`：左边 150 宽的分类面板（一次 5 行，选中行文字右移 14px，光带滑动），右边 170 宽的模块面板（开的模块用 Medium 字重）。
     键位逻辑是 `TabGui` 模块自己的，这里只画。
   - 位置和旧版一样：TabGUI 从 y=99 开始，`LegacyHud.leftBottom()` 是下面元素该从哪开始。列表会让开原版的药水图标和 F3 右栏。
+  - 小部件 `JelloWidgets`（各是一个 INTERFACE 模块，默认关，只有 Jello 画）：`KeyStrokes`（WASD + 左右键，按下变亮、松开时从中心扩散一圈涟漪）、
+    `Coords`（x=85，静止时暗，走动时亮并弹一下）、`Compass`（顶部居中的方位条，S/W/N/E 用 Medium 40 号字，其余是刻度和度数）、
+    `InfoHUD`（左下角：角色小模型、护甲和耐久条、坐标；`Move Chat Up` 通过 `ChatComponent` 里的一行钩子把聊天往上抬，绘制和点击共用）。
+  - 开关声音：`LegacyToggleSound` 订阅 `EventModuleToggle`，Jello 播 `activate/deactivate.mp3`（JLayer 解码成 PCM，Java Sound 播，后台线程；
+    没有声卡就跳过并记一次日志），Classic 播原版石头按钮声。`ArrayList` 的 `Sound` 设置控制，跟旧版 ActiveMods 一样。
 
 ### Classic
 - **游戏内 HUD**：水印（深色底板 + "Sigma" + 彩虹版本号）、ActiveMods `ClassicActiveMods`（深色框 + SF UI Display Bold 名字 + 灰色模式，
@@ -57,14 +62,14 @@
 - `AccountOps`：登录/添加/删除/排序，两套 Alt Manager 共用。
 - `SigmaClickGui.beginClose()`：ClickGUI 想播放关闭动画就返回 true，`ClickGuiHandler` 据此决定是否直接 `close()`。
 - 旧的 `SigmaAccountScreen` 没动，`ModernMainMenuScreen` 还在用。
+- 加载界面早就在 `LoadingOverlay` 里（旧 `LoadingScreen#xd` 的 26.2 版本），这次没动。
 
 ## 没搬（按价值排序）
 
 | 项 | 旧客户端里 | 为什么没搬 |
 |---|---|---|
-| Jello 的 Compass / Coords / KeyStrokes / InfoHUD / MiniMap / Radar | 旧版各是一个 Jello 专用模块 | 还没搬：这里没有对应的模块，要连模块一起加 |
+| Jello 的 MiniMap / Radar（含 WarThunderRadar） | 旧版各是一个 Jello 专用模块 | 还没搬，要采样区块，比其它小部件重得多 |
 | Jello / Classic 下的 PotionStatus | 旧版没有这个模块 | 原版药水图标留在右上角，列表会让开它 |
-| 加载界面 | `LoadingScreen`：logo + 进度条叠在模糊 `back.png` 上 | 26.2 的加载覆盖层另有一套，需要单独接 |
 | 通知 | Jello/Classic 的右下角通知卡片 | 旧版里是各个模块自己发的；这里没有通知系统，也没有模块在发，先不加 |
 | 游戏内 Jello 页面 | Keyboard、Maps、Snake、Bird、Spotlight、IRC、Options/Credits、Waypoints | 不是渲染效果，是功能；没有对应模块 |
 | Jello ClickGUI 附属面板 | 音乐播放器、IRC、配置面板、BrainFreeze 遮罩 | 仓库里没有 BrainFreeze 模块 |

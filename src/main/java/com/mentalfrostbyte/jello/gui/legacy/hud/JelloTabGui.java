@@ -56,9 +56,14 @@ final class JelloTabGui {
         placed = false;
     }
 
-    /** Draws the menu with its top at {@code top}; returns where the category panel ends. */
-    static int render(final LegacyCanvas c, final TabGui tab, final int top, final float dt) {
-        tab.markShown(LAYOUT);
+    /**
+     * Draws the menu with its top at {@code top}; returns where the category panel ends. {@code interactive} is whether
+     * keys move it: not while a screen has them.
+     */
+    static int render(final LegacyCanvas c, final TabGui tab, final int top, final float dt, final boolean interactive) {
+        if (interactive) {
+            tab.markShown(LAYOUT);
+        }
         List<ModuleCategory> categories = tab.categories();
         if (categories.isEmpty()) {
             return top;

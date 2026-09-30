@@ -7,6 +7,7 @@ import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
 import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
 import com.mentalfrostbyte.jello.gui.modern.ModernHud;
 import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.gui.InfoHud;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import net.minecraft.client.Minecraft;
@@ -40,6 +41,20 @@ public final class LegacyHud {
         return mode == ClientMode.JELLO || mode == ClientMode.CLASSIC;
     }
 
+    /**
+     * How far, in GUI units, the chat is lifted: InfoHUD's character and armor stand in the corner it usually fills, and
+     * the old client moved the chat up 40 pixels to clear them. Called from {@code ChatComponent}, so what is drawn and
+     * what a click lands on agree.
+     */
+    public static int chatLift() {
+        InfoHud info = Modules.enabled(InfoHud.class);
+        if (info == null || !info.movesChat() || Client.getInstance().getClientModeManager().get() != ClientMode.JELLO) {
+            return 0;
+        }
+
+        return Math.round(80.0F / Math.max(1, Minecraft.getInstance().getWindow().getGuiScale()));
+    }
+
     /** Where the next element down the left side starts, in framebuffer pixels. */
     static int leftBottom() {
         return leftBottom;
@@ -62,18 +77,23 @@ public final class LegacyHud {
             boolean jello = mode == ClientMode.JELLO;
 
             TabGui tab = Modules.enabled(TabGui.class);
-            boolean inGame = mc.gui.screen() == null;
-            // As the old client: the watermark is always there, the modules only while nothing else is open.
-            float tabActivity = !inGame || debug ? 0F : jello ? 0F : ClassicTabGui.activity(tab);
+            // The menu takes the arrow keys, so it only listens with nothing open; a screen that does not pause the game
+            // (the chat, the inventory) leaves the HUD showing, as it was in the old client.
+            boolean free = mc.gui.screen() == null;
+            boolean showing = free || !mc.gui.screen().isPauseScreen();
+            float tabActivity = !showing || debug || jello ? 0F : ClassicTabGui.activity(tab);
             if (jello) {
                 watermarkJello(c, debug);
             } else {
                 watermarkClassic(c, 0.5F + 0.5F * tabActivity);
             }
 
-            if (!inGame) {
+            if (!showing) {
                 JelloTabGui.hidden();
                 ClassicTabGui.hidden();
+                JelloActiveMods.reset();
+                ClassicActiveMods.reset();
+                JelloWidgets.reset();
                 return;
             }
 
@@ -83,10 +103,16 @@ public final class LegacyHud {
                 ClassicTabGui.hidden();
             } else if (jello) {
                 ClassicTabGui.hidden();
-                leftBottom = JelloTabGui.render(c, tab, JELLO_LEFT_TOP, dt) + 10;
+                leftBottom = JelloTabGui.render(c, tab, JELLO_LEFT_TOP, dt, free) + 10;
             } else {
                 JelloTabGui.hidden();
-                ClassicTabGui.render(c, tab, dt);
+                ClassicTabGui.render(c, tab, dt, free);
+            }
+
+            if (jello) {
+                JelloWidgets.render(c, mc, leftBottom, debug);
+            } else {
+                JelloWidgets.reset();
             }
 
             ModuleArrayList list = Modules.enabled(ModuleArrayList.class);
@@ -109,6 +135,7 @@ public final class LegacyHud {
         ClassicTabGui.hidden();
         JelloActiveMods.reset();
         ClassicActiveMods.reset();
+        JelloWidgets.reset();
     }
 
     /**

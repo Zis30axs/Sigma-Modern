@@ -151,8 +151,10 @@ public class ChatComponent {
     }
 
     private void extractRenderState(
-        final ChatComponent.ChatGraphicsAccess graphics, final int screenHeight, final int ticks, final ChatComponent.DisplayMode displayMode
+        final ChatComponent.ChatGraphicsAccess graphics, final int fullScreenHeight, final int ticks, final ChatComponent.DisplayMode displayMode
     ) {
+        // MODIFIED for porting: Jello's InfoHUD lifts the chat clear of its character and armor (drawing and clicks share this).
+        final int screenHeight = fullScreenHeight - com.mentalfrostbyte.jello.gui.legacy.hud.LegacyHud.chatLift();
         // MODIFIED for porting: the ModernChat module lays the lines out on its own panel, for drawing and for clicks alike -
         // including while the chat is empty, so its input bar can still fold away after the screen closes.
         if (com.mentalfrostbyte.jello.gui.modern.ModernChat.active()) {

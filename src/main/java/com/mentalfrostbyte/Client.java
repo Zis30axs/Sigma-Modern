@@ -50,6 +50,7 @@ public class Client implements MinecraftInstance {
     private final com.mentalfrostbyte.jello.music.MusicPlayer musicPlayer;
     // Feeds module toggles to SigmaModern's in-game island; it only records them, drawing decides what shows.
     private final Object islandActivity = new com.mentalfrostbyte.jello.gui.modern.ModernIsland.ActivityListener();
+    private final Object legacyToggleSound = new com.mentalfrostbyte.jello.gui.legacy.hud.LegacyToggleSound();
     // Main-thread environment snapshots; the music decoding thread applies the local audio effects.
     private final com.mentalfrostbyte.jello.music.MusicEffects musicEffects = new com.mentalfrostbyte.jello.music.MusicEffects();
     private final com.mentalfrostbyte.jello.music.MusicEnvironmentListener musicEnvironment =
@@ -155,6 +156,7 @@ public class Client implements MinecraftInstance {
             EventBus.register(this.musicPlayer);
             EventBus.register(this.islandActivity);
             EventBus.register(this.musicEnvironment);
+            EventBus.register(this.legacyToggleSound);
             // -Dsigma.debug.musicPreview: start the (silent) player a third of the way in, so captures show it playing.
             if (Boolean.getBoolean("sigma.debug.musicPreview")) {
                 this.musicPlayer.play();
@@ -211,6 +213,7 @@ public class Client implements MinecraftInstance {
      * is deliberately not retryable; fixing the list is the correct response, not a rollback.</p>
      */
     private void rollbackFailedStart() {
+        EventBus.unregister(this.legacyToggleSound);
         EventBus.unregister(this.islandActivity);
         EventBus.unregister(this.musicEnvironment);
         this.musicEnvironment.reset();
@@ -578,6 +581,7 @@ public class Client implements MinecraftInstance {
         }
 
         try {
+            EventBus.unregister(this.legacyToggleSound);
             EventBus.unregister(this.islandActivity);
             EventBus.unregister(this.musicEnvironment);
             this.musicEnvironment.reset();

@@ -100,8 +100,10 @@ final class ClassicTabGui {
         return activity;
     }
 
-    static void render(final LegacyCanvas c, final TabGui tab, final float dt) {
-        tab.markShown(LAYOUT);
+    static void render(final LegacyCanvas c, final TabGui tab, final float dt, final boolean interactive) {
+        if (interactive) {
+            tab.markShown(LAYOUT);
+        }
         List<ModuleCategory> categories = tab.categories();
         if (categories.isEmpty()) {
             hidden();

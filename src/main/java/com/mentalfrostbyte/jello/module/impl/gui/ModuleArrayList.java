@@ -129,6 +129,9 @@ public class ModuleArrayList extends Module {
     private final BooleanSetting animations = this.register(new BooleanSetting(
             "Animations", "Slides lines in and out as modules are switched, and eases the rest into place.", true));
 
+    private final BooleanSetting sound = this.register(new BooleanSetting(
+            "Sound", "Jello and Classic: a sound as a module is switched on or off.", true));
+
     private final EnumSetting<Size> size = this.register(new EnumSetting<>(
             "Size", "Jello: the size of the text.", Size.NORMAL));
 
@@ -232,6 +235,10 @@ public class ModuleArrayList extends Module {
 
     public boolean isAnimated() {
         return this.animations.get();
+    }
+
+    public boolean playsSound() {
+        return this.sound.get();
     }
 
     public Size getSize() {
