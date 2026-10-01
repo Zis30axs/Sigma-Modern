@@ -57,8 +57,8 @@ public final class ModernHud {
         debugAt[side] = System.nanoTime();
     }
 
-    /** How far down F3's text reaches on that side, or 0 while it shows none there. */
-    static int debugBottom(boolean left) {
+    /** How far down F3's text reaches on that side, in GUI units, or 0 while it shows none there. */
+    public static int debugBottom(boolean left) {
         int side = left ? 0 : 1;
         return System.nanoTime() - debugAt[side] < DEBUG_STALE_NANOS ? debugBottom[side] : 0;
     }
@@ -67,7 +67,7 @@ public final class ModernHud {
      * Whether F3's text is up - as the old client did, the left stack (TabGUI, keystrokes) then hides, the ArrayList
      * starts below F3's right column and the brand moves to the top centre. Entries pinned to show without F3 count.
      */
-    static boolean debugShowing() {
+    public static boolean debugShowing() {
         return Minecraft.getInstance().debugEntries.isOverlayVisible() || debugBottom(true) > 0 || debugBottom(false) > 0;
     }
 
@@ -92,7 +92,15 @@ public final class ModernHud {
      * {@code Hud.extractEffects}). Only while PotionStatus isn't drawing them in its place.
      */
     static int vanillaEffectsBottom(Minecraft mc) {
-        if (mc.gui.hud.isHidden() || Modules.enabled(PotionStatus.class) != null) return 0;
+        return Modules.enabled(PotionStatus.class) != null ? 0 : effectIconsBottom(mc);
+    }
+
+    /**
+     * {@link #vanillaEffectsBottom} without PotionStatus's say: how far down vanilla's effect icons reach, in GUI
+     * units, for a presentation that leaves them where they are (Jello and Classic have no PotionStatus).
+     */
+    public static int effectIconsBottom(Minecraft mc) {
+        if (mc.gui.hud.isHidden() || mc.player == null) return 0;
         boolean harmful = false, any = false;
         for (MobEffectInstance instance : mc.player.getActiveEffects()) {
             if (!instance.showIcon()) continue;

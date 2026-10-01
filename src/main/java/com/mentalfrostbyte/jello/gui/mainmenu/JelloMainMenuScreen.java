@@ -1,209 +1,335 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.account.SigmaAccountScreen;
+import com.mentalfrostbyte.jello.gui.account.JelloAltManagerScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
-import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
-import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
+import com.mentalfrostbyte.jello.gui.jello.JelloBackdrop;
+import com.mentalfrostbyte.jello.gui.jello.JelloChangelog;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyLabelButton;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
+import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
+import com.mentalfrostbyte.jello.util.math.Easing;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
+import java.util.Locale;
+import java.util.Random;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.sounds.SoundEvents;
+import org.lwjgl.glfw.GLFW;
 
 /**
- * Source-native 26.2 presentation of Sigma's original Jello main menu.
+ * Jello's main menu, as the old client drew it (its {@code MainMenuScreen} + {@code JelloMainMenu}).
  *
- * <p>The artwork, button order, historical framebuffer-pixel measurements and hover motion come from
- * the old client. Rendering itself stays on Minecraft 26.2's backend-neutral GUI pipeline.</p>
+ * <p>Everything is laid out in framebuffer pixels through {@link LegacyCanvas}, so the numbers below are the
+ * old ones. The scene behind is {@link JelloBackdrop}: three layers that slide against each other with the
+ * pointer, and floating bubbles. Over it:</p>
+ * <ul>
+ *   <li>the 336x178 "Jello" wordmark, and five 128 px icons at 122 px pitch that swell 20 % and rise on hover,
+ *       with a soft glow behind and their label under them;</li>
+ *   <li>Exit, Changelog and Switch as text with a growing underline;</li>
+ *   <li>Changelog and Exit both blur and dim the scene and shrink the menu to 93 %; Changelog then shows the
+ *       release list, Exit a random goodbye and a quote, and closes the game two seconds later.</li>
+ * </ul>
  */
 public final class JelloMainMenuScreen extends SigmaMainMenuScreen {
 
-    private static final Identifier BACKGROUND = legacy("jello/background/background.png");
-    private static final Identifier MIDDLE = legacy("jello/background/middle.png");
-    private static final Identifier FOREGROUND = legacy("jello/background/foreground.png");
-    private static final Identifier LOGO = legacy("jello/logo_large.png");
-    private static final Identifier SHADOW = legacy("jello/shadow.png");
-
-    private static final Identifier[] ICONS = {
-        legacy("jello/icons/singleplayer.png"),
-        legacy("jello/icons/multiplayer.png"),
-        legacy("jello/icons/shop.png"),
-        legacy("jello/icons/options.png"),
-        legacy("jello/icons/alt.png")
+    private static final LegacyTexture[] ICONS = {
+        LegacyTexture.ICON_SINGLEPLAYER, LegacyTexture.ICON_MULTIPLAYER, LegacyTexture.ICON_REALMS,
+        LegacyTexture.ICON_OPTIONS, LegacyTexture.ICON_ALT
     };
-
     private static final String[] ACTIONS = {"Singleplayer", "Multiplayer", "Realms", "Options", "Alt Manager"};
 
-    private static final int LIGHT = ClientColors.LIGHT_GREYISH_BLUE.getColor();
-    private static final int DEEP_TEAL = ClientColors.DEEP_TEAL.getColor();
-    private static final int TEXT_DIM = withAlpha(LIGHT, 178);
+    private static final String[] GOODBYE_TITLES = {
+        "Goodbye.", "See you soon.", "Bye!", "Au revoir", "See you!", "Ciao!", "Adios", "Farewell", "See you later!",
+        "Have a good day!", "See you arround.", "See you tomorrow!", "Goodbye, friend.", "Logging out.", "Signing off!",
+        "Shutting down.", "Was good to see you!"
+    };
+    private static final String[] GOODBYE_MESSAGES = {
+        "The two hardest things to say in life are hello for the first time and goodbye for the last.",
+        "Don’t cry because it’s over, smile because it happened.",
+        "It’s time to say goodbye, but I think goodbyes are sad and I’d much rather say hello. Hello to a new adventure.",
+        "We’ll meet again, Don’t know where, don’t know when, But I know we’ll meet again, some sunny day.",
+        "This is not a goodbye but a 'see you soon'.",
+        "You are my hardest goodbye.",
+        "Goodbyes are not forever, are not the end; it simply means I’ll miss you until we meet again.",
+        "Good friends never say goodbye. They simply say \"See you soon\".",
+        "Every goodbye always makes the next hello closer.",
+        "Where's the good in goodbye?",
+        "And I'm sorry, so sorry. But, I have to say goodbye."
+    };
+    private static final String[] GOODBYE_MESSAGES_FR = {
+        "Mon salut jamais dans la fuite, avant d'm'éteindre, faut m'débrancher",
+        "Prêt à partir pour mon honneur"
+    };
 
-    private final Animation[] actionHover = new Animation[ACTIONS.length];
-    private final Animation exitHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
-    private final Animation changelogHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
-    private final Animation switchHover = new Animation(160, 140, Animation.Direction.BACKWARDS);
+    private static final int WHITE = 0xFFFEFEFE;
+    private static final int BLACK = 0xFF010101;
+    private static final long EXIT_DELAY_MS = 2000L;
+
+    private final JelloBackdrop backdrop = new JelloBackdrop();
+    private final JelloChangelog changelog = new JelloChangelog();
+    private final Animation overlay = new Animation(200, 200, Animation.Direction.BACKWARDS);
+    private final Animation goodbye = new Animation(200, 200, Animation.Direction.BACKWARDS);
+    private final Animation[] iconHover = new Animation[ACTIONS.length];
+    private final LegacyLabelButton exit;
+    private final LegacyLabelButton changelogButton;
+    private final LegacyLabelButton switchButton;
+    private final String goodbyeTitle;
+    private final String goodbyeMessage;
+
+    private int pressed = -1;
+    private long exitAtMillis = -1L;
 
     public JelloMainMenuScreen() {
         super(Component.literal("Sigma Jello"));
-        for (int i = 0; i < this.actionHover.length; i++) {
-            this.actionHover[i] = new Animation(160, 140, Animation.Direction.BACKWARDS);
+        for (int i = 0; i < this.iconHover.length; i++) {
+            this.iconHover[i] = new Animation(160, 140, Animation.Direction.BACKWARDS);
         }
+        this.exit = new LegacyLabelButton("Exit", 30, 24, 50, 50, Face.JELLO_LIGHT, 20, LegacyCanvas.alpha(WHITE, 0.4F));
+        this.changelogButton = new LegacyLabelButton("Changelog", 90, 24, 110, 50, Face.JELLO_LIGHT, 20, LegacyCanvas.alpha(WHITE, 0.7F));
+        this.switchButton = new LegacyLabelButton("Switch", 220, 24, 50, 50, Face.JELLO_LIGHT, 20, LegacyCanvas.alpha(WHITE, 0.7F));
+
+        Random random = new Random();
+        this.goodbyeTitle = GOODBYE_TITLES[random.nextInt(GOODBYE_TITLES.length)];
+        int messages = GOODBYE_MESSAGES.length + (isFrench() ? GOODBYE_MESSAGES_FR.length : 0);
+        int pick = random.nextInt(messages);
+        this.goodbyeMessage = pick < GOODBYE_MESSAGES.length ? GOODBYE_MESSAGES[pick] : GOODBYE_MESSAGES_FR[pick - GOODBYE_MESSAGES.length];
+
+        // -Dsigma.debug.jelloMenu=changelog|goodbye: start with that panel open (goodbye without closing the game).
+        String debug = System.getProperty("sigma.debug.jelloMenu");
+        if ("changelog".equals(debug)) {
+            this.overlay.changeDirection(Animation.Direction.FORWARDS);
+            this.changelog.setOpen(true);
+        } else if ("goodbye".equals(debug)) {
+            this.overlay.changeDirection(Animation.Direction.FORWARDS);
+            this.goodbye.changeDirection(Animation.Direction.FORWARDS);
+        }
+    }
+
+    private static boolean isFrench() {
+        Locale locale = Locale.getDefault(Locale.Category.DISPLAY);
+        return locale.getLanguage().equals(Locale.FRENCH.getLanguage());
     }
 
     @Override
-    public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
-        drawFullScreen(graphics, BACKGROUND);
-        drawFullScreen(graphics, MIDDLE);
-        drawFullScreen(graphics, FOREGROUND);
+    public void tick() {
+        if (this.exitAtMillis >= 0L && System.currentTimeMillis() >= this.exitAtMillis) {
+            this.exitAtMillis = -1L;
+            this.quitGame();
+        }
+    }
 
-        int logoWidth = LegacyUiScale.size(336);
-        int logoHeight = LegacyUiScale.size(178);
-        int logoX = (this.width - logoWidth) / 2;
-        int logoY = this.height / 2 - logoHeight;
-        // Minecraft 26.2 identifiers reject '@' in resource paths, so the historical
-        // logo_large@2x.png filename cannot be addressed directly. The base 336x178 artwork already
-        // maps 1:1 to framebuffer pixels at GUI scale 2 through LegacyUiScale, so it is the correct
-        // modern source for this logical-size render as well.
-        graphics.blit(RenderPipelines.GUI_TEXTURED, LOGO, logoX, logoY, 0.0F, 0.0F,
-            logoWidth, logoHeight, logoWidth, logoHeight, LIGHT);
+    // ------------------------------------------------------------------ drawing
 
-        MenuLayout layout = this.menuLayout();
-        for (int i = 0; i < ACTIONS.length; i++) {
-            int x = layout.startX + i * layout.stride;
-            boolean hovered = inside(mouseX, mouseY, x, layout.y, layout.size, layout.size);
-            Animation animation = this.actionHover[i];
-            animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
+    @Override
+    public void extractRenderState(final GuiGraphicsExtractor graphics, final int guiMouseX, final int guiMouseY, final float partialTick) {
+        try (LegacyCanvas c = new LegacyCanvas(graphics)) {
+            double mx = LegacyCanvas.mouseX();
+            double my = LegacyCanvas.mouseY();
+            float transition = this.transition();
 
-            float progress = animation.calcPercent();
-            float motion = animation.getDirection() == Animation.Direction.FORWARDS
-                ? SmoothInterpolator.interpolate(progress, 0.24, 0.88, 0.30, 1.00)
-                : SmoothInterpolator.interpolate(progress, 0.45, 0.02, 0.59, 0.28);
-
-            int drawSize = Math.max(1, Math.round(layout.size * (1.0F + motion * 0.20F)));
-            int drawX = x - (drawSize - layout.size) / 2;
-            int drawY = layout.y - (drawSize - layout.size) / 2
-                - Math.round((layout.size / 2.0F) * motion * 0.20F);
-
-            if (progress > 0.001F) {
-                int shadowPad = LegacyUiScale.size(85);
-                int shadowAlpha = Math.round(255.0F * Math.min(1.0F, progress * 0.70F));
-                graphics.blit(RenderPipelines.GUI_TEXTURED, SHADOW,
-                    drawX - shadowPad, drawY - shadowPad, 0.0F, 0.0F,
-                    drawSize + shadowPad * 2, drawSize + shadowPad * 2,
-                    drawSize + shadowPad * 2, drawSize + shadowPad * 2,
-                    withAlpha(LIGHT, shadowAlpha));
-            }
-
-            graphics.blit(RenderPipelines.GUI_TEXTURED, ICONS[i], drawX, drawY, 0.0F, 0.0F,
-                drawSize, drawSize, drawSize, drawSize, LIGHT);
-
-            if (progress > 0.001F) {
-                String label = ACTIONS[i];
-                int labelX = x + (layout.size - this.font.width(label)) / 2;
-                int labelY = layout.y + layout.size - LegacyUiScale.size(40);
-                graphics.text(this.font, label, labelX + 1, labelY + 1,
-                    withAlpha(DEEP_TEAL, Math.round(progress * 96.0F)), false);
-                graphics.text(this.font, label, labelX, labelY,
-                    withAlpha(LIGHT, Math.round(progress * 153.0F)), false);
+            this.backdrop.draw(c, mx, my, transition);
+            this.drawMenu(c, mx, my, 1.0F - transition, transition);
+            this.changelog.draw(c, mx, my, 1.0F);
+            if (this.goodbye.getDirection() == Animation.Direction.FORWARDS || this.goodbye.calcPercent() > 0.0F) {
+                float p = this.goodbye.calcPercent();
+                c.textCentered(Face.JELLO_MEDIUM, 50, this.goodbyeTitle, c.width() / 2.0F, c.height() / 2.0F - 30, LegacyCanvas.alpha(WHITE, p));
+                c.textCentered(Face.JELLO_LIGHT, 18, "\"" + this.goodbyeMessage + "\"", c.width() / 2.0F, c.height() / 2.0F + 30,
+                    LegacyCanvas.alpha(WHITE, p * 0.5F));
             }
         }
+    }
 
-        this.drawTopAction(graphics, "Exit", 30, mouseX, mouseY, this.exitHover, 0.40F);
-        this.drawTopAction(graphics, "Changelog", 90, mouseX, mouseY, this.changelogHover, 0.70F);
-        this.drawTopAction(graphics, "Switch", 220, mouseX, mouseY, this.switchHover, 0.70F);
+    /** How far the menu has given way to the overlay (changelog or goodbye), eased as the old client did. */
+    private float transition() {
+        float p = this.overlay.calcPercent();
+        return this.overlay.getDirection() == Animation.Direction.BACKWARDS
+            ? Easing.easeInCubic(p, 0.0F, 1.0F, 1.0F)
+            : Easing.easeOutCubic(p, 0.0F, 1.0F, 1.0F);
+    }
 
+    private void drawMenu(final LegacyCanvas c, final double mx, final double my, final float alpha, final float transition) {
+        if (alpha <= 0.0F) {
+            return;
+        }
+        boolean live = this.overlay.calcPercent() == 0.0F;
+        int width = c.width();
+        int height = c.height();
+        float shrink = 1.0F - 0.07F * transition;
+
+        c.push();
+        c.scaleAbout(shrink, shrink, width / 2.0F, height / 2.0F);
+
+        c.image(LegacyTexture.JELLO_LOGO, width / 2 - LegacyTexture.JELLO_LOGO.width / 2, height / 2 - LegacyTexture.JELLO_LOGO.height,
+            LegacyTexture.JELLO_LOGO.width, LegacyTexture.JELLO_LOGO.height, LegacyCanvas.alpha(WHITE, alpha));
+
+        for (int i = 0; i < ICONS.length; i++) {
+            this.drawIcon(c, i, iconX(width, i), iconY(height), mx, my, alpha, live);
+        }
+
+        this.softText(c, "© Sigma Prod", 10, height - 31, alpha);
         String version = "Jello for Sigma " + Client.FULL_VERSION + "  -  Minecraft " + this.minecraft.getLaunchedVersion();
-        graphics.text(this.font, "© Sigma Prod", LegacyUiScale.px(10), this.height - LegacyUiScale.size(16), LIGHT, true);
-        graphics.text(this.font, version, this.width - this.font.width(version) - LegacyUiScale.size(9),
-            this.height - LegacyUiScale.size(16), TEXT_DIM, true);
+        this.softText(c, version, width - Math.round(c.textWidth(Face.JELLO_LIGHT, 20, version)) - 9, height - 31, alpha);
+
+        this.switchButton.draw(c, mx, my, alpha, live);
+        this.changelogButton.draw(c, mx, my, alpha, live);
+        this.exit.draw(c, mx, my, alpha, live);
+        c.pop();
     }
 
-    private static void drawFullScreen(final GuiGraphicsExtractor graphics, final Identifier texture) {
-        int width = graphics.guiWidth();
-        int height = graphics.guiHeight();
-        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, 0, 0, 0.0F, 0.0F,
-            width, height, width, height);
+    /** Text with the old client's crisp black under-print. */
+    private void softText(final LegacyCanvas c, final String text, final float x, final float y, final float alpha) {
+        c.text(Face.JELLO_LIGHT, 20, text, x, y, LegacyCanvas.alpha(BLACK, alpha * 0.5F));
+        c.text(Face.JELLO_LIGHT, 20, text, x, y, LegacyCanvas.alpha(WHITE, alpha));
     }
 
-    private void drawTopAction(
-        final GuiGraphicsExtractor graphics,
-        final String text,
-        final int legacyX,
-        final int mouseX,
-        final int mouseY,
-        final Animation animation,
-        final float baseAlpha
-    ) {
-        int x = LegacyUiScale.px(legacyX);
-        int top = LegacyUiScale.px(20);
-        int width = this.font.width(text);
-        boolean hovered = inside(mouseX, mouseY, x, top, width + LegacyUiScale.size(8), LegacyUiScale.size(20));
-        animation.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
-        float progress = animation.calcPercent();
-        float alpha = Math.min(1.0F, baseAlpha + progress * (1.0F - baseAlpha));
-        graphics.text(this.font, text, x, LegacyUiScale.px(24) - Math.round(LegacyUiScale.px(1.0F) * progress),
-            withAlpha(LIGHT, Math.round(255.0F * alpha)), false);
+    private static int iconX(final int width, final int index) {
+        return width / 2 - 305 + index * 128 + index * -6;
     }
 
-    private MenuLayout menuLayout() {
-        int size = LegacyUiScale.size(128);
-        int stride = LegacyUiScale.size(122);
-        int totalWidth = size + stride * (ACTIONS.length - 1);
-        int startX = (this.width - totalWidth) / 2;
-        int y = this.height / 2 + LegacyUiScale.px(14);
-        return new MenuLayout(size, stride, startX, y);
+    private static int iconY(final int height) {
+        return height / 2 + 14;
     }
+
+    private void drawIcon(final LegacyCanvas c, final int index, final int x, final int y, final double mx, final double my, final float alpha, final boolean live) {
+        final int size = 128;
+        boolean hovered = live && mx >= x && mx < x + size && my >= y && my < y + size;
+        Animation hover = this.iconHover[index];
+        hover.changeDirection(hovered ? Animation.Direction.FORWARDS : Animation.Direction.BACKWARDS);
+        float progress = hover.calcPercent();
+        float motion = hover.getDirection() == Animation.Direction.BACKWARDS
+            ? SmoothInterpolator.interpolate(progress, 0.45, 0.02, 0.59, 0.28)
+            : SmoothInterpolator.interpolate(progress, 0.24, 0.88, 0.3, 1.0);
+
+        float w = (float) (size * (1.0 + motion * 0.2));
+        float h = w;
+        float dx = x - (w - size) / 2.0F;
+        float dy = (float) (y - (h - size) / 2.0F - (size / 2.0F * motion) * 0.2);
+
+        // The icon is square, so it fills the box; the glow behind it reaches 85 px past.
+        float glow = 85.0F;
+        c.image(LegacyTexture.JELLO_SHADOW, dx - glow, dy - glow, w + glow * 2, h + glow * 2, LegacyCanvas.alpha(WHITE, progress * 0.7F * alpha));
+        float press = this.pressed == index ? 0.1F : 0.0F;
+        c.image(ICONS[index], dx, dy, w, h,
+            LegacyCanvas.alpha(LegacyCanvas.shiftTowardsOther(WHITE, BLACK, 1.0F - press), alpha));
+
+        if (motion > 0.0F) {
+            String label = ACTIONS[index];
+            float textW = c.textWidth(Face.JELLO_LIGHT, 25, label);
+            float scale = 0.8F + motion * 0.2F;
+            c.push();
+            c.translate(x + size / 2.0F - textW / 2.0F, y + size - 40);
+            c.scale(scale, scale);
+            float textH = c.textHeight(Face.JELLO_LIGHT, 25);
+            float tx = (1.0F - scale) * textW / 2.0F + 1.0F;
+            c.image(LegacyTexture.JELLO_SHADOW, tx - textW / 2.0F, textH / 3.0F, textW * 2, textH * 3, LegacyCanvas.alpha(WHITE, motion * 0.6F * alpha));
+            c.text(Face.JELLO_LIGHT, 25, label, tx, 40, LegacyCanvas.alpha(WHITE, motion * 0.6F * alpha));
+            c.pop();
+        }
+    }
+
+    // ------------------------------------------------------------------ input
 
     @Override
     public boolean mouseClicked(final MouseButtonEvent event, final boolean doubleClick) {
         if (event.button() != 0) {
             return super.mouseClicked(event, doubleClick);
         }
+        double mx = LegacyCanvas.toLegacy(event.x());
+        double my = LegacyCanvas.toLegacy(event.y());
 
-        int mouseX = (int) event.x();
-        int mouseY = (int) event.y();
-        if (inside(mouseX, mouseY, LegacyUiScale.px(30), LegacyUiScale.px(20),
-            Math.max(this.font.width("Exit") + LegacyUiScale.size(8), LegacyUiScale.size(50)), LegacyUiScale.size(24))) {
-            this.quitGame();
+        if (this.changelog.isOpen()) {
+            return this.changelog.press(mx, my) || super.mouseClicked(event, doubleClick);
+        }
+        if (this.overlay.calcPercent() != 0.0F) {
             return true;
         }
-        if (inside(mouseX, mouseY, LegacyUiScale.px(220), LegacyUiScale.px(20),
-            Math.max(this.font.width("Switch") + LegacyUiScale.size(8), LegacyUiScale.size(50)), LegacyUiScale.size(24))) {
+
+        if (this.exit.contains(mx, my)) {
+            this.click();
+            this.beginExit();
+            return true;
+        }
+        if (this.changelogButton.contains(mx, my)) {
+            this.click();
+            this.overlay.changeDirection(Animation.Direction.FORWARDS);
+            this.changelog.setOpen(true);
+            return true;
+        }
+        if (this.switchButton.contains(mx, my)) {
+            this.click();
             this.openModeSelect();
             return true;
         }
 
-        MenuLayout layout = this.menuLayout();
-        for (int i = 0; i < ACTIONS.length; i++) {
-            int x = layout.startX + i * layout.stride;
-            if (!inside(mouseX, mouseY, x, layout.y, layout.size, layout.size)) {
-                continue;
+        int width = this.minecraft.getWindow().getGuiScaledWidth() * this.minecraft.getWindow().getGuiScale();
+        int height = this.minecraft.getWindow().getGuiScaledHeight() * this.minecraft.getWindow().getGuiScale();
+        for (int i = 0; i < ICONS.length; i++) {
+            int x = iconX(width, i);
+            int y = iconY(height);
+            if (mx >= x && mx < x + 128 && my >= y && my < y + 128) {
+                this.pressed = i;
+                this.click();
+                switch (i) {
+                    case 0 -> this.openSingleplayer();
+                    case 1 -> this.openMultiplayer();
+                    case 2 -> this.openRealms();
+                    case 3 -> this.openOptions();
+                    case 4 -> this.minecraft.gui.setScreen(new JelloAltManagerScreen(this));
+                    default -> throw new IllegalStateException("Unexpected Jello menu action " + i);
+                }
+                return true;
             }
-
-            switch (i) {
-                case 0 -> this.openSingleplayer();
-                case 1 -> this.openMultiplayer();
-                case 2 -> this.openRealms();
-                case 3 -> this.openOptions();
-                case 4 -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.JELLO));
-                default -> throw new IllegalStateException("Unexpected Jello menu action " + i);
-            }
-            return true;
         }
-
         return super.mouseClicked(event, doubleClick);
     }
 
-    private static Identifier legacy(final String path) {
-        return Identifier.withDefaultNamespace("textures/gui/sigma/legacy/" + path);
+    @Override
+    public boolean mouseDragged(final MouseButtonEvent event, final double dx, final double dy) {
+        this.changelog.drag(LegacyCanvas.toLegacy(event.y()));
+        return super.mouseDragged(event, dx, dy);
     }
 
-    private static int withAlpha(final int color, final int alpha) {
-        return Math.max(0, Math.min(255, alpha)) << 24 | color & 0x00FFFFFF;
+    @Override
+    public boolean mouseReleased(final MouseButtonEvent event) {
+        this.pressed = -1;
+        this.changelog.release();
+        return super.mouseReleased(event);
     }
 
-    private record MenuLayout(int size, int stride, int startX, int y) {
+    @Override
+    public boolean mouseScrolled(final double x, final double y, final double scrollX, final double scrollY) {
+        if (this.changelog.isOpen()) {
+            this.changelog.wheel(scrollY);
+            return true;
+        }
+        return super.mouseScrolled(x, y, scrollX, scrollY);
+    }
+
+    @Override
+    public boolean keyPressed(final KeyEvent event) {
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE && this.overlay.calcPercent() > 0.0F) {
+            // Backs out of the changelog - and of a goodbye that hasn't closed the game yet.
+            this.exitAtMillis = -1L;
+            this.goodbye.changeDirection(Animation.Direction.BACKWARDS);
+            this.overlay.changeDirection(Animation.Direction.BACKWARDS);
+            this.changelog.setOpen(false);
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+
+    private void beginExit() {
+        this.overlay.changeDirection(Animation.Direction.FORWARDS);
+        this.goodbye.changeDirection(Animation.Direction.FORWARDS);
+        this.exitAtMillis = System.currentTimeMillis() + EXIT_DELAY_MS;
+    }
+
+    private void click() {
+        this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
     }
 }

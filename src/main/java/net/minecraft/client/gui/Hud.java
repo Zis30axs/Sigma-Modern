@@ -293,6 +293,9 @@ public class Hud {
         // MODIFIED for porting: SigmaModern's HUD decorations (the ArrayList module's list, keystrokes,
         // dynamic island), drawn last so they sit above both the vanilla HUD and any module overlay.
         com.mentalfrostbyte.jello.gui.modern.ModernHud.render(graphics);
+        // MODIFIED for porting: the Jello and Classic HUD (watermark, module list, TabGUI), drawn only in those
+        // presentations.
+        com.mentalfrostbyte.jello.gui.legacy.hud.LegacyHud.render(graphics);
     }
 
     private void extractBossOverlay(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {

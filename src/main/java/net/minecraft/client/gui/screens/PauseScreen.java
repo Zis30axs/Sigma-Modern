@@ -85,6 +85,17 @@ public class PauseScreen extends Screen {
     protected void init() {
         if (this.showPauseMenu) {
             this.createPauseMenu();
+            // MODIFIED for porting: Jello's extra button under the pause menu, as the old client had it.
+            if (com.mentalfrostbyte.Client.getInstance().getClientModeManager().get() == com.mentalfrostbyte.jello.gui.ClientMode.JELLO) {
+                this.addRenderableWidget(
+                    Button.builder(
+                            Component.literal("Jello for Sigma Options"),
+                            var1x -> this.minecraft.gui.setScreen(new com.mentalfrostbyte.jello.gui.jello.JelloOptionsScreen(this))
+                        )
+                        .bounds(this.width / 2 - 102, this.height - 45, 204, 20)
+                        .build()
+                );
+            }
         }
 
         int textWidth = this.font.width(this.title);

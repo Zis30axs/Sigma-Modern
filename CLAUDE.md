@@ -108,6 +108,19 @@ These apply to anything under `net.caffeinemc.mods.sodium`, `net.caffeinemc.mods
   - "Grim is quiet" is not evidence: check the "N movements predicted" / "player state" lines in
     `run/sigma5/selfcheck/logs/latest.log`. `GrimReplayTest` replays a real recording (format 2, with per-packet
     markers) in real time and asserts predictions actually ran.
+- `LEGACY_PORTING.md` records the Jello/Classic presentations brought back from the old `juzibujiji/SigmaClient`
+  (`gui.legacy`, `gui.jello`, `gui.classic`, `gui.account`): what is ported and what is not (Radar and the modules the old repo added later),
+  and the debug flags for capturing each screen. Rules that are easy to break:
+  - Legacy screens lay out in framebuffer pixels through `LegacyCanvas`, so the old client's numbers carry over
+    unchanged; don't rescale them by hand to GUI units.
+  - Every legacy screen must override `extractBackground` (see `SigmaMainMenuScreen`), or vanilla draws its own
+    panorama/blur behind it and a second `blurBeforeThisStratum` in the same frame crashes.
+  - The two music windows - SigmaModern's (`ModernMusicBrowser`) and Jello's (`JelloMusicPanel`) - are two looks over one
+    browse model, `gui.modern.MusicBrowse` (categories, search text and results, opened playlist, what a click on a row
+    does). Change what is listed or how a click behaves there, not in either window.
+  - Jello Maps keeps its files through `com.mentalfrostbyte.jello.map` (`WaypointStore`, `ExploredMap`, `MapManager`); those
+    are plain Java with tests, and `ChunkColours` is how a column is coloured for both the minimap and the saved map. The
+    Maps page itself (`JelloMapsScreen`, `JelloMapView`, `JelloWaypointList`, `JelloWaypointPopover`) only draws and routes input.
 
 ## The `com.mentalfrostbyte.jello` client framework
 

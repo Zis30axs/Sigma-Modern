@@ -6,7 +6,9 @@
 #   scripts/game.sh shot [out.png]                  F2 screenshot; prints the file's path (and copies it to out.png)
 #   scripts/game.sh key F3                          send a key (xdotool names: F3, Escape, e, ctrl+a, ...)
 #   scripts/game.sh type "hello"                    type text (into chat, a text field)
-#   scripts/game.sh click X Y | move X Y            mouse, in window pixels (default window 1280x720)
+#   scripts/game.sh click X Y | rclick X Y | move X Y   mouse, in window pixels (default window 1280x720)
+#   scripts/game.sh scroll X Y up|down [notches]   mouse wheel at X Y
+#   scripts/game.sh hold X Y | release              press the left button at X Y / let it go (drag with `move` in between)
 #   scripts/game.sh log [lines] | status | stop
 #
 # Environment: SERVER=host:port joins that server on start (quick play; local servers only: see server.sh),
@@ -79,6 +81,11 @@ case "${1:-}" in
     type)  need_running; x xdotool type --delay 40 -- "${2:?text}" ;;
     move)  need_running; x xdotool mousemove "${2:?x}" "${3:?y}" ;;
     click) need_running; x xdotool mousemove "${2:?x}" "${3:?y}"; sleep 0.3; x xdotool click 1 ;;
+    rclick) need_running; x xdotool mousemove "${2:?x}" "${3:?y}"; sleep 0.3; x xdotool click 3 ;;
+    hold)  need_running; x xdotool mousemove "${2:?x}" "${3:?y}"; sleep 0.3; x xdotool mousedown 1 ;;
+    release) need_running; x xdotool mouseup 1 ;;
+    scroll) need_running; x xdotool mousemove "${2:?x}" "${3:?y}"; sleep 0.3
+            x xdotool click --repeat "${5:-1}" --delay 120 "$([ "${4:?up|down}" = up ] && echo 4 || echo 5)" ;;
     log)   noise <"$LOG" | tail -n "${2:-60}" ;;
     status) sigma_alive "$PIDFILE" && say "running, pid $(cat "$PIDFILE")" || say "not running" ;;
     stop)  sigma_stop_group "$PIDFILE"; say "stopped" ;;

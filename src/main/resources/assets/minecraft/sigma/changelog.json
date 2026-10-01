@@ -1,0 +1,25 @@
+[
+    {
+        "title": "5.1.1 (26.2) Update",
+        "changes": [
+            "Jello: the layered scene slides with the mouse again, with the floating bubbles",
+            "Jello: the blurred panorama, the Changelog and the goodbye screen are back",
+            "Jello and Classic: the Alt Manager has its own look in both",
+            "Jello and Classic: the ClickGUI is back - Jello's white cards and settings page, Classic's group tiles, module grid and settings sheet",
+            "Classic: the main menu follows the mouse, with its drifting particles",
+            "Added a port of GrimAC that judges your own movement (SelfDetection)",
+            "Added KillAura, FakePlayer, Criticals, Velocity, NoFall and Derp",
+            "Added NetEase / QQ music with word-timed lyrics",
+            "Added PotionStatus, ArrayList and TabGUI (SigmaModern presentation)"
+        ]
+    },
+    {
+        "title": "5.1.0 (26.2) Update",
+        "changes": [
+            "Sigma now runs on Minecraft 26.2",
+            "Sodium, Iris, Lithium and ViaFabricPlus are ported into the client's own source",
+            "Added SigmaModern, a third presentation next to Jello and Classic",
+            "Accounts sign in with Microsoft's device code or as offline names"
+        ]
+    }
+]

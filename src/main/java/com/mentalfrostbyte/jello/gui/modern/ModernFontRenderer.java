@@ -31,7 +31,7 @@ import java.util.Map;
 final class ModernFontRenderer implements AutoCloseable {
     /** The size Modern text is drawn at; the chat scales from it. */
     static final float SIZE = 11;
-    private static final float BASELINE = 9;
+    private static final float DEFAULT_BASELINE = 9;
 
     private static final int MAX_LAYOUTS = 512;
     private static final long CACHE_BYTES = 32L * 1024 * 1024;
@@ -46,6 +46,8 @@ final class ModernFontRenderer implements AutoCloseable {
 
     private final Typeface face;
     private final Font font;
+    /** Distance from a run's top edge to its baseline, in {@link #SIZE} units. */
+    private final float baseline;
     private final Shaper shaper = Shaper.make();
     private final ShapingOptions shaping;
     // Kept apart from the layout cache: single-character measurements would otherwise evict real runs.
@@ -79,6 +81,19 @@ final class ModernFontRenderer implements AutoCloseable {
      * glyph's advance, so all four variants share one set of metrics.
      */
     ModernFontRenderer(String resource, boolean bold, boolean italic, ShapingOptions shaping) {
+        this(resource, bold, italic, shaping, false);
+    }
+
+    /**
+     * A face for the old Jello/Classic screens. Those were laid out with AWT fonts, whose text origin is the
+     * top of the font's ascent, so the baseline comes from the face's own metrics instead of the fixed offset
+     * the serif cuts were tuned for.
+     */
+    static ModernFontRenderer legacy(String resource) {
+        return new ModernFontRenderer(resource, false, false, ShapingOptions.DEFAULT, true);
+    }
+
+    private ModernFontRenderer(String resource, boolean bold, boolean italic, ShapingOptions shaping, boolean metricBaseline) {
         this.shaping = shaping;
         this.advances.defaultReturnValue(Float.NaN);
         try (var stream = ModernFontRenderer.class.getResourceAsStream(resource)) {
@@ -90,6 +105,7 @@ final class ModernFontRenderer implements AutoCloseable {
             this.font = new Font(this.face, SIZE).setEdging(FontEdging.ANTI_ALIAS)
                 .setSubpixel(true).setMetricsLinear(true).setHinting(FontHinting.NONE)
                 .setEmboldened(bold).setSkewX(italic ? -0.2F : 0F);
+            this.baseline = metricBaseline ? -this.font.getMetrics().getAscent() : DEFAULT_BASELINE;
         } catch (IOException e) {
             throw new IllegalStateException("Cannot load Modern's font", e);
         }
@@ -105,6 +121,11 @@ final class ModernFontRenderer implements AutoCloseable {
     }
     int width(String text) {
         return text.isEmpty() ? 0 : (int)Math.ceil(layout(text).getWidth());
+    }
+
+    /** The face's vertical metrics at {@link #SIZE}. */
+    io.github.humbleui.skija.FontMetrics metrics() {
+        return this.font.getMetrics();
     }
 
     /** The unrounded shaped width. */
@@ -202,15 +223,15 @@ final class ModernFontRenderer implements AutoCloseable {
             bounds = blob == null ? Rect.makeXYWH(0, 0, 0, 0) : blob.getBounds();
         }
         int left = (int)Math.floor(bounds.getLeft()) - 1;
-        int top = (int)Math.floor(BASELINE + bounds.getTop()) - 1;
+        int top = (int)Math.floor(this.baseline + bounds.getTop()) - 1;
         int width = Math.max(1, (int)Math.ceil(bounds.getRight()) + 1 - left);
-        int height = Math.max(1, (int)Math.ceil(BASELINE + bounds.getBottom()) + 1 - top);
+        int height = Math.max(1, (int)Math.ceil(this.baseline + bounds.getBottom()) + 1 - top);
         float scale = Math.min(density, Math.min(4096F / width, 2048F / height));
         ModernSkiaRaster.Image image = ModernSkiaRaster.render(Math.max(1, (int)Math.ceil(width * scale)),
             Math.max(1, (int)Math.ceil(height * scale)), canvas -> {
                 try (Paint paint = new Paint().setColor(0xFFFFFFFF).setAntiAlias(true)) {
                     canvas.scale(scale, scale);
-                    canvas.drawTextLine(line, -left, BASELINE - top, paint);
+                    canvas.drawTextLine(line, -left, this.baseline - top, paint);
                 }
             });
         return new Raster(image, left, top, scale);

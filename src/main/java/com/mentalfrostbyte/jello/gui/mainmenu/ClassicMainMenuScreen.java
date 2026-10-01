@@ -1,111 +1,159 @@
 package com.mentalfrostbyte.jello.gui.mainmenu;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.account.SigmaAccountScreen;
+import com.mentalfrostbyte.jello.gui.account.ClassicAltManagerScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
-import com.mentalfrostbyte.jello.util.client.render.LegacyUiScale;
-import com.mentalfrostbyte.jello.util.client.render.theme.ClientColors;
+import com.mentalfrostbyte.jello.gui.classic.ClassicParticles;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
+import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
+import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
+import com.mentalfrostbyte.jello.util.math.Easing;
 import com.mentalfrostbyte.jello.util.math.SmoothInterpolator;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.sounds.SoundEvents;
 
-/** Source-native 26.2 rendering of Sigma Classic's original main-menu artwork and layout. */
+/**
+ * Sigma Classic's main menu, as the old client drew it ({@code ClassicMainScreen}).
+ *
+ * <p>Everything is in framebuffer pixels through {@link LegacyCanvas}. The scene reacts to the pointer in
+ * three depths: the backdrop moves by 1/200 of the pointer's travel, the wordmark and buttons by 1/40, and the
+ * drifting particles by 1/12, so they slide against each other. The pointer is followed with a lag (each frame
+ * closes 5.5 % of the gap). On opening, the whole screen rises 5 px into place over 175 ms.</p>
+ *
+ * <p>The seven buttons (four above, three below) are 114x140 with a 100 px icon and a label under it. Under the
+ * pointer, a button springs up 25 px and overshoots slightly (a bezier with control points outside 0..1); when
+ * the pointer leaves, it springs back the other way. The spring plays once per visit: it restarts only after
+ * the previous one finished.</p>
+ */
 public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
 
-    private static final Identifier BACKGROUND = legacy("classic/mainmenubackground.png");
-    private static final Identifier BIG = legacy("classic/big.png");
-    private static final Identifier[] ICONS = {
-        legacy("classic/singleplayer.png"),
-        legacy("classic/multiplayer.png"),
-        legacy("classic/options.png"),
-        legacy("classic/language.png"),
-        legacy("classic/accounts.png"),
-        legacy("classic/switch.png"),
-        legacy("classic/exit.png")
+    private static final LegacyTexture[] ICONS = {
+        LegacyTexture.CLASSIC_SINGLEPLAYER, LegacyTexture.CLASSIC_MULTIPLAYER, LegacyTexture.CLASSIC_OPTIONS, LegacyTexture.CLASSIC_LANGUAGE,
+        LegacyTexture.CLASSIC_ACCOUNTS, LegacyTexture.CLASSIC_SWITCH, LegacyTexture.CLASSIC_EXIT
     };
-    private static final String[] ACTIONS = {
-        "Singleplayer", "Multiplayer", "Options", "Language", "Accounts", "Switch", "Exit"
-    };
+    private static final String[] ACTIONS = {"Singleplayer", "Multiplayer", "Options", "Language", "Accounts", "Switch", "Exit"};
 
-    private static final int LIGHT = ClientColors.LIGHT_GREYISH_BLUE.getColor();
-    private static final int DEEP_TEAL = ClientColors.DEEP_TEAL.getColor();
+    private static final int WHITE = 0xFFFEFEFE;
+    private static final int BLACK = 0xFF010101;
+    private static final int BOX_W = 114;
+    private static final int BOX_H = 140;
 
-    private final Animation[] actionHover = new Animation[ACTIONS.length];
+    private final Animation[] hover = new Animation[ACTIONS.length];
+    private final Animation intro = new Animation(175, 325, Animation.Direction.FORWARDS);
+    private final ClassicParticles particles = new ClassicParticles();
+    private final String credits;
+
+    private float followX = -1;
+    private float followY = -1;
+    private long lastNanos = System.nanoTime();
 
     public ClassicMainMenuScreen() {
         super(Component.literal("Sigma Classic"));
-        for (int i = 0; i < this.actionHover.length; i++) {
-            this.actionHover[i] = new Animation(300, 300, Animation.Direction.BACKWARDS);
+        for (int i = 0; i < this.hover.length; i++) {
+            this.hover[i] = new Animation(300, 300, Animation.Direction.BACKWARDS);
         }
+        List<String> names = new ArrayList<>(List.of("LeakedPvP", "Omikron"));
+        Collections.shuffle(names);
+        this.credits = "by " + names.get(0) + ", " + names.get(1);
     }
 
     @Override
-    public void extractRenderState(final GuiGraphicsExtractor graphics, final int mouseX, final int mouseY, final float partialTick) {
-        int overscan = LegacyUiScale.size(10);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, -overscan, -overscan, 0.0F, 0.0F,
-            this.width + overscan * 2, this.height + overscan * 2,
-            this.width + overscan * 2, this.height + overscan * 2);
+    public void extractRenderState(final GuiGraphicsExtractor graphics, final int guiMouseX, final int guiMouseY, final float partialTick) {
+        try (LegacyCanvas c = new LegacyCanvas(graphics)) {
+            int width = c.width();
+            int height = c.height();
+            double mx = LegacyCanvas.mouseX();
+            double my = LegacyCanvas.mouseY();
 
-        ClassicLayout layout = this.layout();
-
-        int markWidth = LegacyUiScale.size(300);
-        int markHeight = LegacyUiScale.size(97);
-        int markX = (this.width - markWidth) / 2;
-        int markY = this.height / 2 - LegacyUiScale.size(200);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, BIG, markX, markY, 0.0F, 0.0F,
-            markWidth, markHeight, markWidth, markHeight, LIGHT);
-
-        for (int i = 0; i < ACTIONS.length; i++) {
-            ButtonBox box = layout.box(i);
-            boolean hovered = inside(mouseX, mouseY, box.x, box.y, box.width, box.height);
-            Animation animation = this.actionHover[i];
-            if (hovered && animation.calcPercent() < 0.10F) {
-                animation.changeDirection(Animation.Direction.FORWARDS);
-            } else if (!hovered && animation.calcPercent() >= 0.999F) {
-                animation.changeDirection(Animation.Direction.BACKWARDS);
+            long now = System.nanoTime();
+            float frames = Math.min(6.0F, (now - this.lastNanos) / 1.0E9F * 60.0F);
+            this.lastNanos = now;
+            if (this.followX < 0) {
+                this.followX = width / 2.0F;
+                this.followY = height / 2.0F;
             }
+            float ease = 1.0F - (float) Math.pow(1.0 - 0.055, frames);
+            this.followX += ((float) mx - this.followX) * ease;
+            this.followY += ((float) my - this.followY) * ease;
 
-            float progress = animation.calcPercent();
-            float motion = animation.getDirection() == Animation.Direction.FORWARDS
-                ? SmoothInterpolator.interpolate(progress, 0.68, 2.32, 0.06, 0.48)
-                : SmoothInterpolator.interpolate(progress, 0.81, 0.38, 0.32, -1.53);
+            // The screen rises into place as it opens: everything starts 5 px low, the backdrop cancels that out
+            // and the wordmark and buttons start 5 px lower still.
+            int rise = Math.round((1.0F - Easing.easeOutQuad(this.intro.calcPercent(), 0.0F, 1.0F, 1.0F)) * 5.0F);
+            c.push();
+            c.translate(0, rise);
 
-            int iconX = box.x + LegacyUiScale.px(20);
-            int iconY = box.y;
-            int iconSize = LegacyUiScale.size(100);
-            int hoverLift = Math.round(LegacyUiScale.px(2.0F) * Math.max(-1.0F, Math.min(1.0F, motion)));
-            graphics.blit(RenderPipelines.GUI_TEXTURED, ICONS[i], iconX, iconY - hoverLift, 0.0F, 0.0F,
-                iconSize, iconSize, iconSize, iconSize, LIGHT);
+            // Backdrop: 1/200 of the pointer's travel, a little oversized so the edge never shows.
+            float bgX = (int) (-width / 200 + this.followX / 200.0F);
+            float bgY = (int) (-height / 100 + this.followY / 100.0F) - rise;
+            c.image(LegacyTexture.CLASSIC_BACKGROUND, -10 + bgX, -10 + bgY, width + 20, height + 20, 0xFFFFFFFF);
 
-            String label = ACTIONS[i];
-            int labelX = box.x + LegacyUiScale.px(12) + (box.width - this.font.width(label)) / 2;
-            int labelY = box.y + LegacyUiScale.px(102);
-            graphics.text(this.font, label, labelX, labelY + 1, withAlpha(DEEP_TEAL, 128), false);
-            graphics.text(this.font, label, labelX, labelY, LIGHT, false);
+            // Particles: 1/12.
+            this.particles.draw(c, (int) (-width / 12 + this.followX / 12.0F), (int) (-height / 12 + this.followY / 12.0F));
+
+            // Wordmark and buttons: 1/40.
+            float groupX = (int) (-width / 40 + this.followX / 40.0F);
+            float groupY = (int) (-height / 40 + this.followY / 40.0F) + rise;
+            this.drawGroup(c, width, height, groupX, groupY, mx, my);
+
+            String copyright = "© Sigma Prod";
+            c.text(Face.JELLO_LIGHT, 18, copyright, 10, 8, LegacyCanvas.alpha(WHITE, 1.0F));
+            c.text(Face.CLASSIC, 17, this.credits, 130, 9, LegacyCanvas.alpha(WHITE, 0.5F));
+
+            String version = "Sigma " + Client.FULL_VERSION + " for Minecraft " + this.minecraft.getLaunchedVersion();
+            c.text(Face.CLASSIC, 20, "Hello," + this.minecraft.getUser().getName(), 10, height - 55, WHITE);
+            c.text(Face.CLASSIC, 20, "You are using the latest version", 10, height - 31, WHITE);
+            c.text(Face.CLASSIC, 20, version, width - c.textWidth(Face.CLASSIC, 20, version) - 9, height - 31, WHITE);
+            c.pop();
         }
-
-        String hello = "Hello," + this.minecraft.getUser().getName();
-        graphics.text(this.font, hello, LegacyUiScale.px(10), this.height - LegacyUiScale.size(28), LIGHT, false);
-        graphics.text(this.font, "You are using the latest version", LegacyUiScale.px(10),
-            this.height - LegacyUiScale.size(16), LIGHT, false);
-        String version = "Sigma " + Client.FULL_VERSION + " for Minecraft " + this.minecraft.getLaunchedVersion();
-        graphics.text(this.font, version, this.width - this.font.width(version) - LegacyUiScale.size(9),
-            this.height - LegacyUiScale.size(16), LIGHT, false);
     }
 
-    private ClassicLayout layout() {
-        int width = LegacyUiScale.size(114);
-        int height = LegacyUiScale.size(140);
-        int firstStride = LegacyUiScale.size(116);
-        int secondStride = LegacyUiScale.size(128);
-        int firstStartX = this.width / 2 - LegacyUiScale.px(244);
-        int secondStartX = this.width / 2 - LegacyUiScale.px(204);
-        int firstRowY = this.height / 2 - LegacyUiScale.px(80);
-        int secondRowY = this.height / 2 + LegacyUiScale.px(70);
-        return new ClassicLayout(width, height, firstStride, secondStride, firstStartX, secondStartX, firstRowY, secondRowY);
+    private void drawGroup(final LegacyCanvas c, final int width, final int height, final float gx, final float gy, final double mx, final double my) {
+        int groupX = (width - 480) / 2;
+        int groupY = height / 2 - 230;
+        c.image(LegacyTexture.CLASSIC_BIG, groupX + (480 - 300) / 2.0F + gx, groupY + 30 + gy, 300, 97, WHITE);
+
+        for (int i = 0; i < ACTIONS.length; i++) {
+            float x = buttonX(width, i) + gx;
+            float y = buttonY(height, i) + gy;
+            boolean hovered = mx >= x && mx < x + BOX_W && my >= y && my < y + BOX_H;
+            Animation spring = this.hover[i];
+            if (hovered && spring.calcPercent() < 0.1F) {
+                spring.changeDirection(Animation.Direction.FORWARDS);
+            } else if (!hovered && spring.calcPercent() == 1.0F) {
+                spring.changeDirection(Animation.Direction.BACKWARDS);
+            }
+            float p = spring.calcPercent();
+            float motion = spring.getDirection() == Animation.Direction.BACKWARDS
+                ? SmoothInterpolator.interpolate(p, 0.81, 0.38, 0.32, -1.53)
+                : SmoothInterpolator.interpolate(p, 0.68, 2.32, 0.06, 0.48);
+            float lift = -25.0F * motion;
+
+            c.image(ICONS[i], x + 20, y + lift, 100, 100, WHITE);
+            String label = ACTIONS[i];
+            float labelX = x + 12 - (c.textWidth(Face.CLASSIC, 20, label) - BOX_W) / 2.0F;
+            float labelY = y + lift + 102;
+            c.text(Face.CLASSIC, 20, label, labelX, labelY + 1, LegacyCanvas.alpha(BLACK, 0.5F));
+            c.text(Face.CLASSIC, 20, label, labelX, labelY, WHITE);
+        }
+    }
+
+    private static int buttonX(final int width, final int index) {
+        int groupX = (width - 480) / 2;
+        if (index < 4) {
+            return groupX - 4 + index * 116;
+        }
+        return groupX + 36 + (index - 4) * 128;
+    }
+
+    private static int buttonY(final int height, final int index) {
+        int groupY = height / 2 - 230;
+        return index < 4 ? groupY + 150 : groupY + 300;
     }
 
     @Override
@@ -113,60 +161,31 @@ public final class ClassicMainMenuScreen extends SigmaMainMenuScreen {
         if (event.button() != 0) {
             return super.mouseClicked(event, doubleClick);
         }
-
-        ClassicLayout layout = this.layout();
-        int mouseX = (int) event.x();
-        int mouseY = (int) event.y();
+        double mx = LegacyCanvas.toLegacy(event.x());
+        double my = LegacyCanvas.toLegacy(event.y());
+        int width = this.minecraft.getWindow().getGuiScaledWidth() * this.minecraft.getWindow().getGuiScale();
+        int height = this.minecraft.getWindow().getGuiScaledHeight() * this.minecraft.getWindow().getGuiScale();
+        float gx = (int) (-width / 40 + this.followX / 40.0F);
+        float gy = (int) (-height / 40 + this.followY / 40.0F);
         for (int i = 0; i < ACTIONS.length; i++) {
-            ButtonBox box = layout.box(i);
-            if (!inside(mouseX, mouseY, box.x, box.y, box.width, box.height)) {
+            float x = buttonX(width, i) + gx;
+            float y = buttonY(height, i) + gy;
+            if (mx < x || mx >= x + BOX_W || my < y || my >= y + BOX_H) {
                 continue;
             }
-
+            this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
             switch (i) {
                 case 0 -> this.openSingleplayer();
                 case 1 -> this.openMultiplayer();
                 case 2 -> this.openOptions();
                 case 3 -> this.openLanguage();
-                case 4 -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.CLASSIC));
+                case 4 -> this.minecraft.gui.setScreen(new ClassicAltManagerScreen(this));
                 case 5 -> this.openModeSelect();
                 case 6 -> this.quitGame();
                 default -> throw new IllegalStateException("Unexpected Classic menu action " + i);
             }
             return true;
         }
-
         return super.mouseClicked(event, doubleClick);
-    }
-
-    private static Identifier legacy(final String path) {
-        return Identifier.withDefaultNamespace("textures/gui/sigma/legacy/" + path);
-    }
-
-    private static int withAlpha(final int color, final int alpha) {
-        return Math.max(0, Math.min(255, alpha)) << 24 | color & 0x00FFFFFF;
-    }
-
-    private record ButtonBox(int x, int y, int width, int height) {
-    }
-
-    private record ClassicLayout(
-        int width,
-        int height,
-        int firstStride,
-        int secondStride,
-        int firstStartX,
-        int secondStartX,
-        int firstRowY,
-        int secondRowY
-    ) {
-        private ButtonBox box(final int index) {
-            if (index < 4) {
-                return new ButtonBox(this.firstStartX + index * this.firstStride, this.firstRowY, this.width, this.height);
-            }
-
-            int secondIndex = index - 4;
-            return new ButtonBox(this.secondStartX + secondIndex * this.secondStride, this.secondRowY, this.width, this.height);
-        }
     }
 }

@@ -36,6 +36,8 @@ public class Client implements MinecraftInstance {
 
     private final Path directory;
     private final SigmaAccountManager accountManager;
+    // The explored maps and waypoints of the world being played (Jello's Maps page), under sigma5/maps.
+    private final com.mentalfrostbyte.jello.map.MapManager mapManager;
     private final ModuleManager moduleManager = new ModuleManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final com.mentalfrostbyte.jello.util.movement.MovementCorrector movementCorrector =
@@ -52,6 +54,7 @@ public class Client implements MinecraftInstance {
     private final com.mentalfrostbyte.jello.music.MusicPlayer musicPlayer;
     // Feeds module toggles to SigmaModern's in-game island; it only records them, drawing decides what shows.
     private final Object islandActivity = new com.mentalfrostbyte.jello.gui.modern.ModernIsland.ActivityListener();
+    private final Object legacyToggleSound = new com.mentalfrostbyte.jello.gui.legacy.hud.LegacyToggleSound();
     // Main-thread environment snapshots; the music decoding thread applies the local audio effects.
     private final com.mentalfrostbyte.jello.music.MusicEffects musicEffects = new com.mentalfrostbyte.jello.music.MusicEffects();
     private final com.mentalfrostbyte.jello.music.MusicEnvironmentListener musicEnvironment =
@@ -84,6 +87,7 @@ public class Client implements MinecraftInstance {
     private Client() {
         this.directory = mc.gameDirectory.toPath().resolve("sigma5");
         this.accountManager = new SigmaAccountManager(this.directory.resolve("accounts.json"));
+        this.mapManager = new com.mentalfrostbyte.jello.map.MapManager(this.directory.resolve("maps"));
         if (this.musicOffline) {
             this.musicLibrary = new com.mentalfrostbyte.jello.music.MusicLibrary(null);
             this.musicPlayer = new com.mentalfrostbyte.jello.music.MusicPlayer(
@@ -158,6 +162,8 @@ public class Client implements MinecraftInstance {
             EventBus.register(this.musicPlayer);
             EventBus.register(this.islandActivity);
             EventBus.register(this.musicEnvironment);
+            EventBus.register(this.legacyToggleSound);
+            EventBus.register(this.mapManager);
             // -Dsigma.debug.musicPreview: start the (silent) player a third of the way in, so captures show it playing.
             if (Boolean.getBoolean("sigma.debug.musicPreview")) {
                 this.musicPlayer.play();
@@ -214,6 +220,8 @@ public class Client implements MinecraftInstance {
      * is deliberately not retryable; fixing the list is the correct response, not a rollback.</p>
      */
     private void rollbackFailedStart() {
+        EventBus.unregister(this.mapManager);
+        EventBus.unregister(this.legacyToggleSound);
         EventBus.unregister(this.islandActivity);
         EventBus.unregister(this.musicEnvironment);
         this.musicEnvironment.reset();
@@ -403,6 +411,26 @@ public class Client implements MinecraftInstance {
             // Through VFP's own singleton, so the router sees exactly what a real "open" hands it.
             case "PROTOCOL" -> com.viaversion.viafabricplus.screen.impl.ProtocolSelectionScreen.INSTANCE.get(parent);
             case "MODES" -> new ModeSelectScreen(parent);
+            // The Jello / Classic alt managers, over a few offline accounts made up in the game directory's own store.
+            case "ALTS" -> {
+                this.seedDebugAccounts();
+                yield new com.mentalfrostbyte.jello.gui.account.JelloAltManagerScreen(parent);
+            }
+            case "ALTS_CLASSIC_ADD" -> new com.mentalfrostbyte.jello.gui.account.ClassicAltPromptScreen(parent,
+                com.mentalfrostbyte.jello.gui.account.ClassicAltPromptScreen.Mode.ADD, new com.mentalfrostbyte.jello.gui.account.AccountOps(() -> {
+                }));
+            case "ALTS_CLASSIC" -> {
+                this.seedDebugAccounts();
+                yield new com.mentalfrostbyte.jello.gui.account.ClassicAltManagerScreen(parent);
+            }
+            // Jello's in-game pages: the options, the Keybind Manager and the credits.
+            case "JELLO_OPTIONS" -> new com.mentalfrostbyte.jello.gui.jello.JelloOptionsScreen(parent);
+            case "SPOTLIGHT" -> new com.mentalfrostbyte.jello.gui.jello.JelloSpotlightScreen();
+            case "SNAKE" -> new com.mentalfrostbyte.jello.gui.jello.JelloSnakeScreen();
+            case "BIRD" -> new com.mentalfrostbyte.jello.gui.jello.JelloBirdScreen();
+            case "MAPS" -> new com.mentalfrostbyte.jello.gui.jello.JelloMapsScreen();
+            case "KEYBINDS" -> new com.mentalfrostbyte.jello.gui.jello.JelloKeybindScreen();
+            case "CREDITS" -> new com.mentalfrostbyte.jello.gui.jello.JelloCreditsScreen(parent);
             // A plain vanilla sub-page, for checking how a presentation skins vanilla widgets.
             case "SOUND" -> new net.minecraft.client.gui.screens.options.SoundOptionsScreen(options, mc.options);
             default -> null;
@@ -414,6 +442,16 @@ public class Client implements MinecraftInstance {
         mc.gui.setScreen(screen);
         logger.info("Sigma debug: opened {} as {}", requested, mc.gui.screen().getClass().getSimpleName());
         return true;
+    }
+
+    /** {@code -Dsigma.debug.openScreen=ALTS}: a handful of offline accounts, only when the store is empty. */
+    private void seedDebugAccounts() {
+        if (!this.accountManager.accounts().isEmpty()) {
+            return;
+        }
+        for (String name : new String[] {"Notch", "jeb_", "Dinnerbone", "Steve_123", "Alex_Cat", "Herobrine"}) {
+            this.accountManager.addOffline(name);
+        }
     }
 
     /** Sample chat lines covering what a chat skin has to handle: colors, bold, a link, a wrapping line, Chinese. */
@@ -560,6 +598,9 @@ public class Client implements MinecraftInstance {
         }
 
         try {
+            EventBus.unregister(this.mapManager);
+            this.mapManager.flush();
+            EventBus.unregister(this.legacyToggleSound);
             EventBus.unregister(this.islandActivity);
             EventBus.unregister(this.musicEnvironment);
             this.musicEnvironment.reset();
@@ -617,6 +658,10 @@ public class Client implements MinecraftInstance {
 
     public com.mentalfrostbyte.jello.lang.Translations getTranslations() {
         return this.translations;
+    }
+
+    public com.mentalfrostbyte.jello.map.MapManager getMapManager() {
+        return this.mapManager;
     }
 
     public ModuleManager getModuleManager() {
