@@ -32,6 +32,7 @@ import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
 import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
+import com.mentalfrostbyte.jello.module.impl.render.Rotation;
 import com.mentalfrostbyte.jello.module.impl.world.Weather;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -85,6 +86,7 @@ public final class ModuleManager {
         this.register(new NoFall());
         this.register(new NoHurtCam());
         this.register(new PotionStatus());
+        this.register(new Rotation());
         this.register(new Snake());
         this.register(new Speed());
         this.register(new Spotlight());

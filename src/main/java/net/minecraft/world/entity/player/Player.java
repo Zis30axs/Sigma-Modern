@@ -293,8 +293,10 @@ public abstract class Player extends Avatar implements ContainerUser {
         this.updatePlayerPose();
     }
 
+    // Sigma hook: public (vanilla: protected), so the Rotation module can keep a model's body within the same reach of the
+    // head reported to the server as this keeps the player's own within reach of the camera's.
     @Override
-    protected float getMaxHeadRotationRelativeToBody() {
+    public float getMaxHeadRotationRelativeToBody() {
         // MODIFIED for porting: was VFP limitation.rotation MixinPlayer#dontModifyHeadRotationWhenBlocking (@Redirect isBlocking)
         return (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_20_2) && this.isBlocking()) ? 15.0F : super.getMaxHeadRotationRelativeToBody();
     }
@@ -1504,7 +1506,7 @@ public abstract class Player extends Avatar implements ContainerUser {
             final boolean vfpBedrock = ProtocolTranslator.getTargetVersion().equals(BedrockProtocolVersion.bedrockLatest);
             boolean vfpSwimming = this.isSwimming();
             if (vfpBedrock && vfpSwimming) {
-                final double vfpResurfaceLookAngleY = this.getLookAngle().y;
+                final double vfpResurfaceLookAngleY = this.getMovementLookAngle().y;
                 // The value used here (0.55) isn't entirely correct, however in most cases it should be fine.
                 if (this.level().getFluidState(BlockPos.containing(this.getX(), this.getY() + 0.4, this.getZ())).isEmpty()
                     && vfpResurfaceLookAngleY > 0.0
@@ -1515,7 +1517,7 @@ public abstract class Player extends Avatar implements ContainerUser {
             }
 
             if (vfpSwimming) {
-                double lookAngleY = this.getLookAngle().y;
+                double lookAngleY = this.getMovementLookAngle().y; // Sigma hook: a corrected look, see LivingEntity#getMovementLookAngle
                 double multiplier = lookAngleY < -0.2 ? 0.085 : 0.06;
                 // MODIFIED for porting: was VFP bedrock.movement MixinPlayer#modifyWaterAbovePosition
                 // (@Redirect BlockPos#containing). Bedrock probes the fluid 0.9 blocks below the vanilla point.

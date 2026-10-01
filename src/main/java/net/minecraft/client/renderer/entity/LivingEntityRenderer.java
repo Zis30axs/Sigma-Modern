@@ -1,6 +1,8 @@
 package net.minecraft.client.renderer.entity;
 
 import com.google.common.collect.Lists;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.render.Rotation;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import java.util.List;
@@ -267,6 +269,14 @@ public abstract class LivingEntityRenderer<T extends LivingEntity, S extends Liv
         state.bodyRot = solveBodyRot(entity, headRot, partialTicks);
         state.yRot = Mth.wrapDegrees(headRot - state.bodyRot);
         state.xRot = entity.getXRot(partialTicks);
+        // Sigma hook: the Rotation module puts the look the server was told about on the local player's model, which for
+        // a silent look is not the camera's. Ahead of the upside-down flip below, so the flip turns it too.
+        if (entity instanceof LocalPlayer localPlayer) {
+            Rotation rotation = Modules.enabled(Rotation.class);
+            if (rotation != null) {
+                rotation.applyTo(localPlayer, state, partialTicks);
+            }
+        }
         state.isUpsideDown = this.isEntityUpsideDown(entity);
         if (state.isUpsideDown) {
             state.xRot *= -1.0F;

@@ -349,6 +349,21 @@ public class LocalPlayer extends AbstractClientPlayer
         return 0.0F;
     }
 
+    // Sigma hook: under a movement correction the elytra and the swimmer are pushed along the look the server was told
+    // about, because that is the one it predicts them from.
+    @Override
+    protected Vec3 getMovementLookAngle() {
+        com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
+        Vec3 corrected = corrector == null ? null : corrector.lookAngle();
+        return corrected != null ? corrected : super.getMovementLookAngle();
+    }
+
+    @Override
+    protected float getMovementXRot() {
+        com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
+        return corrector == null ? super.getMovementXRot() : corrector.xRot(super.getMovementXRot());
+    }
+
     private void sendPosition() {
         this.sendIsSprintingIfNeeded();
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#sendSneakingAfterSprinting
@@ -986,6 +1001,17 @@ public class LocalPlayer extends AbstractClientPlayer
         this.input.tick();
         // Sigma hook: the keys held this tick, before anything reads them; a module may press jump or sneak.
         this.input.keyPresses = EventBus.call(new EventMovementInput(this.input.keyPresses)).getInput();
+        // Sigma hook: the movement corrector turns the direction keys to the facing the server was told about. After the
+        // event, so that a module that presses jump or sneak is not undone; the movement vector is worked out again from
+        // whatever it leaves, and the input packet then reports those keys too. Not while riding: the mount steers by its
+        // own facing, from these same keys, and turned keys would send it off sideways.
+        com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
+        if (corrector != null && !this.isPassenger()) {
+            Input corrected = corrector.correct(this.input.keyPresses, this.getYRot());
+            if (!corrected.equals(this.input.keyPresses)) {
+                this.input.replaceKeyPresses(corrected);
+            }
+        }
         this.minecraft.getTutorial().onInput(this.input);
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#moveMovementSpeedFactors
         // (@Inject after Tutorial#onInput in aiStep). <= 1.21.4 applied the movement speed factors to the

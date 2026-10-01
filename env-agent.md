@@ -97,6 +97,8 @@ exit 0
 | `openScreen=`、`openScreenDelayFrames=` | 打开某个界面 |
 | `chatInput=`、`chatType=`、`chatLines=N`、`chatCloseAfterFrames=N` | 聊天框相关截图 |
 | `screenshotAfterFrames=N` | 渲染 N 帧后截图（`capture.sh` 用它） |
+| `musicOffline`（脚本默认开）、`musicSearch=`、`musicAutoplay`、`musicPreview`、`musicPage=fx\|lyrics`、`musicDrawer=open`、`musicLyrics=文件`、`musicMuted` | 音乐播放器截图 |
+| `correctorStats` | 每 100 tick 记一行 Movement Corrector 的统计：有请求的 tick 数、其中在按方向键的、相机与上报 yaw 的平均差、按键被改了几次。跑 SelfDetection 对照实验时用来确认"要修正的朝向确实在" |
 | `musicOffline`（脚本默认开）、`musicSearch=`、`musicDemo`（榜单列假歌曲，Jello 音乐窗口默认打开）、`musicAutoplay`、`musicPreview`、`musicPage=fx\|lyrics`、`musicDrawer=open`、`musicLyrics=文件`、`musicMuted` | 音乐播放器截图 |
 | `islandActivity`、`modernMenuDock`、`selectFirst`、`smoke`、`screenSmoke`、`frameTiming`、`maximizeAfterFrames=N`、`logMode` | 其他截图和性能辅助，见 `Client.java` 里的注释 |
 
@@ -137,6 +139,6 @@ exit 0
 
 ## 提交与推送
 
-- 开发分支 `claude/great-goodall-yaafrw`；推到 `main` 只在用户明确说要推的时候做（先 `git fetch`，main 上有新提交就合并进来、重新跑全量测试再推）。用户没要求就不建 PR。
+- 开发分支 `claude/dreamy-mendel-hz9dci`；推到 `main` 只在用户明确说要推的时候做（先 `git fetch`，main 上有新提交就合并进来、重新跑全量测试再推）。用户没要求就不建 PR。
 - 提交信息末尾原样照抄会话给出的署名行（`Co-Authored-By` 和 `Claude-Session`）；除这两行外，提交、注释、文档里不要出现模型名。
 - 改了行为就同步 `SIGMA_MODERN.md`（界面和 HUD）、`PORTING.md`/`VFP_AUDIT.md`（移植状态）、`SELFCHECK_PORTING.md`（反作弊实验）。
