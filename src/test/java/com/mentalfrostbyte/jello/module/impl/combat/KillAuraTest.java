@@ -100,6 +100,44 @@ class KillAuraTest {
         assertFalse(this.visible(aura, "Min CPS"));
     }
 
+    /** Clicks in {@code seconds} of ticks at a fixed rate, as the aura counts them: owed clicks build up, one goes out when due. */
+    private static int clicks(final float cps, final int seconds) {
+        float budget = 0.0F;
+        int clicks = 0;
+        for (int tick = 0; tick < seconds * 20; tick++) {
+            budget = KillAura.accrue(budget, cps);
+            if (budget >= 1.0F) {
+                clicks++;
+                budget = KillAura.spend(budget);
+            }
+        }
+        return clicks;
+    }
+
+    @Test
+    void theClickRateFollowsTheSettingInsteadOfSnappingToWholeTicks() {
+        for (int cps = 1; cps <= 20; cps++) {
+            // 100 seconds: a rate is off by at most the one click still owed at the end.
+            assertEquals(cps * 100, clicks(cps, 100), 1, cps + " CPS");
+        }
+        assertEquals(1500, clicks(15.0F, 100), 1, "15 CPS used to come out at 10, the nearest whole number of ticks");
+    }
+
+    @Test
+    void aWaitWithNothingInReachIsNotPaidBackAsABurst() {
+        float budget = 0.0F;
+        for (int tick = 0; tick < 200; tick++) {
+            budget = KillAura.accrue(budget, 12.0F);
+        }
+        int burst = 0;
+        while (budget >= 1.0F && burst < 10) {
+            budget = KillAura.spend(budget);
+            burst++;
+            budget = KillAura.accrue(budget, 12.0F);
+        }
+        assertTrue(burst <= 2, "owed clicks stay at one plus a tick's share: " + burst);
+    }
+
     private boolean visible(final KillAura aura, final String name) {
         return aura.setting(name).map(Setting::isVisible).orElseThrow();
     }

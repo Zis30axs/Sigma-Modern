@@ -411,8 +411,24 @@ public class KillAura extends Module {
         if (this.cps <= 0.0F) {
             this.rollCps();
         }
-        this.clickBudget = Math.min(1.0F, this.clickBudget + this.cps / 20.0F);
+        this.clickBudget = accrue(this.clickBudget, this.cps);
         return this.clickBudget >= 1.0F;
+    }
+
+    /**
+     * A tick's worth of clicks added to what is owed. The part of a click left over after an attack is kept, so the
+     * rate averages out to {@code cps}; capping the total at one click instead threw it away, which made every rate
+     * between 10 and 19 hit at 10 and only 20 hit faster. What is owed is held to one click plus this tick's share, so
+     * a long wait with nothing in reach is not paid back as a burst.
+     */
+    static float accrue(final float budget, final float cps) {
+        float perTick = cps / 20.0F;
+        return Math.min(budget + perTick, 1.0F + perTick);
+    }
+
+    /** What is owed after one click went out. */
+    static float spend(final float budget) {
+        return Math.max(0.0F, budget - 1.0F);
     }
 
     private boolean cooldownTiming() {
@@ -501,7 +517,7 @@ public class KillAura extends Module {
         if (!legacy) {
             player.swing(InteractionHand.MAIN_HAND);
         }
-        this.clickBudget = Math.max(0.0F, this.clickBudget - 1.0F);
+        this.clickBudget = spend(this.clickBudget);
         this.rollCps();
     }
 
