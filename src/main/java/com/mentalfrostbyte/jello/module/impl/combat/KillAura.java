@@ -66,7 +66,7 @@ public class KillAura extends Module {
         HEALTH
     }
 
-    /** When an attack is due: at a full cooldown (1.9 and later), at a click rate (1.8 and older), or by version. */
+    /** When an attack is due: Auto always obeys the click rate and, on 1.9+, also waits for a full cooldown. */
     public enum Timing {
         AUTO,
         COOLDOWN,
@@ -133,7 +133,7 @@ public class KillAura extends Module {
             "Which target to pick: the nearest, the one closest to where you look, or the weakest.", Priority.DISTANCE));
 
     private final EnumSetting<Timing> timing = this.register(new EnumSetting<>("Timing",
-            "Auto hits at a full cooldown on 1.9+ and at the click rate on 1.8 and older.", Timing.AUTO));
+            "Auto always obeys Min/Max CPS; on 1.9+ it also waits for the attack cooldown.", Timing.AUTO));
 
     private final NumberSetting minCps = this.register(new NumberSetting("Min CPS",
             "The slowest click rate, when hitting by click rate.", 8.0F, 1.0F, 20.0F, 1.0F));
@@ -424,21 +424,29 @@ public class KillAura extends Module {
 
     /** Whether an attack is due this tick; a click rate only builds up while there is a target. */
     private boolean tickClick(final LocalPlayer player) {
-        if (this.cooldownTiming()) {
-            return player.getAttackStrengthScale(0.5F) >= 1.0F;
+        Timing selected = this.timing.get();
+        boolean cooldownReady = player.getAttackStrengthScale(0.5F) >= 1.0F;
+        if (selected == Timing.COOLDOWN) {
+            return cooldownReady;
         }
+
         if (this.cps <= 0.0F) {
             this.rollCps();
         }
         this.clickBudget = Math.min(1.0F, this.clickBudget + this.cps / 20.0F);
-        return this.clickBudget >= 1.0F;
+        boolean cpsReady = this.clickBudget >= 1.0F;
+        return timingDue(selected, legacyCombat(), cooldownReady, cpsReady);
     }
 
-    private boolean cooldownTiming() {
-        return switch (this.timing.get()) {
-            case COOLDOWN -> true;
-            case CPS -> false;
-            case AUTO -> !legacyCombat();
+    /**
+     * AUTO keeps the CPS limiter on every protocol. Modern combat adds the vanilla cooldown as a second gate;
+     * legacy combat has no attack cooldown, so AUTO is the same timing gate as CPS there.
+     */
+    static boolean timingDue(final Timing timing, final boolean legacy, final boolean cooldownReady, final boolean cpsReady) {
+        return switch (timing) {
+            case COOLDOWN -> cooldownReady;
+            case CPS -> cpsReady;
+            case AUTO -> cpsReady && (legacy || cooldownReady);
         };
     }
 

@@ -244,7 +244,7 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 - `KillAura`（Combat，自写，不是移植）：
   - 每 tick 开头选目标、算出这一 tick 的视角；视角射线在攻击距离内碰到目标、且到了该攻击的时候就出手。这些都发生在这一 tick 的移动包之前，和原版点击的顺序一样：先发攻击，瞄准用的视角随同一 tick 的移动包上报。
   - 攻击走 `MultiPlayerGameMode.attack`，所以 `EventAttack` 的模块（Criticals、SuperKnockback）照常配合。挥手顺序按版本：≤1.8 先挥手后攻击。
-  - Timing：Auto 在 1.9+ 等冷却满，在 1.8 按随机 CPS（默认 8–12）。
+  - Timing：Auto 始终受随机 CPS（默认 8–12）限速；在 1.9+ 还要同时等原版攻击冷却满，1.8 则只看 CPS。
   - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
   - `Silent` 只改上报的视角；`Movement Corrector`（原来的 `Movement Fix` 开关，见下面"Movement Corrector"一节）让走路跟上报的朝向对上。
   - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。

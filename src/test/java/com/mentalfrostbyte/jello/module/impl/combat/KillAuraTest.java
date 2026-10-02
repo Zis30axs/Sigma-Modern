@@ -89,6 +89,22 @@ class KillAuraTest {
     }
 
     @Test
+    void autoTimingKeepsTheCpsLimiterOnEveryProtocol() {
+        assertFalse(KillAura.timingDue(KillAura.Timing.AUTO, false, true, false),
+                "modern Auto must not attack just because the cooldown is full");
+        assertFalse(KillAura.timingDue(KillAura.Timing.AUTO, false, false, true),
+                "modern Auto also waits for the vanilla cooldown");
+        assertTrue(KillAura.timingDue(KillAura.Timing.AUTO, false, true, true),
+                "modern Auto attacks only when both gates are ready");
+
+        assertFalse(KillAura.timingDue(KillAura.Timing.AUTO, true, false, false));
+        assertTrue(KillAura.timingDue(KillAura.Timing.AUTO, true, false, true),
+                "1.8 Auto has no cooldown gate, but still obeys CPS");
+        assertTrue(KillAura.timingDue(KillAura.Timing.CPS, false, false, true));
+        assertTrue(KillAura.timingDue(KillAura.Timing.COOLDOWN, false, true, false));
+    }
+
+    @Test
     void movCorCanFollowTheModuleWithoutChangingTheOldChoices() {
         MovementCorrector corrector = new MovementCorrector();
         assertEquals(MovementCorrection.STRICT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
