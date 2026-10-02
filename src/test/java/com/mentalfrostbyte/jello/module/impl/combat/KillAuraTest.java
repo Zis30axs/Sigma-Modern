@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
@@ -105,6 +106,24 @@ class KillAuraTest {
     }
 
     @Test
+    void solIntervalNeverBreaksTheConfiguredFastestCps() {
+        assertEquals(50L, KillAura.solIntervalMs(20.0F, 20.0F, 0.0F, -40.0F, 0.0F),
+                "negative jitter is clamped by the 20 CPS / 50 ms hard floor");
+        assertEquals(200L, KillAura.solIntervalMs(10.0F, 20.0F, 20.0F, 10.0F, 70.0F));
+        assertEquals(100L, KillAura.solIntervalMs(10.0F, 20.0F, -50.0F, 0.0F, -50.0F),
+                "negative random/pause inputs are ignored");
+    }
+
+    @Test
+    void solRecognizesOnlyExplicitLoopbackAddresses() {
+        assertTrue(KillAura.isLoopbackAddress("127.0.0.1:25565"));
+        assertTrue(KillAura.isLoopbackAddress("localhost"));
+        assertTrue(KillAura.isLoopbackAddress("[::1]:25565"));
+        assertFalse(KillAura.isLoopbackAddress("example.org:25565"));
+        assertFalse(KillAura.isLoopbackAddress("192.168.1.20:25565"));
+    }
+
+    @Test
     void movCorCanFollowTheModuleWithoutChangingTheOldChoices() {
         MovementCorrector corrector = new MovementCorrector();
         assertEquals(MovementCorrection.STRICT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
@@ -126,8 +145,18 @@ class KillAuraTest {
         this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
         assertFalse(this.visible(aura, "Silent"), "nothing to hide when it doesn't turn");
         assertFalse(this.visible(aura, "Movement Corrector"));
+        this.choose(aura, "CPS Mode", KillAura.CpsMode.SOL);
+        assertTrue(this.visible(aura, "Random MS"));
+        assertTrue(this.visible(aura, "Jitter MS"));
+        assertTrue(this.visible(aura, "Pause Chance"));
+        this.number(aura, "Pause Chance", 0.0F);
+        assertFalse(this.visible(aura, "Pause Min"));
+        assertFalse(this.visible(aura, "Pause Max"));
+
         this.choose(aura, "Timing", KillAura.Timing.COOLDOWN);
         assertFalse(this.visible(aura, "Min CPS"));
+        assertFalse(this.visible(aura, "CPS Mode"));
+        assertFalse(this.visible(aura, "Random MS"));
     }
 
     private boolean visible(final KillAura aura, final String name) {
@@ -137,5 +166,9 @@ class KillAuraTest {
     @SuppressWarnings("unchecked")
     private <E extends Enum<E>> void choose(final KillAura aura, final String name, final E value) {
         ((EnumSetting<E>) aura.setting(name).orElseThrow()).set(value);
+    }
+
+    private void number(final KillAura aura, final String name, final float value) {
+        ((NumberSetting) aura.setting(name).orElseThrow()).set(value);
     }
 }

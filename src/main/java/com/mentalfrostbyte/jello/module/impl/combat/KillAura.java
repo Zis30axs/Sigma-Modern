@@ -7,6 +7,8 @@ import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
@@ -17,10 +19,12 @@ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
@@ -69,6 +73,12 @@ public class KillAura extends Module {
         AUTO,
         COOLDOWN,
         CPS
+    }
+
+    /** Which click scheduler supplies the CPS gate. Sol is deliberately local-test-only. */
+    public enum CpsMode {
+        NORMAL,
+        SOL
     }
 
     public enum RotationMode {
@@ -125,10 +135,29 @@ public class KillAura extends Module {
             "Auto always obeys Min/Max CPS; on 1.9+ it also waits for the attack cooldown.", Timing.AUTO));
 
     private final NumberSetting minCps = this.register(new NumberSetting("Min CPS",
-            "The slowest click rate, when hitting by click rate.", 8.0F, 1.0F, 20.0F, 1.0F));
+            "The slow end of the base click-rate range. Sol pauses can make an individual interval slower.", 8.0F, 1.0F, 20.0F, 1.0F));
 
     private final NumberSetting maxCps = this.register(new NumberSetting("Max CPS",
-            "The fastest click rate, when hitting by click rate.", 12.0F, 1.0F, 20.0F, 1.0F));
+            "The fast end of the base click-rate range and a hard upper bound for Sol.", 12.0F, 1.0F, 20.0F, 1.0F));
+
+    private final EnumSetting<CpsMode> cpsMode = this.register(new EnumSetting<>("CPS Mode",
+            "Normal uses the original tick budget. Sol is a millisecond scheduler for FakePlayer, singleplayer and loopback test servers.",
+            CpsMode.NORMAL));
+
+    private final NumberSetting randomMs = this.register(new NumberSetting("Random MS",
+            "Sol: adds 0..N ms of independent random delay to each scheduled click.", 18.0F, 0.0F, 120.0F, 1.0F));
+
+    private final NumberSetting jitterMs = this.register(new NumberSetting("Jitter MS",
+            "Sol: maximum remembered timing drift. The drift moves gradually between clicks instead of resetting.", 8.0F, 0.0F, 60.0F, 1.0F));
+
+    private final NumberSetting pauseChance = this.register(new NumberSetting("Pause Chance",
+            "Sol: percent chance that a scheduled click receives an extra local-test pause.", 3.0F, 0.0F, 30.0F, 0.5F));
+
+    private final NumberSetting pauseMin = this.register(new NumberSetting("Pause Min",
+            "Sol: shortest extra pause in milliseconds.", 60.0F, 0.0F, 500.0F, 5.0F));
+
+    private final NumberSetting pauseMax = this.register(new NumberSetting("Pause Max",
+            "Sol: longest extra pause in milliseconds.", 140.0F, 0.0F, 1000.0F, 5.0F));
 
     private final EnumSetting<RotationMode> rotationMode = this.register(new EnumSetting<>("Rotation",
             "How it turns to the target. Claude1 is experimental.", RotationMode.SNAP));
@@ -164,6 +193,8 @@ public class KillAura extends Module {
     private @Nullable Rotation lastSent;
     private float clickBudget;
     private float cps;
+    private long nextSolClickAtMs;
+    private float solJitterOffsetMs;
     private boolean blockingByAura;
     /** Claude2: the block was lowered last tick for an attack this tick. */
     private boolean pendingAttack;
@@ -172,6 +203,12 @@ public class KillAura extends Module {
         super(ModuleCategory.COMBAT, "KillAura", "Attacks the nearest enemy in reach, turning to face it.");
         this.minCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+        this.cpsMode.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+        this.randomMs.visibleWhen(this::solSettingsVisible);
+        this.jitterMs.visibleWhen(this::solSettingsVisible);
+        this.pauseChance.visibleWhen(this::solSettingsVisible);
+        this.pauseMin.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
+        this.pauseMax.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
         this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH));
         this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
         this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
@@ -184,8 +221,7 @@ public class KillAura extends Module {
         this.lastSent = player == null ? null : new Rotation(player.getYRot(), player.getXRot());
         this.rotation = null;
         this.target = null;
-        this.clickBudget = 0.0F;
-        this.cps = 0.0F;
+        this.resetClickScheduler();
         this.blockingByAura = false;
         this.pendingAttack = false;
     }
@@ -198,6 +234,7 @@ public class KillAura extends Module {
         }
         this.blockingByAura = false;
         this.pendingAttack = false;
+        this.resetClickScheduler();
         this.rotation = null;
         this.target = null;
         MovementCorrector corrector = MovementCorrector.current();
@@ -227,7 +264,7 @@ public class KillAura extends Module {
             this.correctMovement();
             this.lowerBlock(player, gameMode);
             this.pendingAttack = false;
-            this.clickBudget = 0.0F;
+            this.resetClickScheduler();
             return;
         }
 
@@ -411,12 +448,26 @@ public class KillAura extends Module {
             return cooldownReady;
         }
 
+        boolean cpsReady = this.useSolScheduler() ? this.solClickReady(nowMs()) : this.normalClickReady();
+        return timingDue(selected, legacyCombat(), cooldownReady, cpsReady);
+    }
+
+    private boolean normalClickReady() {
+        this.nextSolClickAtMs = 0L;
+        this.solJitterOffsetMs = 0.0F;
         if (this.cps <= 0.0F) {
             this.rollCps();
         }
         this.clickBudget = Math.min(1.0F, this.clickBudget + this.cps / 20.0F);
-        boolean cpsReady = this.clickBudget >= 1.0F;
-        return timingDue(selected, legacyCombat(), cooldownReady, cpsReady);
+        return this.clickBudget >= 1.0F;
+    }
+
+    private boolean solClickReady(final long nowMs) {
+        if (this.nextSolClickAtMs <= 0L) {
+            this.scheduleNextSolClick(nowMs);
+            return false;
+        }
+        return nowMs >= this.nextSolClickAtMs;
     }
 
     /**
@@ -435,6 +486,99 @@ public class KillAura extends Module {
         float low = Math.min(this.minCps.get(), this.maxCps.get());
         float high = Math.max(this.minCps.get(), this.maxCps.get());
         this.cps = low + ThreadLocalRandom.current().nextFloat() * (high - low);
+    }
+
+    private boolean solSettingsVisible() {
+        return !this.timing.is(Timing.COOLDOWN) && this.cpsMode.is(CpsMode.SOL);
+    }
+
+    private boolean useSolScheduler() {
+        return this.cpsMode.is(CpsMode.SOL) && this.timing.get() != Timing.COOLDOWN && this.localSolTestAllowed();
+    }
+
+    /**
+     * Sol is an instrumentation scheduler, not the online default. It is available against the client's own FakePlayer,
+     * an integrated server, or an explicitly loopback-addressed dedicated server.
+     */
+    private boolean localSolTestAllowed() {
+        FakePlayer fake = Modules.enabled(FakePlayer.class);
+        if (fake != null && fake.getEntity() == this.target) {
+            return true;
+        }
+        if (mc.isLocalServer()) {
+            return true;
+        }
+
+        ServerData server = mc.getCurrentServer();
+        return server != null && isLoopbackAddress(server.ip);
+    }
+
+    static boolean isLoopbackAddress(final String address) {
+        if (address == null) {
+            return false;
+        }
+
+        String host = address.strip().toLowerCase(Locale.ROOT);
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            if (end > 0) {
+                host = host.substring(1, end);
+            }
+        } else {
+            int colon = host.lastIndexOf(':');
+            if (colon > 0 && host.indexOf(':') == colon) {
+                host = host.substring(0, colon);
+            }
+        }
+
+        return host.equals("localhost")
+                || host.equals("::1")
+                || host.equals("0:0:0:0:0:0:0:1")
+                || host.startsWith("127.");
+    }
+
+    private void scheduleNextSolClick(final long nowMs) {
+        this.rollCps();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        float randomDelay = random.nextFloat() * this.randomMs.get();
+        float jitterLimit = this.jitterMs.get();
+        float jitterStep = (random.nextFloat() * 2.0F - 1.0F) * jitterLimit;
+        this.solJitterOffsetMs = Math.max(-jitterLimit, Math.min(jitterLimit, this.solJitterOffsetMs + jitterStep));
+
+        float pauseDelay = 0.0F;
+        if (random.nextFloat() * 100.0F < this.pauseChance.get()) {
+            float low = Math.min(this.pauseMin.get(), this.pauseMax.get());
+            float high = Math.max(this.pauseMin.get(), this.pauseMax.get());
+            pauseDelay = low + random.nextFloat() * (high - low);
+        }
+
+        float fastestCps = Math.max(this.minCps.get(), this.maxCps.get());
+        long interval = solIntervalMs(this.cps, fastestCps, randomDelay, this.solJitterOffsetMs, pauseDelay);
+        this.nextSolClickAtMs = nowMs + interval;
+    }
+
+    static long solIntervalMs(final float cps, final float fastestCps, final float randomDelayMs,
+                              final float jitterOffsetMs, final float pauseDelayMs) {
+        double safeCps = Math.max(1.0F, cps);
+        double safeFastest = Math.max(1.0F, fastestCps);
+        long fastestInterval = (long)Math.ceil(1000.0D / safeFastest);
+        long candidate = Math.round(1000.0D / safeCps
+                + Math.max(0.0F, randomDelayMs)
+                + jitterOffsetMs
+                + Math.max(0.0F, pauseDelayMs));
+        return Math.max(fastestInterval, candidate);
+    }
+
+    private static long nowMs() {
+        return System.nanoTime() / 1_000_000L;
+    }
+
+    private void resetClickScheduler() {
+        this.clickBudget = 0.0F;
+        this.cps = 0.0F;
+        this.nextSolClickAtMs = 0L;
+        this.solJitterOffsetMs = 0.0F;
     }
 
     /** 1.8 and older: no cooldown, and the swing goes out before the attack. */
@@ -509,6 +653,16 @@ public class KillAura extends Module {
         if (!legacy) {
             player.swing(InteractionHand.MAIN_HAND);
         }
+        this.consumeScheduledClick();
+    }
+
+    private void consumeScheduledClick() {
+        if (this.useSolScheduler()) {
+            // Schedule from the actual click time. A lag spike therefore never turns into a burst of catch-up clicks.
+            this.scheduleNextSolClick(nowMs());
+            return;
+        }
+
         this.clickBudget = Math.max(0.0F, this.clickBudget - 1.0F);
         this.rollCps();
     }
