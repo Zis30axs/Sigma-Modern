@@ -774,6 +774,17 @@
             <resource>
                 <directory>${project.basedir}/src/main/resources</directory>
                 <filtering>false</filtering>
+                <!-- The imported vanilla resources still contain Mojang's signature
+                     metadata from the original signed client JAR. This project
+                     recompiles/repackages those classes, so the original signatures
+                     are no longer valid and must not be copied into client.jar. -->
+                <excludes>
+                    <exclude>META-INF/MANIFEST.MF</exclude>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.EC</exclude>
+                </excludes>
             </resource>
         </resources>
     </build>
