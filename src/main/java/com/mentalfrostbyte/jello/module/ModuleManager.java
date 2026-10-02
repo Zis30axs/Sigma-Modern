@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.module;
 import com.mentalfrostbyte.jello.module.impl.combat.Criticals;
 import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
 import com.mentalfrostbyte.jello.module.impl.combat.SuperKnockback;
+import com.mentalfrostbyte.jello.module.impl.combat.Target;
 import com.mentalfrostbyte.jello.module.impl.combat.Velocity;
 import com.mentalfrostbyte.jello.module.impl.gui.Bird;
 import com.mentalfrostbyte.jello.module.impl.gui.BrainFreeze;
@@ -79,6 +80,7 @@ public final class ModuleManager {
         this.register(new Fullbright());
         this.register(new InfoHud());
         this.register(new KeyStrokes());
+        this.register(new Target());
         this.register(new KillAura());
         this.register(new LowFire());
         this.register(new Maps());

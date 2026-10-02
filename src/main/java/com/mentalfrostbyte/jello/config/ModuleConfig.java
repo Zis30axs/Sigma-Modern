@@ -59,7 +59,9 @@ public final class ModuleConfig {
     public static void read(final JsonObject root, final ModuleManager modules) {
         Map<Module, JsonObject> saved = new HashMap<>();
         if (root.has(MODULES) && root.get(MODULES).isJsonObject()) {
-            for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject(MODULES).entrySet()) {
+            JsonObject configured = root.getAsJsonObject(MODULES);
+            migrateKillAuraTargets(configured);
+            for (Map.Entry<String, JsonElement> entry : configured.entrySet()) {
                 Optional<Module> module = modules.find(entry.getKey());
                 if (module.isEmpty()) {
                     LOGGER.debug("Config mentions module '{}', which this client does not have - skipping it", entry.getKey());
@@ -83,6 +85,51 @@ public final class ModuleConfig {
                 module.setEnabled(module.isEnabledByDefault());
             }
         }
+    }
+
+    /**
+     * Target selection moved out of KillAura. A config from before that split has no Target entry, so carry the old
+     * four filters over once; ModuleConfig.write will then persist the new layout and drop KillAura's obsolete keys.
+     */
+    private static void migrateKillAuraTargets(final JsonObject modules) {
+        if (findEntry(modules, "Target") != null) {
+            return;
+        }
+
+        JsonElement killAuraElement = findEntry(modules, "KillAura");
+        if (killAuraElement == null || !killAuraElement.isJsonObject()) {
+            return;
+        }
+        JsonObject killAura = killAuraElement.getAsJsonObject();
+        if (!killAura.has(SETTINGS) || !killAura.get(SETTINGS).isJsonObject()) {
+            return;
+        }
+
+        JsonObject old = killAura.getAsJsonObject(SETTINGS);
+        JsonObject migrated = new JsonObject();
+        for (String name : new String[]{"Players", "Mobs", "Animals", "Invisibles"}) {
+            if (old.has(name)) {
+                migrated.add(name, old.get(name).deepCopy());
+            }
+        }
+        if (migrated.isEmpty()) {
+            return;
+        }
+
+        JsonObject target = new JsonObject();
+        target.addProperty(ENABLED, true);
+        target.add(SETTINGS, migrated);
+        modules.add("Target", target);
+        LOGGER.debug("Migrated KillAura target filters to the Target module");
+    }
+
+    private static JsonElement findEntry(final JsonObject object, final String name) {
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     /** Returns whether the config had a usable on/off state for the module, which has then been applied. */

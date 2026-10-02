@@ -28,9 +28,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.decoration.ArmorStand;
-import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.level.ClipContext;
@@ -50,8 +47,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Each tick, at its start, it picks a target, works out this tick's look direction, and - if that look meets the
  * target within reach and an attack is due - attacks, all before the tick's movement report. That is the order a
  * vanilla click keeps: the attack goes out first and the look it was aimed with follows in the same tick's movement
- * packet. With {@code Silent} the look is only reported to the server; the camera stays with the player, and the walking
- * is kept in step with the reported look by the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
+ * packet. Which entities are eligible comes from the shared {@link Target} module. With {@code Silent} the look is only
+ * reported to the server; the camera stays with the player, and the walking is kept in step with the reported look by
+ * the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
  *
  * <p>The rotation and AutoBlock modes span both sides of the line an anticheat draws, for {@code SelfDetection} to be
  * tested with; which of them GrimAC flags, and why, is in {@code SELFCHECK_PORTING.md}. {@code Claude1}, {@code Claude2}
@@ -119,15 +117,6 @@ public class KillAura extends Module {
 
     private final NumberSetting aimRange = this.register(new NumberSetting("Aim Range",
             "How far away it starts turning to a target, in blocks.", 4.0F, 1.0F, 8.0F, 0.1F));
-
-    private final BooleanSetting players = this.register(new BooleanSetting("Players", "Targets other players.", true));
-
-    private final BooleanSetting mobs = this.register(new BooleanSetting("Mobs", "Targets hostile mobs.", true));
-
-    private final BooleanSetting animals = this.register(new BooleanSetting("Animals",
-            "Targets every other creature: animals, villagers, golems.", false));
-
-    private final BooleanSetting invisibles = this.register(new BooleanSetting("Invisibles", "Also targets invisible ones.", false));
 
     private final EnumSetting<Priority> priority = this.register(new EnumSetting<>("Priority",
             "Which target to pick: the nearest, the one closest to where you look, or the weakest.", Priority.DISTANCE));
@@ -333,16 +322,8 @@ public class KillAura extends Module {
     }
 
     private boolean valid(final LocalPlayer player, final LivingEntity entity) {
-        if (entity == player || !entity.isAlive() || entity.isRemoved() || entity.isSpectator() || entity instanceof ArmorStand) {
-            return false;
-        }
-        if (entity.isInvisible() && !this.invisibles.get()) {
-            return false;
-        }
-        if (entity instanceof Player) {
-            return this.players.get();
-        }
-        return entity instanceof Enemy ? this.mobs.get() : this.animals.get();
+        Target targets = Target.current();
+        return targets != null && targets.accepts(player, entity);
     }
 
     private static double distance(final Vec3 eye, final Entity entity) {

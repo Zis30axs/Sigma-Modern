@@ -9,6 +9,9 @@ import com.google.gson.JsonParser;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
+import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
+import com.mentalfrostbyte.jello.module.impl.combat.Target;
+import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +70,26 @@ class ModuleConfigTest {
         ModuleConfig.read(json("{\"modules\": {\"StartsOn\": {\"settings\": {\"Level\": 7}}}}"), this.modules);
         assertTrue(this.startsOn.isEnabled());
         assertEquals(7F, this.startsOn.levelAtEnable);
+    }
+
+    @Test
+    void oldKillAuraTargetFiltersMigrateToTarget() {
+        ModuleManager combat = new ModuleManager();
+        KillAura aura = new KillAura();
+        Target target = new Target();
+        combat.register(aura);
+        combat.register(target);
+
+        ModuleConfig.read(json("{\"modules\":{\"KillAura\":{\"enabled\":false,\"settings\":"
+                + "{\"Players\":false,\"Mobs\":false,\"Animals\":true,\"Invisibles\":true}}}}"), combat);
+
+        assertTrue(target.isEnabled());
+        assertFalse(((BooleanSetting) target.setting("Players").orElseThrow()).get());
+        assertFalse(((BooleanSetting) target.setting("Mobs").orElseThrow()).get());
+        assertTrue(((BooleanSetting) target.setting("Animals").orElseThrow()).get());
+        assertTrue(((BooleanSetting) target.setting("Invisibles").orElseThrow()).get());
+
+        target.setEnabled(false);
     }
 
     @Test
