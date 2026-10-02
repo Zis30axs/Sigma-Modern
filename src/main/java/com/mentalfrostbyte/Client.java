@@ -606,7 +606,6 @@ public class Client implements MinecraftInstance {
             this.musicLibrary.close();
             EventBus.unregister(this.mainMenuRedirectHandler);
             EventBus.unregister(this.keybindHandler);
-            EventBus.unregister(this.movementCorrector);
 
             for (Module module : this.moduleManager.all()) {
                 if (!module.isEnabled()) {
