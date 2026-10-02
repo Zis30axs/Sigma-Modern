@@ -96,6 +96,24 @@ public class KillAura extends Module {
         CLAUDE2
     }
 
+    public enum MovementCorrectorMode {
+        /** Follows the currently selected Mode on the MovementCorrector module. */
+        MOVCOR,
+        OFF,
+        STRICT,
+        SILENT,
+        CLAUDE3;
+
+        MovementCorrection resolve(final MovementCorrector corrector) {
+            return this == MOVCOR ? corrector.mode() : MovementCorrection.valueOf(this.name());
+        }
+
+        @Override
+        public String toString() {
+            return this == MOVCOR ? "MovCor" : this.name();
+        }
+    }
+
     private final NumberSetting range = this.register(new NumberSetting("Range",
             "How far away a target can be hit, in blocks. Vanilla's reach is 3.", 3.0F, 1.0F, 6.0F, 0.05F));
 
@@ -132,9 +150,10 @@ public class KillAura extends Module {
     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
             "Turns only what the server is told; your camera stays where you point it.", true));
 
-    private final EnumSetting<MovementCorrection> movementCorrector = this.register(new EnumSetting<>("Movement Corrector",
-            "Silent look: how the walking is kept to the facing the server is told. Strict walks by that facing, Silent and "
-                    + "Claude3 also turn the keys to keep your direction. Claude3 is experimental.", MovementCorrection.STRICT));
+    private final EnumSetting<MovementCorrectorMode> movementCorrector = this.register(new EnumSetting<>("Movement Corrector",
+            "Silent look: how the walking is kept to the facing the server is told. MovCor follows the MovementCorrector "
+                    + "module's Mode; Strict, Silent, Claude3 and Off keep their old per-aura behaviour.",
+            MovementCorrectorMode.STRICT));
 
     private final BooleanSetting rayTrace = this.register(new BooleanSetting("Ray Trace",
             "Only hits when the look direction actually meets the target.", true));
@@ -253,7 +272,7 @@ public class KillAura extends Module {
     private void correctMovement() {
         MovementCorrector corrector = MovementCorrector.current();
         if (corrector != null && this.rotation != null && this.silent.get()) {
-            corrector.request(this, this.rotation, this.movementCorrector.get());
+            corrector.request(this, this.rotation, this.movementCorrector.get().resolve(corrector));
         }
     }
 

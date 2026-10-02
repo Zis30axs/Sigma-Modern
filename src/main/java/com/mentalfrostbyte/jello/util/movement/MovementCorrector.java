@@ -5,6 +5,10 @@ import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventStrafe;
+import com.mentalfrostbyte.jello.module.Module;
+import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import java.util.Objects;
 import net.minecraft.util.Mth;
@@ -37,10 +41,33 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>The mode follows LiquidBounce's {@code MovementCorrection}; see {@link MovementCorrection}.</p>
  */
-public final class MovementCorrector {
+public final class MovementCorrector extends Module {
 
     /** What a request gets when it names no priority. */
     public static final int DEFAULT_PRIORITY = 0;
+
+    private final EnumSetting<MovementCorrection> mode = this.register(new EnumSetting<>("Mode",
+            "The correction mode other modules can inherit. Strict follows the reported facing; Silent and Claude3 "
+                    + "also remap movement keys. Claude3 is experimental.", MovementCorrection.STRICT));
+
+    public MovementCorrector() {
+        super(ModuleCategory.MOVEMENT, "MovementCorrector",
+                "Keeps movement aligned with a facing that is reported silently to the server.");
+    }
+
+    /**
+     * This used to be an always-running client service. Starting enabled keeps old installs behaving the same while
+     * still letting the user switch the corrector off like any other module.
+     */
+    @Override
+    public boolean isEnabledByDefault() {
+        return true;
+    }
+
+    /** The module-level mode for callers that choose to inherit it. */
+    public MovementCorrection mode() {
+        return this.mode.get();
+    }
 
     /**
      * How far past the edge of a direction the aim may drift before {@link MovementCorrection#CLAUDE3} lets go of it, in
@@ -76,12 +103,18 @@ public final class MovementCorrector {
     private double statYawDifference;
 
     /**
-     * The corrector of the running client, or null before the client has started - the game draws and even ticks a
-     * little before {@code Client.start()} runs, and a hook that asks then must find nothing rather than fail.
+     * The enabled corrector of the running client, or null before startup or while the module is switched off.
      */
     public static @Nullable MovementCorrector current() {
-        Client client = Client.getInstance();
-        return client.isStarted() ? client.getMovementCorrector() : null;
+        return Modules.enabled(MovementCorrector.class);
+    }
+
+    @Override
+    protected void onDisable() {
+        this.active = null;
+        this.direction = -1;
+        this.statTicks = this.statRequested = this.statMoving = this.statTurned = 0;
+        this.statYawDifference = 0.0;
     }
 
     /** As {@link #request(Object, Rotation, MovementCorrection, int)} with the {@link #DEFAULT_PRIORITY}. */

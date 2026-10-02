@@ -27,6 +27,7 @@ import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
 import com.mentalfrostbyte.jello.module.impl.movement.Speed;
 import com.mentalfrostbyte.jello.module.impl.player.NoFall;
+import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
@@ -88,6 +89,7 @@ public final class ModuleManager {
         this.register(new PotionStatus());
         this.register(new Rotation());
         this.register(new Snake());
+        this.register(new MovementCorrector());
         this.register(new Speed());
         this.register(new Spotlight());
         this.register(new SuperKnockback());

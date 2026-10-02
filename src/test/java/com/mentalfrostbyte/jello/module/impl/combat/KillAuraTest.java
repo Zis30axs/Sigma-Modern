@@ -8,6 +8,8 @@ import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
@@ -84,6 +86,18 @@ class KillAuraTest {
         assertEquals(2.0F, KillAura.ease(2.0F, 55.0F), 1e-6, "never past the goal");
         assertEquals(-30.0F, KillAura.ease(-90.0F, 30.0F), 1e-6);
         assertEquals(12.0F, KillAura.ease(20.0F, 55.0F), 1e-6, "60% of what is left");
+    }
+
+    @Test
+    void movCorCanFollowTheModuleWithoutChangingTheOldChoices() {
+        MovementCorrector corrector = new MovementCorrector();
+        assertEquals(MovementCorrection.STRICT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
+        assertEquals(MovementCorrection.CLAUDE3, KillAura.MovementCorrectorMode.CLAUDE3.resolve(corrector));
+
+        @SuppressWarnings("unchecked")
+        EnumSetting<MovementCorrection> mode = (EnumSetting<MovementCorrection>) corrector.setting("Mode").orElseThrow();
+        mode.set(MovementCorrection.SILENT);
+        assertEquals(MovementCorrection.SILENT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
     }
 
     @Test

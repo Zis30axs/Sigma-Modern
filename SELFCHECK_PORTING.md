@@ -374,10 +374,10 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 ## Movement Corrector（2026-09-29）
 
 静默转头（KillAura 的 `Silent`，以后还有 Scaffold）只改上报给服务器的视角。服务器按这个视角预测走路，客户端却按镜头走，两边对不上，Simulation 每个 tick 都报。
-以前这件事是 KillAura 里的 `Movement Fix` 开关；现在是一个独立的服务，KillAura 的 `Movement Fix` 已删，换成 `Movement Corrector` 设置。
+以前这件事是 KillAura 里的 `Movement Fix` 开关；现在 `MovementCorrector` 是一个正常注册的 Movement 模块。KillAura 仍保留自己的 `Movement Corrector` 设置，并新增 `MovCor`：选它时继承 MovementCorrector 模块当前的 `Mode`，旧的 Off/Strict/Silent/Claude3 仍按原来的每-Aura 方式工作。
 
 ### 接口（给 Scaffold 这类以后的模块用）
-`com.mentalfrostbyte.jello.util.movement.MovementCorrector`，由 `Client` 持有并注册到 EventBus（`MovementCorrector.current()` 在客户端启动前返回 null）：
+`com.mentalfrostbyte.jello.util.movement.MovementCorrector` 由 `ModuleManager` 注册；启用时按普通 `Module` 生命周期进入 EventBus，关闭时退出（`MovementCorrector.current()` 在客户端启动前或模块关闭时返回 null）。原有 `current()/request()/release()` 接口保留：
 - `request(owner, look, mode[, priority])`：模块在每个 tick 的开头（`EventTick` PRE），知道这个 tick 要上报的视角之后调用。**请求只在这个 tick 有效**，`EventTick` POST 时清掉，所以模块不再请求就等于不再修正，不会有残留。
 - `release(owner)`：模块关掉时撤回。同一个 tick 有多个请求时，`priority` 高的生效，相同则先来的生效。
 - 视角必须是**同一个 tick 的移动包**上报的那个：服务器按每个 tick 的包里的视角预测那个 tick 的移动。

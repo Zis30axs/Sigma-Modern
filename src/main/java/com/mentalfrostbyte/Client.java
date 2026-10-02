@@ -40,8 +40,6 @@ public class Client implements MinecraftInstance {
     private final com.mentalfrostbyte.jello.map.MapManager mapManager;
     private final ModuleManager moduleManager = new ModuleManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
-    private final com.mentalfrostbyte.jello.util.movement.MovementCorrector movementCorrector =
-            new com.mentalfrostbyte.jello.util.movement.MovementCorrector();
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
     private final ClientModeManager clientModeManager = new ClientModeManager();
     // The language of the client's own text; the game's keeps following its own setting.
@@ -157,7 +155,6 @@ public class Client implements MinecraftInstance {
                 logger.info("Sigma debug: clientMode={}", this.clientModeManager.get());
             }
             EventBus.register(this.keybindHandler);
-            EventBus.register(this.movementCorrector);
             EventBus.register(this.mainMenuRedirectHandler);
             EventBus.register(this.musicPlayer);
             EventBus.register(this.islandActivity);
@@ -229,7 +226,6 @@ public class Client implements MinecraftInstance {
         this.musicPlayer.pause();
         EventBus.unregister(this.mainMenuRedirectHandler);
         EventBus.unregister(this.keybindHandler);
-        EventBus.unregister(this.movementCorrector);
         for (Module module : this.moduleManager.all()) {
             if (module.isEnabled()) {
                 try {
@@ -670,7 +666,7 @@ public class Client implements MinecraftInstance {
 
     /** Keeps the walking in step with a facing that is only reported to the server; see {@link com.mentalfrostbyte.jello.util.movement.MovementCorrector}. */
     public com.mentalfrostbyte.jello.util.movement.MovementCorrector getMovementCorrector() {
-        return this.movementCorrector;
+        return this.moduleManager.get(com.mentalfrostbyte.jello.util.movement.MovementCorrector.class);
     }
 
     public SigmaAccountManager getAccountManager() {
