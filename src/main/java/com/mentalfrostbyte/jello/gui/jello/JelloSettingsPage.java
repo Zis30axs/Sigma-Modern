@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
+import com.mentalfrostbyte.jello.gui.AimAssistTrainingScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyDropdown;
@@ -158,7 +159,7 @@ final class JelloSettingsPage {
             } else if (setting instanceof KeySetting) {
                 kind = Kind.KEY;
                 height = 27;
-            } else if (setting instanceof ItemListSetting) {
+            } else if (setting instanceof ItemListSetting || AimAssistTrainingScreen.isTrainingSetting(setting)) {
                 kind = Kind.ITEMS;
                 height = 27;
             } else {
@@ -272,12 +273,12 @@ final class JelloSettingsPage {
                     pillX + pillW / 2.0F, top + row.height() / 2.0F, LegacyCanvas.alpha(binding ? LIGHT_BLUE : 0xFF010101, p * 0.85F));
             }
             case ITEMS -> {
-                ItemListSetting setting = (ItemListSetting) row.setting();
+                Setting<?> setting = row.setting();
                 this.label(c, setting.getName(), top, p);
                 int pillW = 170, pillX = this.right() - pillW;
                 boolean hover = mx >= pillX && mx < pillX + pillW && my >= top && my < top + row.height();
                 c.rounded(pillX, top, pillW, row.height(), 4, LegacyCanvas.alpha(hover ? 0xFFE6E6E6 : 0xFFF2F2F2, p));
-                c.textCentered(Face.JELLO_LIGHT, 18, setting.displayLabel() + "  >", pillX + pillW / 2.0F,
+                c.textCentered(Face.JELLO_LIGHT, 18, this.interactions.displayValue(setting) + "  >", pillX + pillW / 2.0F,
                         top + row.height() / 2.0F, LegacyCanvas.alpha(LIGHT_BLUE, p * 0.85F));
             }
             case BOOLEAN -> {

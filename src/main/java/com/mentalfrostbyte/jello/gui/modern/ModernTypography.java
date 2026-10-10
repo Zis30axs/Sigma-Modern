@@ -19,6 +19,8 @@ public final class ModernTypography {
 
     private ModernTypography() {}
 
+    public static float size() { return ModernFontRenderer.SIZE; }
+
     private static ModernFontRenderer renderer(Face face) {
         return switch (face) {
             case TEXT -> TEXT;

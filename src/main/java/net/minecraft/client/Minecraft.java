@@ -1468,6 +1468,12 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 this.gameRenderer.update(this.deltaTracker);
                 float worldPartialTicks = this.deltaTracker.getGameTimeDeltaPartialTick(false);
                 this.pick(worldPartialTicks);
+                // Sigma hook: timed clicks use the freshly picked crosshair after visible AimAssist movement.
+                var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
+                        com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
+                if (autoClicker != null && autoClicker.poll(advanceGameTime && this.missTime <= 0)) {
+                    this.startAttack(true);
+                }
                 profiler.popPush("extract");
                 this.gameRenderer.gameRenderState().framerateLimit = this.framerateLimitTracker.getFramerateLimit();
                 this.gameRenderer.extract(this.deltaTracker, advanceGameTime);
@@ -1798,6 +1804,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private boolean startAttack() {
+        return this.startAttack(false);
+    }
+
+    private boolean startAttack(final boolean generatedClick) {
         // Sigma hook: left click - attack an entity, or start breaking a block.
         if (EventBus.call(new EventClick(EventClick.Button.LEFT)).isCancelled()) {
             return false;
@@ -1844,6 +1854,13 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
                 if (this.player.cannotAttackWithItem(heldItem, 0)) {
                     return false;
+                }
+
+                // Sigma hook: arm Helper only after the original input passes native click guards.
+                if (!generatedClick) {
+                    var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
+                            com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
+                    if (autoClicker != null) autoClicker.originalClick();
                 }
 
                 boolean endAttack = false;

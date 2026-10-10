@@ -444,7 +444,8 @@ public class KeyboardHandler implements com.viaversion.viafabricplus.injection.a
         this.setClipboard(command);
     }
 
-    private void keyPress(final long handle, final @KeyEvent.Action int action, final KeyEvent event) {
+    private void keyPress(final long handle, final @KeyEvent.Action int action, final KeyEvent event,
+                          final com.mentalfrostbyte.jello.util.client.MouseClickTracker.InputContext clickContext) {
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
@@ -607,6 +608,10 @@ public class KeyboardHandler implements com.viaversion.viafabricplus.injection.a
                         } else {
                             KeyMapping.set(key, true);
                             KeyMapping.click(key);
+                            // Sigma hook: keyboard attack bindings count PRESS, never keyboard auto-repeat.
+                            if (action == 1) {
+                                com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.physicalPress(key, clickContext);
+                            }
                         }
                     } else if (key == options.keyDebugModifier.key) {
                         options.keyDebugModifier.setDown(!didDebugAction);
@@ -688,7 +693,9 @@ public class KeyboardHandler implements com.viaversion.viafabricplus.injection.a
     public void setup(final Window window) {
         InputConstants.setupKeyboardCallbacks(window, (window1, keysym, scancode, action, mods) -> {
             KeyEvent event = new KeyEvent(keysym, scancode, mods);
-            this.vfpStoreScreenEvent(() -> this.keyPress(window1, action, event));
+            // Preserve input origin across VFP's deferred screen-event queue.
+            var clickContext = com.mentalfrostbyte.jello.util.client.MouseClickTracker.captureContext(this.minecraft);
+            this.vfpStoreScreenEvent(() -> this.keyPress(window1, action, event, clickContext));
         }, (window1, codepoint) -> {
             CharacterEvent event = new CharacterEvent(codepoint);
             this.vfpStoreScreenEvent(() -> this.charTyped(window1, event));

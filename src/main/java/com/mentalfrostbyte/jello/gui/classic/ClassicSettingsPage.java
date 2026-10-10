@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.classic;
 
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
+import com.mentalfrostbyte.jello.gui.AimAssistTrainingScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyKeys;
@@ -120,7 +121,7 @@ final class ClassicSettingsPage {
             } else if (setting instanceof KeySetting) {
                 kind = Kind.KEY;
                 pitch = 55;
-            } else if (setting instanceof ItemListSetting) {
+            } else if (setting instanceof ItemListSetting || AimAssistTrainingScreen.isTrainingSetting(setting)) {
                 kind = Kind.ITEMS;
                 pitch = 55;
             } else {
@@ -191,9 +192,9 @@ final class ClassicSettingsPage {
                 this.description(c, setting, x + 195, y + 4, alpha);
             }
             case ITEMS -> {
-                ItemListSetting setting = (ItemListSetting) row.setting();
+                Setting<?> setting = row.setting();
                 c.text(Face.CLASSIC, 20, setting.getName(), x, y, LegacyCanvas.alpha(0xFF010101, alpha));
-                this.choiceBox(c, x, y + 27, 170, 20, setting.displayLabel() + "  >", mx, my, alpha, false);
+                this.choiceBox(c, x, y + 27, 170, 20, this.interactions.displayValue(setting) + "  >", mx, my, alpha, false);
                 this.description(c, setting, x + 195, y + 4, alpha);
             }
             case BOOLEAN -> {

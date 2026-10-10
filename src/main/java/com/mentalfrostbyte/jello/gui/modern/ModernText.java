@@ -2,6 +2,7 @@ package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.setting.EnumSetting;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
 
@@ -34,6 +35,15 @@ final class ModernText {
     /** {@link #tr(String)} with its {@code %s} placeholders filled in. */
     static String tr(String key, Object... args) {
         return Client.getInstance().getTranslations().get(key, args);
+    }
+
+    /** Module and setting display labels; their persisted identifiers always stay in English. */
+    static String text(String sourceText) {
+        return Client.getInstance().getTranslations().text(sourceText);
+    }
+
+    static String option(Enum<?> value) {
+        return text(EnumSetting.label(value));
     }
 
     /** A category's name in the client language. */

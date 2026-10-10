@@ -204,8 +204,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         String q = this.search.trim().toLowerCase(Locale.ROOT);
         List<Module> out = new ArrayList<>();
         for (Module m : this.modules.all()) {
-            if (q.isEmpty() || m.getName().toLowerCase(Locale.ROOT).contains(q)
-                || m.getDescription().toLowerCase(Locale.ROOT).contains(q)) out.add(m);
+            if (q.isEmpty() || (m.getName().toLowerCase(Locale.ROOT).contains(q) || ModernText.text(m.getName()).toLowerCase(Locale.ROOT).contains(q))
+                || ModernText.text(m.getDescription()).toLowerCase(Locale.ROOT).contains(q)) out.add(m);
         }
         return out;
     }
@@ -502,7 +502,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private static String tileState(Module m) {
         if (!m.isEnabled()) return ModernText.tr("clickgui.tile.off");
         for (Setting<?> setting : m.settings()) {
-            if (setting instanceof EnumSetting<?> choice) return EnumSetting.label(choice.get());
+            if (setting instanceof EnumSetting<?> choice) return ModernText.option(choice.get());
         }
         return ModernText.tr("clickgui.tile.on");
     }
@@ -546,7 +546,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             ModernTypography.draw(g, ModernTypography.Face.TEXT, key, right - kw + 5, y + 11.2F, 0.78F, nameColor);
             right -= kw + 4;
         }
-        ModernTypography.draw(g, ModernTypography.fit(m.getName(), right - x - 15), x + 11, y + 9, nameColor, false);
+        ModernTypography.draw(g, ModernTypography.fit(ModernText.text(m.getName()), right - x - 15), x + 11, y + 9, nameColor, false);
         boolean binding = this.interactions.isBinding(m);
         String state = binding ? ModernText.tr("clickgui.detail.binding") : tileState(m);
         ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.wrap(ModernTypography.Face.TEXT, state, 0.82F, w - 22, 1).getFirst(),
@@ -592,7 +592,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         if (setting.getOptions().size() > SEGMENTS_MAX) return false;
         float segmentW = controlW / (float)setting.getOptions().size();
         for (Enum<?> option : setting.getOptions()) {
-            if (ModernTypography.width(ModernTypography.Face.TEXT, EnumSetting.label(option), VALUE_SCALE) > segmentW - 8) return false;
+            if (ModernTypography.width(ModernTypography.Face.TEXT, ModernText.option(option), VALUE_SCALE) > segmentW - 8) return false;
         }
         return true;
     }
@@ -616,7 +616,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         if (this.interactions.isBinding(m)) return ModernText.tr("clickgui.detail.binding");
         com.mentalfrostbyte.jello.module.Keybind keybind = m.getKeybind();
         if (!keybind.isBound()) return ModernText.tr("clickgui.detail.unbound");
-        return ModernText.tr("clickgui.detail.bind", keybind.key().getDisplayName().getString(), EnumSetting.label(keybind.mode()));
+        return ModernText.tr("clickgui.detail.bind", keybind.key().getDisplayName().getString(), ModernText.option(keybind.mode()));
     }
 
     /** The keybind, as a chip in the header left of the module's switch: click to bind, right-click for toggle/hold. */
@@ -638,12 +638,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void drawDetailHeader(GuiGraphicsExtractor g, Hit h, Module m, int chipX) {
-        String name = ModernTypography.wrap(ModernTypography.Face.TEXT, m.getName(), 1.25F, chipX - h.x() - 10, 1).getFirst();
+        String name = ModernTypography.wrap(ModernTypography.Face.TEXT, ModernText.text(m.getName()), 1.25F, chipX - h.x() - 10, 1).getFirst();
         ModernTypography.draw(g, ModernTypography.Face.TEXT, name, h.x(), h.y() + 1, 1.25F, ModernStyle.INK);
         float on = animate("detail-on-" + m, m.isEnabled() ? 1 : 0);
         ModernStyle.toggle(g, h.x() + h.w() - 34, h.y() + 3, 34, 18, on);
-        if (!m.getDescription().isBlank()) {
-            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, m.getDescription(), 0.82F, h.w(), 1).getFirst();
+        if (!ModernText.text(m.getDescription()).isBlank()) {
+            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, ModernText.text(m.getDescription()), 0.82F, h.w(), 1).getFirst();
             ModernTypography.draw(g, ModernTypography.Face.TEXT, description, h.x(), h.y() + 24, 0.82F, ModernStyle.INK_MUTED);
         }
         ModernStyle.fill(g, h.x(), h.y() + h.h() + 3, h.x() + h.w(), h.y() + h.h() + 4, 0x1EBFEEFF);
@@ -668,9 +668,9 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         float hover = animate(new Anim("row", s), over ? 1 : 0);
         if (hover > 0.01F) ModernStyle.rounded(g, x - 6, h.y(), w + 12, h.h(), 6, Math.round(hover * 22) << 24 | 0x3D9DDC);
         int labelW = cx - x - 24;
-        ModernTypography.draw(g, ModernTypography.fit(s.getName(), labelW), x, h.y() + 4, ModernStyle.INK, false);
-        if (!s.getDescription().isBlank()) {
-            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, s.getDescription(), DESC_SCALE, labelW, 1).getFirst();
+        ModernTypography.draw(g, ModernTypography.fit(ModernText.text(s.getName()), labelW), x, h.y() + 4, ModernStyle.INK, false);
+        if (!ModernText.text(s.getDescription()).isBlank()) {
+            String description = ModernTypography.wrap(ModernTypography.Face.TEXT, ModernText.text(s.getDescription()), DESC_SCALE, labelW, 1).getFirst();
             ModernTypography.draw(g, ModernTypography.Face.TEXT, description, x, h.y() + 17, DESC_SCALE, ModernStyle.INK_MUTED);
         }
         if (over && !isDefault(s)) ModernIcons.draw(g, ModernIcons.Icon.REFRESH, cx - 17, mid - 5.5F, 11, ModernStyle.INK_MUTED);
@@ -739,7 +739,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             float at = animate(new Anim("segment", choice), choice.index());
             ModernStyle.rounded(g, Math.round(cx + segmentW * at + 1.5F), mid - 7, Math.round(segmentW - 3), 14, 5, 0xFFFFFFFF);
             for (int i = 0; i < options.size(); i++) {
-                String label = EnumSetting.label(options.get(i));
+                String label = ModernText.option(options.get(i));
                 float labelW = ModernTypography.width(ModernTypography.Face.TEXT, label, VALUE_SCALE);
                 ModernTypography.draw(g, ModernTypography.Face.TEXT, label, cx + segmentW * i + (segmentW - labelW) / 2F, mid - 4.6F, VALUE_SCALE,
                     i == choice.index() ? ModernStyle.BLUE : ModernStyle.INK_MUTED);
@@ -748,7 +748,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         }
         boolean open = this.popover == choice;
         ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, open ? PILL_EDITING : PILL);
-        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(EnumSetting.label(choice.get()), controlW - 30),
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(ModernText.option(choice.get()), controlW - 30),
             cx + 8, mid - 4.6F, VALUE_SCALE, ModernStyle.INK);
         ModernIcons.draw(g, open ? ModernIcons.Icon.CHEVRON_UP : ModernIcons.Icon.CHEVRON_DOWN, cx + controlW - 17, mid - 4.5F, 9, ModernStyle.INK_MUTED);
     }
@@ -795,7 +795,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             boolean hovered = ModernStyle.inside(mx, my, c[0], c[1], p.cellW(), POP_CELL_H);
             ModernStyle.rounded(g, c[0], c[1], p.cellW(), POP_CELL_H, 6, chosen ? 0x333D9DDC : hovered ? 0x1F3D9DDC : 0x0F243746);
             if (chosen) ModernStyle.rounded(g, c[0] + 1, c[1] + 6, 2, POP_CELL_H - 12, 1, ModernStyle.BLUE);
-            ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(EnumSetting.label(options.get(i)), p.cellW() - 16),
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(ModernText.option(options.get(i)), p.cellW() - 16),
                 c[0] + 9, c[1] + 6.5F, 0.9F, chosen ? ModernStyle.BLUE : ModernStyle.INK);
         }
     }
@@ -812,11 +812,11 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             // Over a tile, the footer says what that module does - its description lives here, not on the tile.
             ModernStyle.statusDot(g, panelX + PAD, y + 9, 6, ModernStyle.BLUE, hovered.isEnabled());
             int textX = panelX + PAD + 12, room = panelW - PAD * 2 - 12;
-            String name = ModernTypography.fit(hovered.getName(), room);
+            String name = ModernTypography.fit(ModernText.text(hovered.getName()), room);
             ModernTypography.draw(g, name, textX, y + 6, ModernStyle.INK, false);
             int nameW = ModernTypography.width(name);
-            if (!hovered.getDescription().isBlank() && room - nameW > 40) {
-                ModernTypography.draw(g, ModernTypography.fit("  ·  " + hovered.getDescription(), room - nameW), textX + nameW, y + 6, ModernStyle.INK_MUTED, false);
+            if (!ModernText.text(hovered.getDescription()).isBlank() && room - nameW > 40) {
+                ModernTypography.draw(g, ModernTypography.fit("  ·  " + ModernText.text(hovered.getDescription()), room - nameW), textX + nameW, y + 6, ModernStyle.INK_MUTED, false);
             }
             return;
         }
@@ -1151,7 +1151,15 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             if (module == null) return;
             this.activeCategory = module.getCategory();
             openDetail(module);
-            if (parts.length > 2 && module.setting(parts[2]).orElse(null) instanceof EnumSetting<?> choice) this.popover = choice;
+            if (parts.length > 2) {
+                Setting<?> setting = module.setting(parts[2]).orElse(null);
+                if (setting instanceof EnumSetting<?> choice) this.popover = choice;
+                else if (module instanceof com.mentalfrostbyte.jello.module.impl.combat.AimAssist aimAssist
+                        && setting == aimAssist.getTrainingSetting()) {
+                    // Startup previews run before Client.isStarted; the selected module already proves identity.
+                    this.minecraft.gui.setScreen(new com.mentalfrostbyte.jello.gui.AimAssistTrainingScreen(this, aimAssist));
+                }
+            }
         } else if ("SEARCH".equalsIgnoreCase(view)) {
             openSearch();
         } else if ("LANGUAGE".equalsIgnoreCase(view)) {

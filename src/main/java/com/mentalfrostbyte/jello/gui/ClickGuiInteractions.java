@@ -164,6 +164,15 @@ public final class ClickGuiInteractions {
     }
 
     public void handleSettingClick(final Setting<?> setting, final int mouseX, final int trackLeft, final int trackRight) {
+        if (AimAssistTrainingScreen.isTrainingSetting(setting)) {
+            this.bindingSetting = null;
+            this.bindingModule = null;
+            this.editingSetting = null;
+            this.draggingNumber = null;
+            Minecraft minecraft = Minecraft.getInstance();
+            minecraft.gui.setScreen(AimAssistTrainingScreen.open(minecraft.gui.screen()));
+            return;
+        }
         if (setting instanceof ItemListSetting items) {
             this.bindingSetting = null;
             this.bindingModule = null;
@@ -224,6 +233,7 @@ public final class ClickGuiInteractions {
     }
 
     public String displayValue(final Setting<?> setting) {
+        if (AimAssistTrainingScreen.isTrainingSetting(setting)) return AimAssistTrainingScreen.settingLabel();
         if (setting instanceof ItemListSetting items) return items.displayLabel();
         if (setting instanceof KeySetting key) {
             return this.bindingSetting == key ? "Press a key..." : key.displayLabel();

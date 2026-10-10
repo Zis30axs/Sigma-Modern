@@ -174,6 +174,8 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                 KeyMapping.set(mouseKey, pressed);
                 if (pressed) {
                     KeyMapping.click(mouseKey);
+                    // Sigma hook: only accepted physical gameplay presses can arm Helper clicks.
+                    com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.physicalPress(mouseKey, clickContext);
                 }
             }
         }
@@ -458,7 +460,17 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
 
         this.minecraft.getTutorial().onMouse(xo, yo);
         if (this.minecraft.player != null) {
-            this.minecraft.player.turn(this.minecraft.options.invertMouseX().get() ? -xo : xo, this.minecraft.options.invertMouseY().get() ? -yo : yo);
+            double yaw = this.minecraft.options.invertMouseX().get() ? -xo : xo;
+            double pitch = this.minecraft.options.invertMouseY().get() ? -yo : yo;
+            // Sigma hook: visible AimAssist uses the same per-frame camera path as physical mouse input.
+            com.mentalfrostbyte.jello.module.impl.combat.AimAssist aimAssist =
+                com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.combat.AimAssist.class);
+            if (aimAssist != null) {
+                var turn = aimAssist.applyMouseTurn(yaw * 0.15, pitch * 0.15, mousea);
+                yaw = turn.yaw() / 0.15;
+                pitch = turn.pitch() / 0.15;
+            }
+            this.minecraft.player.turn(yaw, pitch);
         }
     }
 

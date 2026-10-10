@@ -1,6 +1,8 @@
 package com.mentalfrostbyte.jello.module;
 
 import com.mentalfrostbyte.jello.module.impl.combat.AntiBot;
+import com.mentalfrostbyte.jello.module.impl.combat.AimAssist;
+import com.mentalfrostbyte.jello.module.impl.combat.AutoClicker;
 import com.mentalfrostbyte.jello.module.impl.combat.AutoProjectile;
 import com.mentalfrostbyte.jello.module.impl.combat.Criticals;
 import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
@@ -108,6 +110,8 @@ public final class ModuleManager {
         this.register(new AntiBot());
         this.register(new Target());
         this.register(new KillAura());
+        this.register(new AimAssist());
+        this.register(new AutoClicker());
         this.register(new AutoProjectile());
         this.register(new AutoPearl());
         this.register(new LowFire());

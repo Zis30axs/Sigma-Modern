@@ -376,6 +376,12 @@ public final class AutoProjectile extends Module {
         return mc.options.keyUse.isDown() || mc.options.keyAttack.isDown();
     }
 
+    /** Visible aim helpers yield while an automated throw owns the look or a charged item. */
+    public boolean isActivelyWorking() {
+        return isEnabled() && owner == mc.player && available(mc.player)
+                && (plan != null || heldSlot >= 0 || charging || reportedMotion != null);
+    }
+
     private static boolean busy() {
         if (AutoPearl.isRescuing()) return true;
         KillAura aura = Modules.enabled(KillAura.class);

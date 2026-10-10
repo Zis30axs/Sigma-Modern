@@ -70,6 +70,14 @@ public final class Translations {
         return text == null ? key : text;
     }
 
+    /** Translate display copy without changing the English identifiers used by modules and saved settings. */
+    public String text(final String sourceText) {
+        Objects.requireNonNull(sourceText, "sourceText");
+        String key = "text." + sourceText;
+        String translated = this.get(key);
+        return translated.equals(key) ? sourceText : translated;
+    }
+
     /**
      * {@link #get(String)} with {@code %s}-style placeholders filled in. A translation whose placeholders don't fit
      * the arguments falls back to the English text rather than throwing mid-frame.

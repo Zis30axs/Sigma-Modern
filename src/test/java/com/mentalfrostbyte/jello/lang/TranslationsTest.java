@@ -64,4 +64,17 @@ class TranslationsTest {
         assertEquals(Map.of("a", "text", "d", "more"), strings);
         assertEquals(Map.of(), Translations.parse(new StringReader("[\"not\", \"an\", \"object\"]"), "test.json"));
     }
+
+    @Test
+    void displayTextTranslatesWithoutChangingSourceIdentifiersAndFallsBackCleanly() {
+        Translations copy = new Translations(language -> language == ClientLanguage.ZH_CN
+                ? Map.of("text.AutoProjectile", "自动投掷") : Map.of());
+        assertEquals("AutoProjectile", copy.text("AutoProjectile"));
+        copy.select(ClientLanguage.ZH_CN);
+        assertEquals("自动投掷", copy.text("AutoProjectile"));
+        assertEquals("FutureModule", copy.text("FutureModule"));
+        assertEquals("", copy.text(""));
+        copy.select(ClientLanguage.JA_JP);
+        assertEquals("AutoProjectile", copy.text("AutoProjectile"));
+    }
 }
