@@ -5,9 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mentalfrostbyte.jello.config.ModuleConfig;
 import com.mentalfrostbyte.jello.gui.modern.ModernStyle;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import java.util.ArrayList;
@@ -33,7 +37,7 @@ class ModuleArrayListTest {
         assertEquals("ArrayList", list.getName());
     }
 
-    /** Switched on untouched, the list must look like the one SigmaModern's HUD always drew. */
+    /** Adding new effects must not change the defaults of the existing text and layout choices. */
     @Test
     void defaultsReproduceTheOldList() {
         ModuleArrayList list = new ModuleArrayList();
@@ -140,6 +144,90 @@ class ModuleArrayListTest {
         assertEquals(14F, ModuleArrayList.Size.TINY.points());
         assertEquals(ModuleArrayList.Outline.ALL, list.getOutline());
         assertEquals(ModuleArrayList.Transition.SMOOTH, list.getTransition());
+    }
+
+    @Test
+    void olderProfilesKeepTheirExistingChoicesAndGainOnlyTheNewEffectDefaults() {
+        ModuleArrayList list = new ModuleArrayList();
+        ModuleManager modules = this.registry(list);
+        ModuleConfig.read(JsonParser.parseString("""
+                {"modules":{"ArrayList":{"enabled":false,"settings":{
+                  "Position":"BOTTOM_RIGHT","Font Size":14,"Spacing":3,"Background":0.45,
+                  "Accent Bar":true,"Color Mode":"WAVE","Text Shadow":false,"Animations":false
+                }}}}
+                """).getAsJsonObject(), modules);
+
+        assertFalse(list.isEnabled(), "the saved module switch still wins over the default");
+        assertEquals(ModuleArrayList.Corner.BOTTOM_RIGHT, list.getPosition());
+        assertEquals(14F, list.getFontSize());
+        assertEquals(3, list.getSpacing());
+        assertEquals(0.45F, list.getBackground());
+        assertTrue(list.hasAccentBar());
+        assertEquals(ModuleArrayList.ColorMode.WAVE, list.getColorMode());
+        assertFalse(list.hasTextShadow());
+        assertFalse(list.isAnimated());
+        assertTrue(list.hasBlur());
+        assertEquals(0.8F, list.getBlurStrength());
+        assertTrue(list.hasBloom());
+        assertEquals(0.35F, list.getBloomStrength());
+        assertTrue(list.setting("Blur Strength").orElseThrow().isVisible());
+        assertTrue(list.setting("Bloom Strength").orElseThrow().isVisible());
+    }
+
+    @Test
+    void switchedOffEffectsKeepTheirStrengthsThroughARealConfigRoundTrip() {
+        ModuleArrayList original = new ModuleArrayList();
+        ModuleManager originalModules = this.registry(original);
+        ModuleConfig.read(JsonParser.parseString("""
+                {"modules":{"ArrayList":{"enabled":false,"settings":{
+                  "Blur":false,"Blur Strength":0.2,"Bloom":false,"Bloom Strength":0.65,
+                  "Background":0,"Font Size":13
+                }}}}
+                """).getAsJsonObject(), originalModules);
+        assertFalse(original.setting("Blur Strength").orElseThrow().isVisible());
+        assertFalse(original.setting("Bloom Strength").orElseThrow().isVisible());
+        JsonObject written = new JsonObject();
+        ModuleConfig.write(written, originalModules);
+
+        ModuleArrayList restored = new ModuleArrayList();
+        ModuleConfig.read(JsonParser.parseString(written.toString()).getAsJsonObject(), this.registry(restored));
+        assertFalse(restored.isEnabled());
+        assertFalse(restored.hasBlur());
+        assertFalse(restored.hasBloom());
+        assertEquals(0.2F, restored.getBlurStrength(), "hidden settings are still persisted");
+        assertEquals(0.65F, restored.getBloomStrength());
+        assertEquals(0F, restored.getBackground());
+        assertEquals(13F, restored.getFontSize());
+        assertFalse(restored.setting("Blur Strength").orElseThrow().isVisible());
+        assertFalse(restored.setting("Bloom Strength").orElseThrow().isVisible());
+
+        ((BooleanSetting) restored.setting("Blur").orElseThrow()).set(true);
+        ((BooleanSetting) restored.setting("Bloom").orElseThrow()).set(true);
+        assertTrue(restored.setting("Blur Strength").orElseThrow().isVisible());
+        assertTrue(restored.setting("Bloom Strength").orElseThrow().isVisible());
+        assertEquals(0.2F, restored.getBlurStrength());
+        assertEquals(0.65F, restored.getBloomStrength());
+    }
+
+    @Test
+    void handEditedEffectStrengthsStayInsideTheirSupportedRange() {
+        ModuleArrayList list = new ModuleArrayList();
+        ModuleManager modules = this.registry(list);
+        ModuleConfig.read(JsonParser.parseString("""
+                {"modules":{"ArrayList":{"enabled":false,"settings":{
+                  "Blur Strength":9,"Bloom Strength":-2
+                }}}}
+                """).getAsJsonObject(), modules);
+        assertEquals(1F, list.getBlurStrength());
+        assertEquals(0F, list.getBloomStrength());
+        assertEquals(0F, list.getBackground(), "new effect settings must not create an opaque background by default");
+    }
+
+    private ModuleManager registry(final ModuleArrayList list) {
+        ModuleManager modules = new ModuleManager();
+        modules.register(list);
+        this.switchedOn.add(list);
+        return modules;
     }
 
     private <M extends Module> M on(final M module) {

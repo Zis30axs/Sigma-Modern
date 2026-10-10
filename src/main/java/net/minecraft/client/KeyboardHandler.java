@@ -448,6 +448,14 @@ public class KeyboardHandler implements com.viaversion.viafabricplus.injection.a
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
             this.minecraft.getFramerateLimitTracker().onInputReceived();
+            // Sigma hook: radar combat chords take priority over Alt layout editing, never over a menu's key capture.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernRadar.handleKey(event, action)) {
+                return;
+            }
+            // Sigma hook: Alt's temporary HUD screen owns input before module and global GUI keybinds.
+            if (com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.handleKey(event, action)) {
+                return;
+            }
             // Sigma hook: global ClickGUI hotkey. This runs even while another screen is open, so the GUI
             // can be summoned from the title screen, pause menu, or normal gameplay.
             if (ClickGuiHandler.handleKey(InputConstants.getKey(event), EventKeyPress.Action.fromGlfw(action))) {

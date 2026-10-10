@@ -7,9 +7,11 @@ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
+import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import java.util.List;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -206,8 +208,15 @@ public class Criticals extends Module {
     private ServerboundMovePlayerPacket packet(final LocalPlayer player, final Offset offset) {
         double y = player.getY() + offset.y();
         return switch (this.packetType.get()) {
-            case FULL -> new ServerboundMovePlayerPacket.PosRot(player.getX(), y, player.getZ(), player.getYRot(), player.getXRot(),
-                    offset.onGround(), player.horizontalCollision);
+            case FULL -> {
+                // Sigma hook: extra movement packets must preserve KillAura's active silent look before the attack.
+                KillAura aura = Modules.enabled(KillAura.class);
+                Rotation silentRotation = aura == null ? null : aura.getSilentRotation();
+                float yaw = silentRotation == null ? player.getYRot() : silentRotation.yaw();
+                float pitch = silentRotation == null ? player.getXRot() : silentRotation.pitch();
+                yield new ServerboundMovePlayerPacket.PosRot(player.getX(), y, player.getZ(), yaw, pitch,
+                        offset.onGround(), player.horizontalCollision);
+            }
             case POSITION -> new ServerboundMovePlayerPacket.Pos(player.getX(), y, player.getZ(), offset.onGround(), player.horizontalCollision);
         };
     }

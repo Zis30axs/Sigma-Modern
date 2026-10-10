@@ -462,6 +462,10 @@ public class Hud {
     }
 
     private void extractScoreboardSidebar(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
+        // MODIFIED for porting: Modern's sidebar shares the current frame's layout with its other HUD widgets.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernHud.isActive()) {
+            return;
+        }
         Scoreboard scoreboard = this.minecraft.level.getScoreboard();
         Objective teamObjective = null;
         PlayerTeam playerTeam = scoreboard.getPlayersTeam(this.minecraft.player.getScoreboardName());
@@ -497,6 +501,9 @@ public class Hud {
         if (options.getCameraType().isFirstPerson()) {
             if (this.minecraft.gameMode.getPlayerMode() != GameType.SPECTATOR || this.canRenderCrosshairForSpectator(this.minecraft.hitResult)) {
                 if (!this.minecraft.debugEntries.isCurrentlyEnabled(DebugScreenEntries.THREE_DIMENSIONAL_CROSSHAIR)) {
+                    // Sigma hook: the shared reported look is shown relative to the ordinary first-person crosshair.
+                    com.mentalfrostbyte.jello.gui.RotationIndicatorRenderer.render(graphics,
+                            deltaTracker.getGameTimeDeltaPartialTick(false));
                     graphics.nextStratum();
                     int size = 15;
                     graphics.blitSprite(RenderPipelines.CROSSHAIR, CROSSHAIR_SPRITE, (graphics.guiWidth() - 15) / 2, (graphics.guiHeight() - 15) / 2, 15, 15);

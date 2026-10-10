@@ -100,6 +100,14 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
         final int lightCoords,
         final CameraRenderState camera
     ) {
+        this.submitNameTag(poseStack, nameTagAttachment, offset, name, seeThrough, lightCoords, camera, false);
+    }
+
+    @Override
+    public void submitNameTag(
+        final PoseStack poseStack, final @Nullable Vec3 nameTagAttachment, final int offset, final Component name,
+        final boolean seeThrough, final int lightCoords, final CameraRenderState camera, final boolean suspect
+    ) {
         if (nameTagAttachment != null) {
             Minecraft minecraft = Minecraft.getInstance();
             poseStack.pushPose();
@@ -108,19 +116,23 @@ public class SubmitNodeCollection implements OrderedSubmitNodeCollector {
             poseStack.scale(0.025F, -0.025F, 0.025F);
             Matrix4f pose = new Matrix4f(poseStack.last().pose());
             float x = -minecraft.font.width(name) / 2.0F;
+            if (suspect) {
+                // Center the name and its left-hand icon together, keeping the vanilla billboard and score position.
+                x += com.mentalfrostbyte.jello.util.game.render.SuspectNameTagIcon.ADVANCE / 2.0F;
+            }
             int backgroundColor = ARGB.color(minecraft.gameRenderer.gameRenderState().optionsRenderState.getBackgroundOpacity(0.25F), -16777216);
             if (seeThrough) {
                 this.nameTags
                     .submit(
                         new NameTagFeatureRenderer.Submit(
-                            pose, x, offset, name, LightCoordsUtil.lightCoordsWithEmission(lightCoords, 2), -1, 0, Font.DisplayMode.NORMAL
+                            pose, x, offset, name, LightCoordsUtil.lightCoordsWithEmission(lightCoords, 2), -1, 0, Font.DisplayMode.NORMAL, suspect
                         )
                     );
                 this.seeThroughNameTags
-                    .submit(new NameTagFeatureRenderer.Submit(pose, x, offset, name, lightCoords, -2130706433, backgroundColor, Font.DisplayMode.SEE_THROUGH));
+                    .submit(new NameTagFeatureRenderer.Submit(pose, x, offset, name, lightCoords, -2130706433, backgroundColor, Font.DisplayMode.SEE_THROUGH, suspect));
             } else {
                 this.nameTags
-                    .submit(new NameTagFeatureRenderer.Submit(pose, x, offset, name, lightCoords, -2130706433, backgroundColor, Font.DisplayMode.NORMAL));
+                    .submit(new NameTagFeatureRenderer.Submit(pose, x, offset, name, lightCoords, -2130706433, backgroundColor, Font.DisplayMode.NORMAL, suspect));
             }
 
             poseStack.popPose();

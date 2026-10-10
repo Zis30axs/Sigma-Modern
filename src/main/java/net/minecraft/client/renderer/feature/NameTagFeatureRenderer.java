@@ -41,6 +41,12 @@ public class NameTagFeatureRenderer extends RenderTypeFeatureRenderer<NameTagFea
             Font.PreparedText preparedText = prepareText(context.font(), nameTag);
             glyphRenderer.prepare(nameTag, nameTag.displayMode());
             preparedText.visit(glyphRenderer);
+            // Sigma hook: use the same pass and Iris name_tag context as the name, including discrete-name depth.
+            if (nameTag.suspect()) {
+                com.mentalfrostbyte.jello.util.game.render.SuspectNameTagIcon.render(
+                        nameTag.pose(), nameTag.x(), nameTag.y(), nameTag.color(), nameTag.lightCoords(),
+                        nameTag.displayMode(), this::getVertexBuilder);
+            }
         }
         } finally {
             // MODIFIED for porting: was iris's entity_render_context MixinEntityRenderer#resetId (@Inject RETURN)
@@ -76,8 +82,13 @@ public class NameTagFeatureRenderer extends RenderTypeFeatureRenderer<NameTagFea
     }
 
     @OnlyIn(Dist.CLIENT)
-    public record Submit(Matrix4fc pose, float x, float y, Component text, int lightCoords, int color, int backgroundColor, Font.DisplayMode displayMode)
+    public record Submit(Matrix4fc pose, float x, float y, Component text, int lightCoords, int color, int backgroundColor, Font.DisplayMode displayMode,
+                         boolean suspect)
         implements TranslucentSubmit {
+        public Submit(Matrix4fc pose, float x, float y, Component text, int lightCoords, int color, int backgroundColor, Font.DisplayMode displayMode) {
+            this(pose, x, y, text, lightCoords, color, backgroundColor, displayMode, false);
+        }
+
         @Override
         public float distanceToCameraSq() {
             return TranslucentSubmit.computeDistanceToCameraSq(this.pose);

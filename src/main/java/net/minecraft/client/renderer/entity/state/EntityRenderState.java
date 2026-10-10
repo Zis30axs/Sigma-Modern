@@ -31,6 +31,8 @@ public class EntityRenderState {
     public int outlineColor = 0;
     public @Nullable Vec3 passengerOffset;
     public @Nullable Component nameTag;
+    // Sigma hook: this frame's AntiCheat marker, independent of the optional Modern NameTags module.
+    public boolean sigmaSuspectNameTag;
     public @Nullable Component scoreText;
     public @Nullable Vec3 nameTagAttachment;
     public @Nullable List<EntityRenderState.LeashState> leashStates;

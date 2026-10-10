@@ -86,6 +86,7 @@ public class NoFall extends Module {
 
     /** Upstream's {@code ModuleNoFall.running}: nothing to save where a fall can't hurt. */
     private static boolean active(final LocalPlayer player) {
-        return !player.isCreative() && !player.isSpectator() && !player.getAbilities().invulnerable && !player.getAbilities().flying;
+        return !AutoPearl.isRescuing() && !player.isCreative() && !player.isSpectator()
+                && !player.getAbilities().invulnerable && !player.getAbilities().flying;
     }
 }

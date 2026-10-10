@@ -6,12 +6,15 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Locale;
 import java.util.Optional;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -27,6 +30,7 @@ import org.lwjgl.glfw.GLFW;
 public final class ClickGuiInteractions {
 
     private @Nullable Module bindingModule;
+    private @Nullable KeySetting bindingSetting;
     private @Nullable Setting<?> editingSetting;
     private String editingBuffer = "";
 
@@ -35,6 +39,8 @@ public final class ClickGuiInteractions {
     private int draggingTrackRight;
 
     public boolean mouseClickedBinding(final MouseButtonEvent event) {
+        // Setting shortcuts are keyboard-only. A click cancels their capture and continues normally.
+        this.bindingSetting = null;
         if (this.bindingModule == null) {
             return false;
         }
@@ -46,14 +52,43 @@ public final class ClickGuiInteractions {
     }
 
     public void startBind(final Module module) {
+        this.bindingSetting = null;
+        this.editingSetting = null;
+        this.draggingNumber = null;
         this.bindingModule = module;
     }
+
+    public void startBind(final KeySetting setting) {
+        this.bindingModule = null;
+        this.editingSetting = null;
+        this.draggingNumber = null;
+        this.bindingSetting = setting;
+    }
+
+    public boolean isBinding(final KeySetting setting) { return this.bindingSetting == setting; }
+    public boolean isCapturingKey() { return this.bindingSetting != null; }
+    public void cancelKeyCapture() { this.bindingSetting = null; }
 
     public boolean isBinding(final Module module) {
         return this.bindingModule == module;
     }
 
     public boolean keyPressed(final KeyEvent event) {
+        if (this.bindingSetting != null) {
+            if (event.isEscape()) {
+                this.bindingSetting = null;
+            } else if (event.key() == GLFW.GLFW_KEY_BACKSPACE || event.key() == GLFW.GLFW_KEY_DELETE) {
+                this.bindingSetting.set(KeySetting.Chord.UNBOUND);
+                this.bindingSetting = null;
+            } else {
+                Optional<KeySetting.Chord> chord = KeySetting.capture(event);
+                if (chord.isPresent()) {
+                    this.bindingSetting.set(chord.get());
+                    this.bindingSetting = null;
+                }
+            }
+            return true;
+        }
         if (this.bindingModule != null) {
             if (event.isEscape()) {
                 this.bindingModule = null;
@@ -96,6 +131,7 @@ public final class ClickGuiInteractions {
     }
 
     public boolean charTyped(final CharacterEvent event) {
+        if (this.bindingSetting != null) return true;
         if (this.editingSetting == null) {
             return false;
         }
@@ -128,6 +164,20 @@ public final class ClickGuiInteractions {
     }
 
     public void handleSettingClick(final Setting<?> setting, final int mouseX, final int trackLeft, final int trackRight) {
+        if (setting instanceof ItemListSetting items) {
+            this.bindingSetting = null;
+            this.bindingModule = null;
+            this.editingSetting = null;
+            this.draggingNumber = null;
+            Minecraft minecraft = Minecraft.getInstance();
+            minecraft.gui.setScreen(new ProjectileWhitelistScreen(minecraft.gui.screen(), items));
+            return;
+        }
+        if (setting instanceof KeySetting key) {
+            this.startBind(key);
+            return;
+        }
+        this.bindingSetting = null;
         if (setting instanceof BooleanSetting bool) {
             bool.toggle();
             return;
@@ -163,6 +213,8 @@ public final class ClickGuiInteractions {
      * clamped to the setting's range like any value - and Esc, or text that isn't a number, leaves it as it was.
      */
     public void startEditing(final NumberSetting number, final String shown) {
+        this.bindingSetting = null;
+        this.bindingModule = null;
         this.editingSetting = number;
         this.editingBuffer = shown;
     }
@@ -172,6 +224,10 @@ public final class ClickGuiInteractions {
     }
 
     public String displayValue(final Setting<?> setting) {
+        if (setting instanceof ItemListSetting items) return items.displayLabel();
+        if (setting instanceof KeySetting key) {
+            return this.bindingSetting == key ? "Press a key..." : key.displayLabel();
+        }
         if (this.editingSetting == setting) {
             return this.editingBuffer;
         }

@@ -44,6 +44,14 @@ public interface OrderedSubmitNodeCollector {
         final CameraRenderState camera
     );
 
+    /** Sigma hook: the optional SVG is part of the same name-tag passes, never of score text. */
+    default void submitNameTag(
+        PoseStack poseStack, @Nullable Vec3 nameTagAttachment, int offset, Component name,
+        boolean seeThrough, int lightCoords, CameraRenderState camera, boolean suspect
+    ) {
+        this.submitNameTag(poseStack, nameTagAttachment, offset, name, seeThrough, lightCoords, camera);
+    }
+
     void submitText(
         PoseStack poseStack,
         float x,

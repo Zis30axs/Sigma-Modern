@@ -827,6 +827,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleSetHeldSlot(final ClientboundSetHeldSlotPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // Sigma hook: a server slot change invalidates Disabler's outgoing selection history.
+        com.mentalfrostbyte.jello.module.impl.world.Disabler.serverChangedState(this.connection);
         if (Inventory.isHotbarSlot(packet.slot())) {
             this.minecraft.player.getInventory().setSelectedSlot(packet.slot());
         }
@@ -922,6 +924,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleMovePlayer(final ClientboundPlayerPositionPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // Sigma hook: begin fresh before the correction reply, including VFP's alternate acknowledgement order.
+        com.mentalfrostbyte.jello.module.impl.world.Disabler.serverChangedState(this.connection);
         Player player = this.minecraft.player;
         if (!player.isPassenger()) {
             setValuesFromPositionPacket(packet.change(), packet.relatives(), player, false);
@@ -989,6 +993,8 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleRotatePlayer(final ClientboundPlayerRotationPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // Sigma hook: the first report after this reset preserves the server's corrected rotation exactly.
+        com.mentalfrostbyte.jello.module.impl.world.Disabler.serverChangedState(this.connection);
         Player player = this.minecraft.player;
         Set<Relative> relatives = Relative.rotation(packet.relativeY(), packet.relativeX());
         PositionMoveRotation currentValues = PositionMoveRotation.of(player);

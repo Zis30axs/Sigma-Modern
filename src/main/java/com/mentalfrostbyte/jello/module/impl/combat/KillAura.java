@@ -1,15 +1,17 @@
 package com.mentalfrostbyte.jello.module.impl.combat;
 
+import com.mentalfrostbyte.jello.event.EventPriority;
 import com.mentalfrostbyte.jello.event.EventTarget;
+import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
-import com.mentalfrostbyte.jello.module.Modules;
-import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
+import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
+import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
@@ -19,12 +21,10 @@ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Comparator;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
-import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
@@ -75,10 +75,11 @@ public class KillAura extends Module {
         CPS
     }
 
-    /** Which click scheduler supplies the CPS gate. Sol is deliberately local-test-only. */
+    /** Which click scheduler supplies the CPS gate. */
     public enum CpsMode {
         NORMAL,
-        SOL
+        SOL,
+        ASTRA
     }
 
     public enum RotationMode {
@@ -135,13 +136,13 @@ public class KillAura extends Module {
             "Auto always obeys Min/Max CPS; on 1.9+ it also waits for the attack cooldown.", Timing.AUTO));
 
     private final NumberSetting minCps = this.register(new NumberSetting("Min CPS",
-            "The slow end of the base click-rate range. Sol pauses can make an individual interval slower.", 8.0F, 1.0F, 20.0F, 1.0F));
+            "The slow end of the base click-rate range. Sol and Astra pauses can make individual intervals slower.", 8.0F, 1.0F, 20.0F, 1.0F));
 
     private final NumberSetting maxCps = this.register(new NumberSetting("Max CPS",
-            "The fast end of the base click-rate range and a hard upper bound for Sol.", 12.0F, 1.0F, 20.0F, 1.0F));
+            "The fast end of the base range. Sol caps each interval; Astra caps clicks in a rolling second.", 12.0F, 1.0F, 20.0F, 1.0F));
 
     private final EnumSetting<CpsMode> cpsMode = this.register(new EnumSetting<>("CPS Mode",
-            "Normal uses the original tick budget. Sol is a millisecond scheduler for FakePlayer, singleplayer and loopback test servers.",
+            "Normal uses a tick budget. Sol uses millisecond delays. Astra varies the pace with occasional pauses.",
             CpsMode.NORMAL));
 
     private final NumberSetting randomMs = this.register(new NumberSetting("Random MS",
@@ -151,7 +152,7 @@ public class KillAura extends Module {
             "Sol: maximum remembered timing drift. The drift moves gradually between clicks instead of resetting.", 8.0F, 0.0F, 60.0F, 1.0F));
 
     private final NumberSetting pauseChance = this.register(new NumberSetting("Pause Chance",
-            "Sol: percent chance that a scheduled click receives an extra local-test pause.", 3.0F, 0.0F, 30.0F, 0.5F));
+            "Sol: percent chance that a scheduled click receives an extra pause.", 3.0F, 0.0F, 30.0F, 0.5F));
 
     private final NumberSetting pauseMin = this.register(new NumberSetting("Pause Min",
             "Sol: shortest extra pause in milliseconds.", 60.0F, 0.0F, 500.0F, 5.0F));
@@ -182,25 +183,40 @@ public class KillAura extends Module {
     private final EnumSetting<AutoBlock> autoBlock = this.register(new EnumSetting<>("AutoBlock",
             "Blocks with a sword (1.8) or an off-hand shield between hits. Claude2 is experimental.", AutoBlock.NONE));
 
+    private final BooleanSetting targetIndicator = this.register(new BooleanSetting("Target Indicator",
+            "Modern: marks the currently selected target in the world, including while waiting to attack.", true));
+
+    private final ColorSetting indicatorColor = this.register(new ColorSetting("Indicator Color",
+            "Color of the current target's lock-on marker.", 0xFF9DDEFF));
+
     // Game thread only.
     private @Nullable LivingEntity target;
     /** The look reported this tick, or null to leave the report to vanilla. */
     private @Nullable Rotation rotation;
     /**
-     * The look the server holds: the last one any movement packet carried, a teleport confirmation's included - the
-     * client's own record of what it reported misses those.
+     * The look on the wire and whether an attack still needs its following movement report. The wire record
+     * includes teleport confirmations, which vanilla's own last-reported rotation record misses.
      */
-    private @Nullable Rotation lastSent;
+    private final AuraAttackCycle attackCycle = new AuraAttackCycle();
     private float clickBudget;
     private float cps;
     private long nextSolClickAtMs;
     private float solJitterOffsetMs;
+    private final AstraClickScheduler astraClicks = new AstraClickScheduler(ThreadLocalRandom.current());
     private boolean blockingByAura;
     /** Claude2: the block was lowered last tick for an attack this tick. */
     private boolean pendingAttack;
+    /** Item interactions this tick still take precedence over lower-priority automated item use. */
+    private boolean actedThisTick;
+    private @Nullable LocalPlayer activityPlayer;
+    private @Nullable ClientLevel activityLevel;
 
     public KillAura() {
         super(ModuleCategory.COMBAT, "KillAura", "Attacks the nearest enemy in reach, turning to face it.");
+        this.cpsMode.onChange(this::resetClickScheduler);
+        this.timing.onChange(this::resetClickScheduler);
+        this.minCps.onChange(this::resetClickScheduler);
+        this.maxCps.onChange(this::resetClickScheduler);
         this.minCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.cpsMode.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
@@ -213,12 +229,14 @@ public class KillAura extends Module {
         this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
         this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
         this.throughWalls.visibleWhen(this.rayTrace::get);
+        this.indicatorColor.visibleWhen(this.targetIndicator::get);
     }
 
     @Override
     protected void onEnable() {
+        this.clearActivity();
         LocalPlayer player = mc.player;
-        this.lastSent = player == null ? null : new Rotation(player.getYRot(), player.getXRot());
+        this.attackCycle.reset(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
         this.rotation = null;
         this.target = null;
         this.resetClickScheduler();
@@ -228,6 +246,11 @@ public class KillAura extends Module {
 
     @Override
     protected void onDisable() {
+        this.releaseCombat();
+    }
+
+    private void releaseCombat() {
+        this.clearActivity();
         LocalPlayer player = mc.player;
         if (player != null && this.blockingByAura && mc.gameMode != null) {
             mc.gameMode.releaseUsingItem(player);
@@ -241,10 +264,56 @@ public class KillAura extends Module {
         if (corrector != null) {
             corrector.release(this);
         }
+        if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
+            // A server may check queued attacks only when the next movement arrives. Drain them with the
+            // attack's look before handing back the camera, including a toggle before this tick's report.
+            this.attackCycle.stop(new Rotation(player.getYRot(), player.getXRot()),
+                    look -> player.sendRotation(look.yaw(), look.pitch()));
+        } else {
+            this.attackCycle.reset(null);
+        }
     }
 
     public @Nullable LivingEntity getTarget() {
         return this.target;
+    }
+
+    /**
+     * True while actually aiming, attacking, blocking or completing a silent-look handback. Merely
+     * having the module enabled (or selecting a target with Rotation=None between clicks) is idle.
+     * Read after this module's NORMAL-priority EventTick PRE; game thread only.
+     */
+    public boolean isActivelyWorking() {
+        return this.isEnabled() && mc.player != null && mc.level != null && mc.player.isAlive()
+                && !mc.player.isSpectator() && this.activityPlayer == mc.player && this.activityLevel == mc.level
+                && (this.actedThisTick || this.rotation != null || this.pendingAttack
+                    || this.blockingByAura || this.attackCycle.isBusy());
+    }
+
+    private void clearActivity() {
+        this.actedThisTick = false;
+        this.activityPlayer = null;
+        this.activityLevel = null;
+    }
+
+    public boolean showsTargetIndicator() {
+        return this.targetIndicator.get();
+    }
+
+    public int getIndicatorColor() {
+        return this.indicatorColor.get() | 0xFF000000;
+    }
+
+    /** The silent look supplemental movement packets must preserve, or null to use the player's own look. */
+    public @Nullable Rotation getSilentRotation() {
+        return this.silent.get() && !AutoPearl.isRescuing() ? this.rotation : null;
+    }
+
+    @EventTarget
+    public void onLoadWorld(final EventLoadWorld event) {
+        this.clearActivity();
+        this.astraClicks.reset();
+        this.resetClickScheduler();
     }
 
     @EventTarget
@@ -252,10 +321,25 @@ public class KillAura extends Module {
         LocalPlayer player = mc.player;
         ClientLevel level = mc.level;
         MultiPlayerGameMode gameMode = mc.gameMode;
-        if (!event.isPre() || player == null || level == null || gameMode == null) {
+        if (!event.isPre()) {
             return;
         }
-        Rotation from = this.lastSent != null ? this.lastSent : new Rotation(player.getYRot(), player.getXRot());
+        this.clearActivity();
+        if (AutoPearl.isRescuing()) {
+            this.releaseCombat();
+            return;
+        }
+        if (player == null || level == null || gameMode == null || !player.isAlive()) {
+            this.resetClickScheduler();
+            return;
+        }
+        this.activityPlayer = player;
+        this.activityLevel = level;
+        // If another listener cancelled the previous tick's report, finish its hit before choosing a
+        // new target or handing the look back to the camera. The normal path has nothing left to send.
+        this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
+        Rotation lastSent = this.attackCycle.lastSent();
+        Rotation from = lastSent != null ? lastSent : new Rotation(player.getYRot(), player.getXRot());
         Vec3 eye = player.getEyePosition();
         this.target = mc.gui.screen() == null && !player.isSpectator() ? this.pickTarget(player, level, eye) : null;
 
@@ -286,7 +370,7 @@ public class KillAura extends Module {
      */
     @EventTarget
     public void onStopUsing(final EventStopUsingItem event) {
-        if (this.blockingByAura && this.target != null) {
+        if (this.blockingByAura && this.target != null && !AutoPearl.isRescuing()) {
             event.cancel();
         }
     }
@@ -304,16 +388,8 @@ public class KillAura extends Module {
 
     @EventTarget
     public void onMotion(final EventMotion event) {
-        Rotation reported = this.rotation;
-        if (event.isPre() && reported != null && this.silent.get()) {
-            event.setYaw(reported.yaw());
-            event.setPitch(reported.pitch());
-            // After a teleport the server holds the confirmation's look, while the client still remembers the one it
-            // reported before; a look that happens to match that stale record would otherwise not be sent at all.
-            if (!reported.equals(this.lastSent)) {
-                event.forceRotation();
-            }
-        }
+        if (AutoPearl.isRescuing()) return;
+        this.attackCycle.motion(event, this.rotation, this.silent.get());
     }
 
     /**
@@ -321,16 +397,16 @@ public class KillAura extends Module {
      * report; with a silent look that must be the reported one, not the camera's. Every movement packet that carries a
      * look is noted as what the server now holds.
      */
-    @EventTarget
+    @EventTarget(EventPriority.LOWEST)
     public void onSend(final EventSendPacket event) {
-        if (!mc.isSameThread()) {
+        if (!mc.isSameThread() || event.isCancelled()) {
             return;
         }
         Rotation reported = this.rotation;
-        if (reported != null && this.silent.get() && event.getPacket() instanceof ServerboundUseItemPacket use) {
+        if (reported != null && this.silent.get() && !AutoPearl.isRescuing() && event.getPacket() instanceof ServerboundUseItemPacket use) {
             event.setPacket(new ServerboundUseItemPacket(use.getHand(), use.getSequence(), reported.yaw(), reported.pitch()));
-        } else if (event.getPacket() instanceof ServerboundMovePlayerPacket move && move.hasRotation()) {
-            this.lastSent = new Rotation(move.getYRot(0.0F), move.getXRot(0.0F));
+        } else if (event.getPacket() instanceof ServerboundMovePlayerPacket move) {
+            this.attackCycle.reported(move);
         }
     }
 
@@ -448,7 +524,11 @@ public class KillAura extends Module {
             return cooldownReady;
         }
 
-        boolean cpsReady = this.useSolScheduler() ? this.solClickReady(nowMs()) : this.normalClickReady();
+        boolean cpsReady = switch (this.cpsMode.get()) {
+            case NORMAL -> this.normalClickReady();
+            case SOL -> this.solClickReady(nowMs());
+            case ASTRA -> this.astraClicks.ready(nowMs(), this.minCps.get(), this.maxCps.get());
+        };
         return timingDue(selected, legacyCombat(), cooldownReady, cpsReady);
     }
 
@@ -492,49 +572,9 @@ public class KillAura extends Module {
         return !this.timing.is(Timing.COOLDOWN) && this.cpsMode.is(CpsMode.SOL);
     }
 
+    /** Sol replaces the tick budget with its own millisecond schedule, whatever the connection is. */
     private boolean useSolScheduler() {
-        return this.cpsMode.is(CpsMode.SOL) && this.timing.get() != Timing.COOLDOWN && this.localSolTestAllowed();
-    }
-
-    /**
-     * Sol is an instrumentation scheduler, not the online default. It is available against the client's own FakePlayer,
-     * an integrated server, or an explicitly loopback-addressed dedicated server.
-     */
-    private boolean localSolTestAllowed() {
-        FakePlayer fake = Modules.enabled(FakePlayer.class);
-        if (fake != null && fake.getEntity() == this.target) {
-            return true;
-        }
-        if (mc.isLocalServer()) {
-            return true;
-        }
-
-        ServerData server = mc.getCurrentServer();
-        return server != null && isLoopbackAddress(server.ip);
-    }
-
-    static boolean isLoopbackAddress(final String address) {
-        if (address == null) {
-            return false;
-        }
-
-        String host = address.strip().toLowerCase(Locale.ROOT);
-        if (host.startsWith("[")) {
-            int end = host.indexOf(']');
-            if (end > 0) {
-                host = host.substring(1, end);
-            }
-        } else {
-            int colon = host.lastIndexOf(':');
-            if (colon > 0 && host.indexOf(':') == colon) {
-                host = host.substring(0, colon);
-            }
-        }
-
-        return host.equals("localhost")
-                || host.equals("::1")
-                || host.equals("0:0:0:0:0:0:0:1")
-                || host.startsWith("127.");
+        return this.cpsMode.is(CpsMode.SOL) && this.timing.get() != Timing.COOLDOWN;
     }
 
     private void scheduleNextSolClick(final long nowMs) {
@@ -579,6 +619,9 @@ public class KillAura extends Module {
         this.cps = 0.0F;
         this.nextSolClickAtMs = 0L;
         this.solJitterOffsetMs = 0.0F;
+        this.astraClicks.restart();
+        // Do not carry a Claude2 attack reserved under the old timing into the new schedule.
+        this.pendingAttack = false;
     }
 
     /** 1.8 and older: no cooldown, and the swing goes out before the attack. */
@@ -645,11 +688,16 @@ public class KillAura extends Module {
 
     /** A click on the target, the way {@code Minecraft.startAttack} makes one, swing included. */
     private void attack(final LocalPlayer player, final MultiPlayerGameMode gameMode, final LivingEntity entity) {
+        this.actedThisTick = true;
+        Rotation look = this.rotation != null ? this.rotation : new Rotation(player.getYRot(), player.getXRot());
         boolean legacy = legacyCombat();
         if (legacy) {
             player.swing(InteractionHand.MAIN_HAND);
         }
         gameMode.attack(player, entity);
+        // A movement with this look must follow the attack even when its angles did not change. Modern
+        // vanilla otherwise suppresses idle reports, leaving server-side ray checks queued until a turn.
+        this.attackCycle.attacked(look, this.rotation != null && this.silent.get());
         if (!legacy) {
             player.swing(InteractionHand.MAIN_HAND);
         }
@@ -657,6 +705,10 @@ public class KillAura extends Module {
     }
 
     private void consumeScheduledClick() {
+        if (this.cpsMode.is(CpsMode.ASTRA) && !this.timing.is(Timing.COOLDOWN)) {
+            this.astraClicks.clicked(nowMs(), this.minCps.get(), this.maxCps.get());
+            return;
+        }
         if (this.useSolScheduler()) {
             // Schedule from the actual click time. A lag spike therefore never turns into a burst of catch-up clicks.
             this.scheduleNextSolClick(nowMs());
@@ -682,6 +734,7 @@ public class KillAura extends Module {
      * on 1.8 a sword's use reports PASS (the stack did not change) although the block is up.
      */
     private void raiseBlock(final LocalPlayer player, final MultiPlayerGameMode gameMode, final InteractionHand hand) {
+        this.actedThisTick = true;
         gameMode.useItem(player, hand);
         this.blockingByAura = player.isUsingItem();
     }
@@ -695,6 +748,7 @@ public class KillAura extends Module {
         if (player.isUsingItem()) {
             return;
         }
+        this.actedThisTick = true;
         for (InteractionHand hand : InteractionHand.values()) {
             ItemStack held = player.getItemInHand(hand);
             if (hit.isPresent() && player.isWithinEntityInteractionRange(entity, 0.0)
@@ -710,6 +764,7 @@ public class KillAura extends Module {
 
     private void lowerBlock(final LocalPlayer player, final MultiPlayerGameMode gameMode) {
         if (this.blockingByAura && player.isUsingItem()) {
+            this.actedThisTick = true;
             gameMode.releaseUsingItem(player);
         }
         this.blockingByAura = false;

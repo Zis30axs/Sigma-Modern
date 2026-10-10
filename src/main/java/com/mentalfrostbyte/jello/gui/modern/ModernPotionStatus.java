@@ -31,6 +31,7 @@ import net.minecraft.world.effect.MobEffectUtil;
  * from the potion's full length, which the client is never told.</p>
  */
 final class ModernPotionStatus {
+    private static final String LAYOUT_ID = "potion-status";
     private static final int MARGIN = 10;
     private static final int CARD_MIN_W = 128, RADIUS = 7, PAD = 6;
     /** Space kept between the stack and the ArrayList (either end of the right side) or F3's text. */
@@ -128,7 +129,9 @@ final class ModernPotionStatus {
 
         long now = System.nanoTime();
         float dt = lastDraw == 0L ? 0F : Math.min(0.05F, (now - lastDraw) / 1_000_000_000F);
-        boolean snap = now - lastDraw > GAP_NANOS;
+        boolean editing = ModernHudEditor.isEditing();
+        boolean custom = ModernHudEditor.hasPosition(LAYOUT_ID);
+        boolean snap = editing || now - lastDraw > GAP_NANOS;
         lastDraw = now;
 
         float partial = mc.getDeltaTracker().getGameTimeDeltaPartialTick(false);
@@ -138,10 +141,13 @@ final class ModernPotionStatus {
         // Up from the bottom-right corner, standing on a list that hangs there; no higher than a top-right list's end,
         // F3's right column, or vanilla's icons' place. The ArrayList is drawn first, so its extent is this frame's.
         ModuleArrayList list = Modules.enabled(ModuleArrayList.class);
-        int floor = Math.min(g.guiHeight() - MARGIN, ModernArrayList.bottomRightTop(g) - CLEARANCE);
-        int ceiling = Math.max(ModernHud.rightStack(),
+        int floor = custom ? g.guiHeight() - MARGIN
+                : Math.min(g.guiHeight() - MARGIN, ModernArrayList.bottomRightTop(g) - CLEARANCE);
+        int ceiling = custom ? MARGIN : Math.max(ModernHud.rightStack(),
             Math.max(ModernArrayList.topRightBottom() + CLEARANCE, ModernHud.debugBottom(false) + CLEARANCE));
-        int room = floor - ceiling;
+        // Freeze the choice of card size/folding before the first drag saves a custom position. Otherwise
+        // leaving the automatic corner would expand a folded stack under the cursor midway through the drag.
+        int room = custom || editing ? Math.max(0, g.guiHeight() - MARGIN * 2) : floor - ceiling;
 
         // Slimmer cards when full ones don't fit; when even those don't, the effects with the most time left fold
         // into a "+N more" entry.
@@ -176,7 +182,10 @@ final class ModernPotionStatus {
             if (row.appear < 0.02F) it.remove();
             else leaving.add(row);
         }
-        if (ROWS.isEmpty()) return;
+        if (ROWS.isEmpty()) {
+            if (editing) renderPreview(g, status, inline, look, floor);
+            return;
+        }
 
         // In reading order from the top of the stack down to its foot, which sits on the floor; eased, so the stack
         // rises and sinks rather than jumps as effects come and go.
@@ -185,15 +194,57 @@ final class ModernPotionStatus {
         shownTop = snap || shownTop < 0F ? target : ModernStyle.smooth(shownTop, target, dt, 14F);
         int top = Math.round(shownTop);
 
-        if (inline) {
-            for (Row row : leaving) drawInline(g, status, look, row, top);
-            for (MobEffectInstance instance : listed) drawInline(g, status, look, ROWS.get(instance.getEffect()), top);
-            if (folded > 0) drawFoldedInline(g, look, folded, listed.size(), top);
-        } else {
-            int width = cardWidth(status, size);
-            for (Row row : leaving) drawCard(g, status, size, row, top, width);
-            for (MobEffectInstance instance : listed) drawCard(g, status, size, ROWS.get(instance.getEffect()), top, width);
-            if (folded > 0) drawFolded(g, status, size, folded, listed.size(), top, width);
+        int width = inline ? 0 : cardWidth(status, size);
+        float reach = entries <= 0 ? 0 : entries * (itemH + gap) - gap;
+        for (Row row : ROWS.values()) {
+            reach = Math.max(reach, row.slot * (itemH + gap) + itemH);
+            if (inline) width = Math.max(width, (int)Math.ceil(inlineWidth(status, look, row)));
+        }
+        if (inline && folded > 0) width = Math.max(width, (int)Math.ceil(foldedInlineWidth(look, folded)));
+        int padding = inline ? INLINE_PAD : 0;
+        var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
+                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, reach);
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(bounds.dx(), bounds.dy());
+            if (inline) {
+                for (Row row : leaving) drawInline(g, status, look, row, top);
+                for (MobEffectInstance instance : listed) drawInline(g, status, look, ROWS.get(instance.getEffect()), top);
+                if (folded > 0) drawFoldedInline(g, look, folded, listed.size(), top);
+            } else {
+                for (Row row : leaving) drawCard(g, status, size, row, top, width);
+                for (MobEffectInstance instance : listed) drawCard(g, status, size, ROWS.get(instance.getEffect()), top, width);
+                if (folded > 0) drawFolded(g, status, size, folded, listed.size(), top, width);
+            }
+        } finally {
+            g.pose().popMatrix();
+        }
+    }
+
+    /** An explicitly labelled editing sample; never enters ROWS or the player's effects collection. */
+    private static void renderPreview(GuiGraphicsExtractor g, PotionStatus status, boolean inline, Inline look, int floor) {
+        Row preview = new Row();
+        preview.appear = 1F;
+        preview.name = ModernText.t("PotionStatus · Preview", "药水状态 · 预览");
+        preview.icon = ModernSvg.effectIcon("generic");
+        preview.color = ModernStyle.MUTED;
+        preview.infinite = true;
+        Size size = Size.FULL;
+        int width = inline ? (int)Math.ceil(inlineWidth(status, look, preview))
+                : Math.max(CARD_MIN_W, (int)Math.ceil(size.textX()
+                + ModernTypography.width(ModernTypography.Face.TEXT, preview.name, size.nameScale()) + PAD));
+        int height = inline ? look.rowH() : size.height();
+        int padding = inline ? INLINE_PAD : 0;
+        int top = floor - height;
+        var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
+                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, height);
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(bounds.dx(), bounds.dy());
+            if (inline) drawInline(g, status, look, preview, top);
+            else drawCard(g, status, size, preview, top, width);
+        } finally {
+            g.pose().popMatrix();
         }
     }
 
@@ -235,7 +286,7 @@ final class ModernPotionStatus {
     private static void drawFoldedInline(GuiGraphicsExtractor g, Inline look, int count, int slot, int top) {
         String text = "+" + count + " more";
         float icon = look.rowH() - 1;
-        float width = ModernTypography.width(ModernTypography.Face.TEXT, text, look.scale()) + INLINE_GAP + icon;
+        float width = foldedInlineWidth(look, count);
         g.pose().pushMatrix();
         try {
             g.pose().translate(g.guiWidth() - MARGIN - width, top + slot * look.rowH());
@@ -340,10 +391,9 @@ final class ModernPotionStatus {
      */
     private static void drawInline(GuiGraphicsExtractor g, PotionStatus status, Inline look, Row row, int top) {
         float nameW = ModernTypography.width(ModernTypography.Face.TEXT, row.name, look.scale());
-        String time = status.showsTime() ? " " + row.time : "";
-        float timeW = ModernTypography.width(ModernTypography.Face.TEXT, time, look.scale());
+        String time = status.showsTime() && !row.time.isEmpty() ? " " + row.time : "";
         float icon = look.rowH() - 1;
-        float width = nameW + timeW + INLINE_GAP + icon;
+        float width = inlineWidth(status, look, row);
         float slide = (1F - row.appear) * (width + MARGIN + INLINE_PAD + 2);
         float x = g.guiWidth() - MARGIN - width + slide;
         float y = top + row.slot * look.rowH();
@@ -372,6 +422,18 @@ final class ModernPotionStatus {
                 g.pose().popMatrix();
             }
         }
+    }
+
+    private static float inlineWidth(PotionStatus status, Inline look, Row row) {
+        String time = status.showsTime() && !row.time.isEmpty() ? " " + row.time : "";
+        return ModernTypography.width(ModernTypography.Face.TEXT, row.name, look.scale())
+                + ModernTypography.width(ModernTypography.Face.TEXT, time, look.scale())
+                + INLINE_GAP + look.rowH() - 1;
+    }
+
+    private static float foldedInlineWidth(Inline look, int count) {
+        return ModernTypography.width(ModernTypography.Face.TEXT, "+" + count + " more", look.scale())
+                + INLINE_GAP + look.rowH() - 1;
     }
 
     private static void glass(GuiGraphicsExtractor g, PotionStatus status, int w, int h) {

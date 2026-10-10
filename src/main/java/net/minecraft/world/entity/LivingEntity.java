@@ -138,6 +138,8 @@ import net.minecraft.world.phys.Vec3;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.EventState;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventJump;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.movement.NoJumpDelay;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.scores.PlayerTeam;
@@ -3305,6 +3307,14 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
         // MODIFIED for porting: was VFP movement.jump MixinLivingEntity#removeJumpDelay (@Inject HEAD). Beta and
         // below (older than 1.0.0-1.0.1) had no 10 tick jump cooldown at all.
         if (ProtocolTranslator.getTargetVersion().olderThan(LegacyProtocolVersion.r1_0_0tor1_0_1)) {
+            this.noJumpDelay = 0;
+        }
+
+        // Sigma hook: clear only our player's ground-jump cooldown. Vanilla jump eligibility and
+        // jumpFromGround's cancellable EventJump still apply, including Stuck's jump suppression.
+        if (this instanceof net.minecraft.client.player.LocalPlayer
+            && this == net.minecraft.client.Minecraft.getInstance().player
+            && Modules.enabled(NoJumpDelay.class) != null) {
             this.noJumpDelay = 0;
         }
 

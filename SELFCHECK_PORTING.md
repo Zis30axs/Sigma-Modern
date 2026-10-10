@@ -242,10 +242,12 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
 
 ### 模块
 - `KillAura`（Combat，自写，不是移植）：
-  - 每 tick 开头选目标、算出这一 tick 的视角；视角射线在攻击距离内碰到目标、且到了该攻击的时候就出手。这些都发生在这一 tick 的移动包之前，和原版点击的顺序一样：先发攻击，瞄准用的视角随同一 tick 的移动包上报。
+  - 每 tick 开头选目标、算出这一 tick 的视角；视角射线在攻击距离内碰到目标、且到了该攻击的时候就出手。这些都发生在这一 tick 的移动包之前，和原版点击的顺序一样：先发攻击，瞄准用的视角随同一 tick 的移动包上报。攻击后的移动报告即使角度没变也强制带旋转，避免现代原版省略静止报告后，服务器把多次攻击积压到关闭时的镜头转向才做射线检查。若关闭发生在攻击之后、正常报告之前，先补发攻击视角排空待检查攻击，再恢复镜头视角；不改变玩家或相机的真实旋转。
   - 攻击走 `MultiPlayerGameMode.attack`，所以 `EventAttack` 的模块（Criticals、SuperKnockback）照常配合。挥手顺序按版本：≤1.8 先挥手后攻击。
   - 目标类型不再由 KillAura 自己保存：统一读取 Combat/Target 的 Players、Bots、Mobs、Animals、Invisibles。Target 默认开启；目前 Bots 能单独识别客户端 FakePlayer，服务器 Bot 等以后接 AntiBot。
-  - Timing：Auto 始终受 CPS 限速；在 1.9+ 还要同时等原版攻击冷却满，1.8 则只看 CPS。CPS Mode 默认 Normal（原来的 tick budget）；Sol 只对 FakePlayer、单机和 127.0.0.0/8 / localhost / ::1 本地测试连接生效，使用毫秒调度，并提供 Random MS、带记忆的 Jitter MS、Pause Chance 和 Pause Min/Max。Sol 最终间隔受 Max CPS 的最短间隔硬限制，卡顿后从实际点击时间重新排下一刀，不追赶连发。
+  - Timing：Auto 始终受 CPS 限速；在 1.9+ 还要同时等原版攻击冷却满，1.8 则只看 CPS。CPS Mode 默认 Normal（原来的 tick budget）；Sol 用毫秒调度，任何连接下都可用（原先只对 FakePlayer、单机和 127.0.0.0/8 / localhost / ::1 生效的本地检测已删除），并提供 Random MS、带记忆的 Jitter MS、Pause Chance 和 Pause Min/Max。Sol 最终间隔受 Max CPS 的最短间隔硬限制，卡顿后从实际点击时间重新排下一刀，不追赶连发。
+  - Astra CPS（2026-10-02）：在原有 CPS Mode 中增加 `Astra`，沿用 Min/Max CPS，独立于 Sol 的 Random/Jitter/Pause 设置。基础速率逐次缓慢变化，间隔加入 tick 尺度扰动和偶发短暂停顿；只保留不足 50 ms 的取整余差，长停顿后从实际攻击时间重新排期。每 tick 最多一击、实际间隔至少 50 ms、滚动一秒内最多 `floor(max(Min CPS, Max CPS))` 次；因此 Max 是每秒总数限制，不是每个间隔的倒数限制。Min 是基础速率下界，暂停、冷却、tick 量化会让实测速率更低；20/20 也保留间隔变化，实际不会维持恒定 20 CPS。切换 CPS Mode/Timing/Min/Max、启停、丢目标、换世界时清空调度和 Claude2 的旧预约。
+    - 日志依据：`logs/2026-10-02-7.log.gz`（18:05–18:13）有 ClickSpeedLimiter/AttackRaytrace，无 double/pattern；更晚的 `logs/latest.log`（18:37–18:41）在 18:39:55、18:40:00 有 ClickPatterns，18:40:06 后服务端切到 GrimAC。日志未记录当时 CPS 设置及逐包时间，不能把服务端报告的 76/106 c/s 直接认定为客户端真实发送速率，或据此断言某种随机分布能通过 Intave。Astra 不增加双击，也不改变现有攻击后移动报告修复。
   - Rotation：`None`、`Snap`（连续 yaw）、`Wrapped`（把 atan2 的 -180..180 直接发出去，对照用）、`Smooth`（每 tick 最多转 `Turn Speed`）、`Claude1`（实验性，见下）。
   - `Silent` 只改上报的视角；`Movement Corrector`（原来的 `Movement Fix` 开关，见下面"Movement Corrector"一节）让走路跟上报的朝向对上。
   - AutoBlock：`Hold`（一直举着、隔着格挡攻击）、`SameTick`（同一 tick 放下、攻击、再举起）、`Claude2`（实验性，见下）。1.8 用剑（ViaFabricPlus 给剑加了格挡组件），其他版本用副手的盾。
@@ -264,6 +266,12 @@ loyisa 自己装了 GrimAC，并把告警广播给玩家，所以录制里的聊
   - `EventStrafe`（`Entity.moveRelative`，只对本地玩家）：改按键推动所用的 yaw。
   - `EventStopUsingItem`（`Minecraft.handleKeybinds`）：右键没按着时原版会松开正在用的物品；取消它就等于一直按着。
   - `EventMotion.forceRotation()`：本 tick 即使视角和客户端记录的相同，也强制上报。
+
+### 静止攻击后转身关闭的射线问题（2026-10-02）
+
+- 录包几何回放复现了两组告警：相同攻击朝向下的 3 刀 / 1 刀均命中目标，但期间只有 TickEnd，没有移动包；随后关闭、恢复镜头时分别转了约 84° / 183°，服务器紧接着返回 3 条 / 1 条 AttackRaytrace。另一次 6 刀积压也对应 6 条告警。回放使用 `Rotations.hit`，验证的是几何和包顺序，不模拟 Intave 的内部实现。
+- `AuraAttackCycle` 记录攻击后尚未上报的朝向，强制后续普通移动报告包含旋转。关闭时若尚未完成这一报告，先上报攻击朝向，再恢复镜头；关闭后清空状态，撤销移动修正。`AuraAttackCycleTest` 覆盖稳定朝向的攻击、镜头交接、取消报告和 tick 中途关闭。
+- Criticals 的 Full 包和 VFP 1.17–1.20.5 使用物品前的额外 PosRot 保留当前静默瞄准方向，避免它们提前用镜头方向排空待检查攻击。传送确认包保留服务器要求的原始角度。
 
 ### 实验环境（沿用上一节，另加一台带插件的 1.8 服）
 - **Paper 1.8.8**（build 445，JDK 21）+ **ViaVersion 5.12.0** + **GrimAC 2.3.74-8eb5f28**。服务器上的 Grim 和 SelfDetection 内嵌的是同一个提交，所以每个场景都有两份判决可以逐项对照。

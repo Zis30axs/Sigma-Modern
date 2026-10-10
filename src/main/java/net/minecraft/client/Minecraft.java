@@ -1881,7 +1881,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                         // (@WrapOperation on MultiPlayerGameMode#hasMissTime ordinal 1). In <= 1.7 this code
                         // sat in the BLOCK case and so never ran, which means no 10-tick miss penalty there.
                         // The ordinal 0 call in the null-hitResult branch above deliberately stays unwrapped.
-                        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_7_6) && this.gameMode.hasMissTime()) {
+                        // Sigma hook: remove only the ordinary miss penalty, preserving GUI and null-hit protections.
+                        if (ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_7_6) && this.gameMode.hasMissTime()
+                                && com.mentalfrostbyte.jello.module.Modules.enabled(
+                                        com.mentalfrostbyte.jello.module.impl.combat.NoClickDelay.class) == null) {
                             this.missTime = 10;
                         }
 
@@ -3323,14 +3326,18 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private float getTickTargetMillis(final float defaultTickTargetMillis) {
+        // Sigma hook: BlockFly owns the legacy tower/speed timer only while its session is active.
+        com.mentalfrostbyte.jello.module.impl.movement.BlockFly blockFly =
+            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.movement.BlockFly.class);
+        float multiplier = blockFly == null ? 1.0F : blockFly.timerMultiplier();
         if (this.level != null) {
             TickRateManager manager = this.level.tickRateManager();
             if (manager.runsNormally()) {
-                return Math.max(defaultTickTargetMillis, manager.millisecondsPerTick());
+                return Math.max(defaultTickTargetMillis, manager.millisecondsPerTick()) / multiplier;
             }
         }
 
-        return defaultTickTargetMillis;
+        return defaultTickTargetMillis / multiplier;
     }
 
     public ItemModelResolver getItemModelResolver() {

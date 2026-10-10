@@ -25,6 +25,7 @@ public class GuiRenderState {
     private int firstStratumAfterBlur = Integer.MAX_VALUE;
     private GuiRenderState.Node current;
     private final Set<Object> itemModelIdentities = new HashSet<>();
+    private final List<com.mentalfrostbyte.jello.gui.modern.ModernHudBlur.Element> sigma$hudBlur = new ArrayList<>();
     private @Nullable ScreenRectangle lastElementBounds;
     public @Nullable PanoramaRenderState panoramaRenderState;
     public Vector4f clearColorOverride = new Vector4f(0.0F);
@@ -82,6 +83,15 @@ public class GuiRenderState {
             this.current.addGuiElement(blitState);
             this.addDebugRectangleIfEnabled(blitState.bounds());
         }
+    }
+
+    public void sigma$addHudBlur(final com.mentalfrostbyte.jello.gui.modern.ModernHudBlur.Element element) {
+        this.sigma$hudBlur.add(element);
+        this.addGuiElement(element);
+    }
+
+    public List<com.mentalfrostbyte.jello.gui.modern.ModernHudBlur.Element> sigma$hudBlur() {
+        return this.sigma$hudBlur;
     }
 
     private void addDebugRectangleIfEnabled(final @Nullable ScreenRectangle bounds) {
@@ -261,6 +271,7 @@ public class GuiRenderState {
 
     public void reset() {
         this.itemModelIdentities.clear();
+        this.sigma$hudBlur.clear();
         this.strata.clear();
         this.firstStratumAfterBlur = Integer.MAX_VALUE;
         this.nextStratum();

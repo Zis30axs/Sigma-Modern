@@ -12,6 +12,8 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
@@ -41,7 +43,7 @@ final class ClassicSettingsPage {
     private static final int FIRST_ROW = 35;
 
     private enum Kind {
-        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR
+        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR, KEY, ITEMS
     }
 
     private record Row(Kind kind, Setting<?> setting, int top, int height) {
@@ -66,6 +68,7 @@ final class ClassicSettingsPage {
     }
 
     void close() {
+        this.interactions.cancelKeyCapture();
         this.closing = true;
         this.slide.changeDirection(Animation.Direction.BACKWARDS);
         this.openChoice = null;
@@ -79,6 +82,7 @@ final class ClassicSettingsPage {
     }
 
     boolean typing() {
+        if (this.interactions.isCapturingKey()) return true;
         for (LegacyTextField field : this.fields.values()) {
             if (field.focused()) {
                 return true;
@@ -112,6 +116,12 @@ final class ClassicSettingsPage {
                 pitch = 55;
             } else if (setting instanceof ColorSetting) {
                 kind = Kind.COLOR;
+                pitch = 55;
+            } else if (setting instanceof KeySetting) {
+                kind = Kind.KEY;
+                pitch = 55;
+            } else if (setting instanceof ItemListSetting) {
+                kind = Kind.ITEMS;
                 pitch = 55;
             } else {
                 kind = Kind.TEXT;
@@ -173,6 +183,18 @@ final class ClassicSettingsPage {
                 String key = binding ? "Press a key..." : LegacyKeys.name(this.module.getKeybind());
                 String mode = this.module.getKeybind().mode().name().charAt(0) + this.module.getKeybind().mode().name().substring(1).toLowerCase(Locale.ROOT);
                 this.choiceBox(c, x + 100, y - 1, 120, 20, key + "  (" + mode + ")", mx, my, alpha, false);
+            }
+            case KEY -> {
+                KeySetting setting = (KeySetting) row.setting();
+                c.text(Face.CLASSIC, 20, setting.getName(), x, y, LegacyCanvas.alpha(0xFF010101, alpha));
+                this.choiceBox(c, x, y + 27, 170, 20, this.interactions.displayValue(setting), mx, my, alpha, this.interactions.isBinding(setting));
+                this.description(c, setting, x + 195, y + 4, alpha);
+            }
+            case ITEMS -> {
+                ItemListSetting setting = (ItemListSetting) row.setting();
+                c.text(Face.CLASSIC, 20, setting.getName(), x, y, LegacyCanvas.alpha(0xFF010101, alpha));
+                this.choiceBox(c, x, y + 27, 170, 20, setting.displayLabel() + "  >", mx, my, alpha, false);
+                this.description(c, setting, x + 195, y + 4, alpha);
             }
             case BOOLEAN -> {
                 BooleanSetting setting = (BooleanSetting) row.setting();
@@ -338,6 +360,16 @@ final class ClassicSettingsPage {
                 case BIND -> {
                     if (mx >= ROW_X + 100 && mx < ROW_X + 220) {
                         this.interactions.handleKeybindClick(this.module, button);
+                    }
+                }
+                case KEY -> {
+                    if (button == 0 && mx >= ROW_X && mx < ROW_X + 170 && my >= y + 27 && my < y + 47) {
+                        this.interactions.startBind((KeySetting) row.setting());
+                    }
+                }
+                case ITEMS -> {
+                    if (button == 0 && mx >= ROW_X && mx < ROW_X + 170 && my >= y + 27 && my < y + 47) {
+                        this.interactions.handleSettingClick(row.setting(), 0, 0, 1);
                     }
                 }
                 case BOOLEAN -> {

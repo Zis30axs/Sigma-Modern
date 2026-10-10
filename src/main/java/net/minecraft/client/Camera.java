@@ -329,6 +329,13 @@ public class Camera implements TrackedWaypoint.Camera {
             );
         }
 
+        // Sigma hook: snap rotation is a render choice; it must never change the player's physical view/input.
+        if (this.entity == this.minecraft.player && !this.entity.isPassenger()) {
+            com.mentalfrostbyte.jello.module.impl.movement.BlockFly blockFly =
+                com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.movement.BlockFly.class);
+            com.mentalfrostbyte.jello.util.math.Rotations.Rotation look = blockFly == null ? null : blockFly.cameraRotation();
+            if (look != null) this.setRotation(look.yaw(), look.pitch());
+        }
         this.detached = !this.minecraft.options.getCameraType().isFirstPerson();
         if (this.detached) {
             if (this.minecraft.options.getCameraType().isMirrored()) {

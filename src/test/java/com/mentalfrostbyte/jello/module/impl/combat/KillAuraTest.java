@@ -115,15 +115,6 @@ class KillAuraTest {
     }
 
     @Test
-    void solRecognizesOnlyExplicitLoopbackAddresses() {
-        assertTrue(KillAura.isLoopbackAddress("127.0.0.1:25565"));
-        assertTrue(KillAura.isLoopbackAddress("localhost"));
-        assertTrue(KillAura.isLoopbackAddress("[::1]:25565"));
-        assertFalse(KillAura.isLoopbackAddress("example.org:25565"));
-        assertFalse(KillAura.isLoopbackAddress("192.168.1.20:25565"));
-    }
-
-    @Test
     void movCorCanFollowTheModuleWithoutChangingTheOldChoices() {
         MovementCorrector corrector = new MovementCorrector();
         assertEquals(MovementCorrection.STRICT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
@@ -152,6 +143,15 @@ class KillAuraTest {
         this.number(aura, "Pause Chance", 0.0F);
         assertFalse(this.visible(aura, "Pause Min"));
         assertFalse(this.visible(aura, "Pause Max"));
+
+        this.choose(aura, "CPS Mode", KillAura.CpsMode.ASTRA);
+        assertEquals("Astra", EnumSetting.label(KillAura.CpsMode.ASTRA));
+        assertEquals("ASTRA", aura.setting("CPS Mode").orElseThrow().toJson().getAsString());
+        assertTrue(this.visible(aura, "Min CPS"));
+        assertTrue(this.visible(aura, "Max CPS"));
+        assertFalse(this.visible(aura, "Random MS"));
+        assertFalse(this.visible(aura, "Jitter MS"));
+        assertFalse(this.visible(aura, "Pause Chance"));
 
         this.choose(aura, "Timing", KillAura.Timing.COOLDOWN);
         assertFalse(this.visible(aura, "Min CPS"));

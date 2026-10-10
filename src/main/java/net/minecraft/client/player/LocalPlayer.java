@@ -12,10 +12,13 @@ import net.minecraft.client.Minecraft;
 // Sigma: local player events.
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.EventState;
+import com.mentalfrostbyte.jello.event.impl.player.EventGetFovModifier;
 import com.mentalfrostbyte.jello.event.impl.player.EventLivingUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventSafeWalk;
+import com.mentalfrostbyte.jello.util.math.ReportedRotations;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.BookEditScreen;
@@ -147,6 +150,12 @@ public class LocalPlayer extends AbstractClientPlayer
     private final ClientRecipeBook recipeBook;
     private final TickThrottler dropSpamThrottler = new TickThrottler(20, 1280);
     private final List<AmbientSoundHandler> ambientSoundHandlers = Lists.newArrayList();
+    // Sigma: shared packet-facing state, independent of any cosmetic module's enabled state.
+    private final ReportedRotations reportedRotations = new ReportedRotations();
+
+    public ReportedRotations getReportedRotations() {
+        return this.reportedRotations;
+    }
 
     // MODIFIED for porting: was iris's MixinLocalPlayer (its LocalPlayerInterface implementation)
     @Override
@@ -336,6 +345,9 @@ public class LocalPlayer extends AbstractClientPlayer
 
             // Sigma hook: end of the player's tick, after this tick's movement has been reported.
             EventBus.call(new EventUpdate(EventState.POST));
+            this.reportedRotations.tick(this.getYRot(), this.yBodyRot, this.getX() - this.xo, this.getZ() - this.zo,
+                this.attackAnim > 0.0F, this.getMaxHeadRotationRelativeToBody(),
+                this.isPassenger() || this.isSleeping() || !this.isAlive());
         }
     }
 
@@ -362,6 +374,14 @@ public class LocalPlayer extends AbstractClientPlayer
     protected float getMovementXRot() {
         com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
         return corrector == null ? super.getMovementXRot() : corrector.xRot(super.getMovementXRot());
+    }
+
+    /** Sigma: finishes a pending attack report and restores a silent look when its module stops mid-tick. */
+    public void sendRotation(final float yaw, final float pitch) {
+        this.connection.send(new ServerboundMovePlayerPacket.Rot(yaw, pitch, this.onGround(), this.horizontalCollision));
+        // Keep the normal report in step so it does not resend this restoration in the same tick.
+        this.yRotLast = yaw;
+        this.xRotLast = pitch;
     }
 
     private void sendPosition() {
@@ -1000,7 +1020,9 @@ public class LocalPlayer extends AbstractClientPlayer
 
         this.input.tick();
         // Sigma hook: the keys held this tick, before anything reads them; a module may press jump or sneak.
-        this.input.keyPresses = EventBus.call(new EventMovementInput(this.input.keyPresses)).getInput();
+        EventMovementInput movementInput = EventBus.call(new EventMovementInput(this.input.keyPresses, this.input.moveVector));
+        this.input.keyPresses = movementInput.getInput();
+        this.input.moveVector = movementInput.getMoveVector();
         // Sigma hook: the movement corrector turns the direction keys to the facing the server was told about. After the
         // event, so that a module that presses jump or sneak is not undone; the movement vector is worked out again from
         // whatever it leaves, and the input packet then reports those keys too. Not while riding: the mount steers by its
@@ -1009,7 +1031,9 @@ public class LocalPlayer extends AbstractClientPlayer
         if (corrector != null && !this.isPassenger()) {
             Input corrected = corrector.correct(this.input.keyPresses, this.getYRot());
             if (!corrected.equals(this.input.keyPresses)) {
+                float inputMagnitude = this.input.moveVector.length();
                 this.input.replaceKeyPresses(corrected);
+                this.input.moveVector = this.input.moveVector.normalized().scale(inputMagnitude);
             }
         }
         this.minecraft.getTutorial().onInput(this.input);
@@ -1318,6 +1342,18 @@ public class LocalPlayer extends AbstractClientPlayer
 
     public boolean isHandsBusy() {
         return this.handsBusy;
+    }
+
+    @Override
+    protected boolean isStayingOnGroundSurface() {
+        // Sigma hook: keep vanilla's version-aware edge collision checks, without faking a sneak key.
+        return EventBus.call(new EventSafeWalk(super.isStayingOnGroundSurface())).isSafe();
+    }
+
+    @Override
+    public float getFieldOfViewModifier(final boolean firstPerson, final float effectScale) {
+        // Sigma hook: only the local player's FOV is configurable by enabled modules.
+        return EventBus.call(new EventGetFovModifier(super.getFieldOfViewModifier(firstPerson, effectScale))).getFovModifier();
     }
 
     @Override

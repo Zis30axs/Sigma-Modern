@@ -385,6 +385,8 @@ public final class Window implements AutoCloseable {
     private void onFocus(final long handle, final boolean focused) {
         if (handle == this.handle) {
             this.focused = focused;
+            // Sigma hook: release the temporary HUD editor immediately on Alt-Tab, after updating focus state.
+            com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.onWindowFocusChanged(focused);
         }
     }
 

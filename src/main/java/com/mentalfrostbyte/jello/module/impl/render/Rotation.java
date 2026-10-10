@@ -2,12 +2,11 @@ package com.mentalfrostbyte.jello.module.impl.render;
 
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
-import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.util.math.ReportedRotations;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
-import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.util.Mth;
 import org.jspecify.annotations.Nullable;
 
@@ -23,23 +22,17 @@ import org.jspecify.annotations.Nullable;
  * <p>The reported rotation is taken from the packets themselves, not from a module, so it is whatever anything at all
  * made the client say - a teleport confirmation included. The body is not reported; it is worked out the way a remote
  * client works it out for a player it only knows the head of ({@code LivingEntity.tickHeadTurn}): it drifts towards
- * the way the player walks and is kept within reach of the head. Switching on starts from the player's own rotation, so
- * if the server holds a different look at that moment the model shows it only from the next movement packet that
- * carries one.</p>
+ * the way the player walks and is kept within reach of the head. The local player's shared reported-look state is
+ * tracked even while this cosmetic module is off, and ignores cancelled or replaced-away movement packets.</p>
  *
  * <p>The vanilla renderer asks {@link #applyTo} for the local player's render state; that is the only place the game
  * touches this module.</p>
  */
 public class Rotation extends Module {
 
-    /** LivingEntity.tickHeadTurn: how much of the way to the walking direction the body turns in a tick. */
-    private static final float BODY_EASE = 0.3F;
-
-    // Game thread. The head's yaw and pitch this tick and the last, the yaw and pitch the last packet carried, and the
+    // Game thread. The head's yaw and pitch this tick and the last, and the
     // body's yaw this tick and the last; the model between two ticks is a blend of the pairs, as vanilla's is.
     private @Nullable LocalPlayer owner;
-    private float sentYaw;
-    private float sentPitch;
     private float headYaw;
     private float headYawO;
     private float pitch;
@@ -61,21 +54,6 @@ public class Rotation extends Module {
         this.owner = null;
     }
 
-    /**
-     * The look on the wire. Movement packets are sent from the game thread; one from anywhere else is not this player's
-     * tick and is left alone, as {@code KillAura} does.
-     */
-    @EventTarget
-    public void onSend(final EventSendPacket event) {
-        if (!mc.isSameThread() || this.owner == null || this.owner != mc.player) {
-            return;
-        }
-        if (event.getPacket() instanceof ServerboundMovePlayerPacket move && move.hasRotation()) {
-            this.sentYaw = move.getYRot(this.sentYaw);
-            this.sentPitch = move.getXRot(this.sentPitch);
-        }
-    }
-
     /** Once a tick, after the player's own tick has reported: the model moves on to what the server now holds. */
     @EventTarget
     public void onTick(final EventTick event) {
@@ -95,11 +73,11 @@ public class Rotation extends Module {
         this.headYawO = this.headYaw;
         this.pitchO = this.pitch;
         this.bodyYawO = this.bodyYaw;
-        this.headYaw = this.sentYaw;
-        this.pitch = this.sentPitch;
-        this.bodyYaw = stepBody(this.bodyYaw, this.headYaw,
-                player.getX() - player.xo, player.getZ() - player.zo,
-                player.attackAnim > 0.0F, player.getMaxHeadRotationRelativeToBody());
+        ReportedRotations.Sample reported = player.getReportedRotations().sample(1.0F,
+                player.getYRot(), player.getXRot(), player.yBodyRot);
+        this.headYaw = reported.yaw();
+        this.pitch = reported.pitch();
+        this.bodyYaw = reported.bodyYaw();
     }
 
     /**
@@ -122,9 +100,11 @@ public class Rotation extends Module {
         if (player == null) {
             return;
         }
-        this.sentYaw = this.headYaw = this.headYawO = player.getYRot();
-        this.sentPitch = this.pitch = this.pitchO = player.getXRot();
-        this.bodyYaw = this.bodyYawO = player.yBodyRot;
+        ReportedRotations.Sample reported = player.getReportedRotations().sample(1.0F,
+                player.getYRot(), player.getXRot(), player.yBodyRot);
+        this.headYaw = this.headYawO = reported.yaw();
+        this.pitch = this.pitchO = reported.pitch();
+        this.bodyYaw = this.bodyYawO = reported.bodyYaw();
     }
 
     /**
@@ -138,22 +118,7 @@ public class Rotation extends Module {
      */
     static float stepBody(final float bodyYaw, final float headYaw, final double dx, final double dz,
                           final boolean swinging, final float maxHeadTurn) {
-        float target = bodyYaw;
-        if ((float) (dx * dx + dz * dz) > 0.0025000002F) {
-            float walkDirection = (float) Mth.atan2(dz, dx) * (180.0F / (float) Math.PI) - 90.0F;
-            float off = Mth.abs(Mth.wrapDegrees(headYaw) - walkDirection);
-            target = 95.0F < off && off < 265.0F ? walkDirection - 180.0F : walkDirection;
-        }
-        if (swinging) {
-            target = headYaw;
-        }
-
-        float body = bodyYaw + Mth.wrapDegrees(target - bodyYaw) * BODY_EASE;
-        float headDiff = Mth.wrapDegrees(headYaw - body);
-        if (Math.abs(headDiff) > maxHeadTurn) {
-            body += headDiff - Mth.sign(headDiff) * maxHeadTurn;
-        }
-        return body;
+        return ReportedRotations.stepBody(bodyYaw, headYaw, dx, dz, swinging, maxHeadTurn);
     }
 
     /**

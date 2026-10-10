@@ -82,6 +82,7 @@ public class GuiRenderer implements AutoCloseable {
         .thenComparing(GuiElementRenderState::textureSetup, TEXTURE_COMPARATOR);
     private final Map<Object, OversizedItemRenderer> oversizedItemRenderers = new Object2ObjectOpenHashMap<>();
     private final GuiRenderState renderState;
+    private final com.mentalfrostbyte.jello.gui.modern.ModernHudBlur sigma$hudBlur = new com.mentalfrostbyte.jello.gui.modern.ModernHudBlur();
     private final List<GuiRenderer.Draw> draws = new ArrayList<>();
     private final StagedVertexBuffer vertexBuffer = new StagedVertexBuffer(() -> "GUI Vertex Buffer", 786432);
     private int firstDrawIndexAfterBlur = Integer.MAX_VALUE;
@@ -124,6 +125,11 @@ public class GuiRenderer implements AutoCloseable {
         if (this.renderState.panoramaRenderState != null) {
             this.cubeMap.render(10.0F, this.renderState.panoramaRenderState.spin());
         }
+
+        // Sigma hook: snapshot the completed world before any GUI draw; only requested HUD shapes sample the blur.
+        Minecraft minecraft = Minecraft.getInstance();
+        this.sigma$hudBlur.prepare(this.renderState.sigma$hudBlur(), minecraft.gameRenderer.mainRenderTarget(),
+                minecraft.gameRenderer.gameRenderState().windowRenderState.guiScale, minecraft.gameRenderer.getResourcePool());
 
         profiler.push("prepare");
         this.prepare();
@@ -422,6 +428,7 @@ public class GuiRenderer implements AutoCloseable {
 
     @Override
     public void close() {
+        this.sigma$hudBlur.close();
         this.vertexBuffer.close();
         if (this.itemAtlas != null) {
             this.itemAtlas.close();

@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">Modern TargetHUD 布局与拖动示意</title>
+  <desc id="desc">设计示意，并非游戏截图。左右对比 Normal 固定位置与 Follow Target 跟随目标。名片按实际 216 乘 122 布局绘制，含头像、姓名、生命值与吸收、距离、延迟、装备与耐久。按住 Alt 后左键拖动，右键重置，松开保存。七个可拖动组件为水印、TabGUI、按键显示、模块列表、药水状态、音乐岛和 TargetHUD。</desc>
+  <defs>
+    <linearGradient id="page" x2="0" y2="1">
+      <stop stop-color="#101c2a"/>
+      <stop offset="1" stop-color="#09131f"/>
+    </linearGradient>
+    <linearGradient id="scene" x2="0" y2="1">
+      <stop stop-color="#162a3b"/>
+      <stop offset="1" stop-color="#0c1b28"/>
+    </linearGradient>
+    <linearGradient id="sheen" x2="0" y2="1">
+      <stop stop-color="#c3efff" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#c3efff" stop-opacity="0"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 7 4 1 7" fill="none" stroke="#9ddeff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <symbol id="heart" viewBox="0 0 24 24">
+      <path d="M20.3 5.7a5.2 5.2 0 0 0-7.4 0L12 6.6l-.9-.9a5.2 5.2 0 0 0-7.4 7.4L12 21l8.3-7.9a5.2 5.2 0 0 0 0-7.4Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="distance" viewBox="0 0 24 24">
+      <path d="M3 12h18M7 8l-4 4 4 4m10-8 4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="signal" viewBox="0 0 24 24">
+      <path d="M4 19v-3m5 3v-6m6 6V9m5 10V5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="shield" viewBox="0 0 24 24">
+      <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M12 8v7m-3-3.5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <g id="target" fill="#94bfd0" stroke="#c0e6f3" stroke-width="1.3">
+      <rect x="-10" y="0" width="20" height="20" rx="2"/>
+      <path d="M-12 25H12V55H-12Z" fill="#396782"/>
+      <path d="M-17 27V53M17 27V53M-7 57V80M7 57V80" fill="none" stroke-width="8" stroke-linecap="round"/>
+    </g>
+    <g id="card" font-family="Georgia, 'Microsoft YaHei', sans-serif">
+      <!-- Same 216 × 122 coordinate system as ModernTargetHud; sample item art is schematic. -->
+      <rect x="-3" y="3" width="222" height="124" rx="12" fill="#02070d" opacity=".42"/>
+      <rect width="216" height="122" rx="10" fill="#8bbfd9" opacity=".40"/>
+      <rect x="1" y="1" width="214" height="120" rx="9" fill="#0a1926" opacity=".94"/>
+      <path d="M12 1H204V16H12Z" fill="url(#sheen)"/>
+      <rect x="10" y="17" width="42" height="42" rx="8" fill="#29495b"/>
+      <g shape-rendering="crispEdges">
+        <path d="M13 20H49V56H13Z" fill="#bd8c65"/>
+        <path d="M13 20H49V29H44V33H39V29H22V34H13Z" fill="#503a29"/>
+        <path d="M18 37H27V41H18ZM36 37H45V41H36Z" fill="#eceded"/>
+        <path d="M23 37H27V41H23ZM36 37H40V41H36Z" fill="#6579a2"/>
+        <path d="M27 42H35V47H27Z" fill="#956445"/>
+        <path d="M23 49H39V54H23Z" fill="#65402d"/>
+      </g>
+      <text x="63" y="14" fill="#a2bfd1" font-size="6.6" letter-spacing="1">TARGET</text>
+      <text x="62" y="29" fill="#eaf6ff" font-size="11">Steve</text>
+      <use href="#heart" x="62" y="35" width="8" height="8" color="#86e3c3"/>
+      <text x="74" y="42" fill="#eaf6ff" font-size="9">18 / 20</text>
+      <rect x="62" y="51" width="142" height="5" rx="2" fill="#ffffff" opacity=".18"/>
+      <rect x="62" y="51" width="116" height="5" rx="2" fill="#ef7f8e" opacity=".65"/>
+      <rect x="62" y="51" width="107" height="5" rx="2" fill="#86e3c3"/>
+      <rect x="180" y="51" width="24" height="5" rx="2" fill="#f1cf86"/>
+      <path d="M12 64.5H204" stroke="#c9edff" stroke-opacity=".15"/>
+      <use href="#distance" x="12" y="71" width="8" height="8" color="#a2bfd1"/>
+      <text x="23" y="78" fill="#a2bfd1" font-size="8.25">13m</text>
+      <use href="#signal" x="53" y="71" width="8" height="8" color="#a2bfd1"/>
+      <text x="64" y="78" fill="#a2bfd1" font-size="8.25">46ms</text>
+      <use href="#shield" x="104" y="71" width="8" height="8" color="#f1cf86"/>
+      <text x="115" y="78" fill="#f1cf86" font-size="8.25">+4</text>
+      <g fill="#2f5065" fill-opacity=".45">
+        <rect x="26" y="91" width="24" height="24" rx="4"/>
+        <rect x="54" y="91" width="24" height="24" rx="4"/>
+        <rect x="82" y="91" width="24" height="24" rx="4"/>
+        <rect x="110" y="91" width="24" height="24" rx="4"/>
+        <rect x="138" y="91" width="24" height="24" rx="4"/>
+        <rect x="166" y="91" width="24" height="24" rx="4"/>
+      </g>
+      <g fill="#79cbd0" stroke="#c0edf0" stroke-width=".7" stroke-linejoin="round">
+        <path d="M32 98 35 95H41L44 98V104H41V101H35V104H32Z"/>
+        <path d="M59 96 63 94 66 97 69 94 73 96 71 101 70 100V106H62V100L61 101Z"/>
+        <path d="M88 95H100V106H96V100H92V106H88Z"/>
+        <path d="M116 95H120V103H122V106H115V103H116ZM124 95H128V106H122V103H124Z"/>
+        <path d="m145 105 10-11 2 2-10 11ZM144 101l6 6"/>
+        <path d="m172 95 6-2 6 2v6l-6 6-6-6Z" fill="#937250"/>
+      </g>
+      <g fill="#86e3c3" font-size="6" text-anchor="middle">
+        <text x="38" y="115">96%</text><text x="66" y="115">88%</text>
+        <text x="94" y="115">91%</text><text x="122" y="115">74%</text>
+        <text x="150" y="115">83%</text><text x="178" y="115">100%</text>
+      </g>
+    </g>
+  </defs>
+
+  <rect width="1200" height="680" fill="url(#page)"/>
+  <g font-family="'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif">
+    <text x="36" y="49" fill="#eaf6ff" font-size="27" font-weight="600">TargetHUD · 布局与拖动</text>
+    <text x="36" y="80" fill="#a2bfd1" font-size="14">设计示意 · 非游戏截图　｜　按实际 216 × 122 布局绘制，数据与装备为示例</text>
+
+    <g transform="translate(36 112)">
+      <rect width="544" height="366" rx="16" fill="url(#scene)" stroke="#33576b"/>
+      <text x="22" y="34" fill="#eaf6ff" font-size="19" font-weight="600">Normal · 固定位置</text>
+      <text x="22" y="59" fill="#a2bfd1" font-size="13">拖动后，卡片停留在设定的屏幕位置</text>
+      <path d="M1 164H543M38 365 193 164M178 365 244 164M366 365 300 164M506 365 351 164" stroke="#32536a" stroke-opacity=".35" fill="none"/>
+      <use href="#target" transform="translate(404 77) scale(.72)" opacity=".65"/>
+      <path d="M308 110H366" stroke="#9ddeff" stroke-width="1.5" stroke-dasharray="4 5" marker-end="url(#arrow)"/>
+      <text x="300" y="98" fill="#a2bfd1" font-size="12">目标移动</text>
+      <use href="#card" transform="translate(110 166) scale(1.5)"/>
+      <path d="M88 248H103" stroke="#9ddeff" stroke-width="1.3" marker-end="url(#arrow)"/>
+      <text x="23" y="251" fill="#9ddeff" font-size="12">固定锚点</text>
+    </g>
+
+    <g transform="translate(620 112)">
+      <rect width="544" height="366" rx="16" fill="url(#scene)" stroke="#33576b"/>
+      <text x="22" y="34" fill="#eaf6ff" font-size="19" font-weight="600">Follow Target · 跟随目标</text>
+      <text x="22" y="59" fill="#a2bfd1" font-size="13">卡片贴近目标；拖动调整与目标的相对偏移</text>
+      <path d="M1 258H543M38 365 193 258M178 365 244 258M366 365 300 258M506 365 351 258" stroke="#32536a" stroke-opacity=".35" fill="none"/>
+      <use href="#target" transform="translate(118 162)"/>
+      <circle cx="118" cy="196" r="5" fill="#9ddeff"/>
+      <path d="M127 196H187" stroke="#9ddeff" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+      <use href="#card" transform="translate(196 108) scale(1.5)"/>
+      <path d="M72 286C99 301 135 301 163 286" fill="none" stroke="#9ddeff" stroke-width="1.4" marker-end="url(#arrow)"/>
+      <text x="91" y="324" fill="#a2bfd1" font-size="12">目标移动，卡片随行</text>
+    </g>
+
+    <g fill="#a2bfd1" font-size="14" text-anchor="middle">
+      <text x="214" y="518">头像与姓名</text>
+      <text x="540" y="518">生命值 · 金色吸收量</text>
+      <text x="930" y="518">距离 · 延迟 · 装备与耐久</text>
+    </g>
+    <rect x="36" y="548" width="1128" height="54" rx="12" fill="#152b3c" stroke="#315269"/>
+    <text x="600" y="582" fill="#eaf6ff" font-size="18" text-anchor="middle">按住 Alt　→　左键拖动　·　右键重置　·　松开保存</text>
+    <text x="600" y="637" fill="#a2bfd1" font-size="14" text-anchor="middle">可拖动：水印 · TabGUI · 按键显示 · 模块列表 · 药水状态 · 音乐岛 · TargetHUD</text>
+  </g>
+</svg>

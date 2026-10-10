@@ -55,6 +55,14 @@ public class SubmitNodeStorage implements SubmitNodeCollector {
     }
 
     @Override
+    public void submitNameTag(
+        final PoseStack poseStack, final @Nullable Vec3 nameTagAttachment, final int offset, final Component name,
+        final boolean seeThrough, final int lightCoords, final CameraRenderState camera, final boolean suspect
+    ) {
+        this.order(0).submitNameTag(poseStack, nameTagAttachment, offset, name, seeThrough, lightCoords, camera, suspect);
+    }
+
+    @Override
     public void submitText(
         final PoseStack poseStack,
         final float x,

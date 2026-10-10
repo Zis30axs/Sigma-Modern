@@ -59,6 +59,7 @@ public class Client implements MinecraftInstance {
         new com.mentalfrostbyte.jello.music.MusicEnvironmentListener(this.musicEffects);
 
     private JsonObject config = new JsonObject();
+    private final com.mentalfrostbyte.jello.gui.modern.HudLayout hudLayout = new com.mentalfrostbyte.jello.gui.modern.HudLayout();
     private boolean modulesRegistered;
     private boolean started;
     // -1 means "no screenshot pending"; set by -Dsigma.debug.screenshotAfterFrames so the capture happens
@@ -139,6 +140,7 @@ public class Client implements MinecraftInstance {
             boolean hasClientMode = this.config.has("clientMode");
             this.clientModeManager.read(this.config);
             this.translations.read(this.config);
+            this.hudLayout.read(this.config);
 
             if (!this.modulesRegistered) {
                 this.moduleManager.registerAll();
@@ -644,6 +646,7 @@ public class Client implements MinecraftInstance {
         this.musicPlayer.write(this.config);
         this.musicLibrary.write(this.config);
         this.musicEffects.write(this.config);
+        this.hudLayout.write(this.config);
         try {
             JsonFileUtil.write(this.getConfigFile(), this.config);
         } catch (IOException failure) {
@@ -694,6 +697,10 @@ public class Client implements MinecraftInstance {
 
     public JsonObject getConfig() {
         return this.config;
+    }
+
+    public com.mentalfrostbyte.jello.gui.modern.HudLayout getHudLayout() {
+        return this.hudLayout;
     }
 
     public Path getDirectory() {

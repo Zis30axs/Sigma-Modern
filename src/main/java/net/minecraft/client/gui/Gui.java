@@ -131,6 +131,8 @@ public class Gui {
     }
 
     public void update() {
+        // Sigma hook: validate the temporary editor before each frame, including presentation/world changes.
+        com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.update();
         this.toastManager.update();
 
         try {
@@ -152,8 +154,17 @@ public class Gui {
         profiler.push("gui");
         this.guiRenderState.reset();
         GuiGraphicsExtractor graphics = new GuiGraphicsExtractor(this.minecraft, this.guiRenderState, xMouse, yMouse);
+        // Sigma hook: one validated TRK focus snapshot shared by world labels, ESP and target indicators.
+        com.mentalfrostbyte.jello.gui.modern.ModernTrkFocus.beginFrame(graphics, shouldRenderLevel);
         if (shouldRenderLevel) {
             profiler.push("hud");
+            // Sigma hook: world ESP and player labels sit behind the ordinary HUD chrome.
+            com.mentalfrostbyte.jello.gui.ProjectileTrajectoryRenderer.render(graphics,
+                    deltaTracker.getGameTimeDeltaPartialTick(false));
+            com.mentalfrostbyte.jello.gui.modern.ModernEsp.render(graphics);
+            com.mentalfrostbyte.jello.gui.modern.ModernAuraIndicator.render(graphics);
+            com.mentalfrostbyte.jello.gui.modern.ModernNameTags.render(graphics);
+            com.mentalfrostbyte.jello.gui.modern.ModernTrkFocus.render(graphics);
             this.hud.extractRenderState(graphics, deltaTracker);
             profiler.pop();
         }
@@ -182,7 +193,9 @@ public class Gui {
                 com.mentalfrostbyte.jello.gui.modern.ModernWindowFrame.render(graphics);
                 // Sigma hook: the suspect list's drawer, resident over every screen while a world is loaded (a
                 // no-op unless the SuspectList module is on under SigmaModern).
-                com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.renderOverScreen(graphics, xMouse, yMouse);
+                if (!com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.isEditing()) {
+                    com.mentalfrostbyte.jello.gui.modern.ModernSuspectDrawer.renderOverScreen(graphics, xMouse, yMouse);
+                }
             } catch (Throwable t) {
                 CrashReport report = CrashReport.forThrowable(t, "Rendering screen");
                 CrashReportCategory category = report.addCategory("Screen render details");
@@ -218,7 +231,8 @@ public class Gui {
         }
 
         // MODIFIED for porting: resident Modern branding stays above in-game screens, even with F1.
-        if (shouldRenderLevel && resourcesLoaded && this.overlay == null) {
+        if (shouldRenderLevel && resourcesLoaded && this.overlay == null
+                && !com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.isEditing()) {
             com.mentalfrostbyte.jello.gui.modern.ModernHud.renderBrand(graphics);
         }
 

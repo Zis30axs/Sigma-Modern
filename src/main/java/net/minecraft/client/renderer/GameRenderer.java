@@ -440,6 +440,47 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
         }
     }
 
+    /** The world camera effects, shared by level rendering and this frame's projected Modern name tags. */
+    private Matrix4f sigma$worldCameraEffects(final CameraRenderState cameraState, final float worldPartialTicks) {
+        PoseStack bobStack = new PoseStack();
+        this.bobHurt(cameraState, bobStack);
+        if (this.gameRenderState.optionsRenderState.bobView) {
+            this.bobView(cameraState, bobStack);
+        }
+
+        Matrix4f effects = new Matrix4f(bobStack.last().pose());
+        LocalPlayer player = this.minecraft.player;
+        float screenEffectScale = this.gameRenderState.optionsRenderState.screenEffectScale;
+        float portalIntensity = Mth.lerp(worldPartialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
+        float nauseaIntensity = player.getEffectBlendFactor(MobEffects.NAUSEA, worldPartialTicks);
+        float spinningEffectIntensity = Math.max(portalIntensity, nauseaIntensity) * (screenEffectScale * screenEffectScale);
+        if (spinningEffectIntensity > 0.0F) {
+            float skew = 5.0F / (spinningEffectIntensity * spinningEffectIntensity + 5.0F) - spinningEffectIntensity * 0.04F;
+            skew *= skew;
+            Vector3f axis = new Vector3f(0.0F, Mth.SQRT_OF_TWO / 2.0F, Mth.SQRT_OF_TWO / 2.0F);
+            float angle = (this.spinningEffectTime + worldPartialTicks * this.spinningEffectSpeed) * (float) (Math.PI / 180.0);
+            // MODIFIED for porting: iris MixinModelViewBobbing#iris$applySpinningRotate / #iris$applySpinningScale - the spin
+            // is composed with bobbing here, then applied to the projection or model-view as the Iris path requires.
+            effects.rotate(angle, axis);
+            effects.scale(1.0F / skew, 1.0F, 1.0F);
+            effects.rotate(-angle, axis);
+        }
+        return effects;
+    }
+
+    /** A HUD projection cannot follow Panini's later nonlinear reprojection; retain vanilla name tags in that case. */
+    private boolean sigma$usesPaniniProjection(final CameraRenderState cameraState) {
+        if (!me.flashyreese.mods.sodiumextra.client.config.SodiumExtraFeatures.PANINI_PROJECTION) {
+            return false;
+        }
+        var settings = me.flashyreese.mods.sodiumextra.client.SodiumExtraClientMod.options().extraSettings;
+        // Match PaniniProjection#shouldApply; that predicate is private to the port's post effect.
+        return settings.paniniProjection && settings.paniniProjectionStrength > 0 && !settings.preventShaders
+                && this.minecraft.player != null && !this.minecraft.player.isScoping()
+                && !cameraState.isPanoramicMode && !cameraState.isFrustumCaptured
+                && !me.flashyreese.mods.sodiumextra.compat.IrisCompat.isShaderPackInUse();
+    }
+
     private void renderItemInHand(final CameraRenderState cameraState, final float deltaPartialTick, final Matrix4fc modelViewMatrix) {
         if (!cameraState.isPanoramicMode) {
             if (this.gameRenderState.optionsRenderState.cameraType.isFirstPerson()
@@ -507,7 +548,36 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
             this.lightmapRenderStateExtractor.extract(this.gameRenderState.lightmapRenderState, 1.0F);
             float cameraEntityPartialTicks = this.mainCamera.getCameraEntityPartialTicks(deltaTracker);
             this.extractCamera(deltaTracker, worldPartialTicks, cameraEntityPartialTicks);
-            this.minecraft.levelExtractor.extract(deltaTracker, this.mainCamera, worldPartialTicks);
+            // Sigma hook: capture names and their projection during the same extraction pass as the entities and HUD.
+            CameraRenderState cameraState = this.gameRenderState.levelRenderState.cameraRenderState;
+            if (this.sigma$usesPaniniProjection(cameraState)) {
+                com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(null, null);
+                com.mentalfrostbyte.jello.gui.modern.ModernNameTags.beginFrame(null, null);
+            } else {
+                Matrix4f worldToClip = new Matrix4f(cameraState.projectionMatrix)
+                        .mul(this.sigma$worldCameraEffects(cameraState, worldPartialTicks))
+                        .mul(cameraState.viewRotationMatrix);
+                // Match Projection#getMatrix's depth convention, normalizing only this HUD copy to [0, 1].
+                boolean irisUndoReverseZ = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled()
+                        && net.irisshaders.iris.Iris.isPackInUseQuick()
+                        && !net.irisshaders.iris.vertices.ImmediateState.ALWAYS_REVERSE;
+                if (irisUndoReverseZ || !RenderSystem.getDevice().getDeviceInfo().isZZeroToOne()) {
+                    worldToClip.m02((worldToClip.m02() + worldToClip.m03()) * 0.5F);
+                    worldToClip.m12((worldToClip.m12() + worldToClip.m13()) * 0.5F);
+                    worldToClip.m22((worldToClip.m22() + worldToClip.m23()) * 0.5F);
+                    worldToClip.m32((worldToClip.m32() + worldToClip.m33()) * 0.5F);
+                }
+                com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(cameraState, worldToClip);
+                com.mentalfrostbyte.jello.gui.modern.ModernNameTags.beginFrame(cameraState, worldToClip);
+            }
+            try {
+                this.minecraft.levelExtractor.extract(deltaTracker, this.mainCamera, worldPartialTicks);
+            } finally {
+                com.mentalfrostbyte.jello.gui.modern.ModernNameTags.finishFrame();
+            }
+        } else {
+            com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(null, null);
+            com.mentalfrostbyte.jello.gui.modern.ModernNameTags.beginFrame(null, null);
         }
 
         this.minecraft.gui.extractRenderState(deltaTracker, readyForLevelRendering, resourcesLoaded);
@@ -666,7 +736,6 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
     public void renderLevel(final DeltaTracker deltaTracker) {
         float worldPartialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
         float cameraEntityPartialTicks = this.mainCamera.getCameraEntityPartialTicks(deltaTracker);
-        LocalPlayer player = this.minecraft.player;
         ProfilerFiller profiler = Profiler.get();
         boolean renderOutline = this.shouldRenderBlockOutline();
         OptionsRenderState optionsState = this.gameRenderState.optionsRenderState;
@@ -683,34 +752,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
           onto the model-view matrix right before LevelRenderer#render (`bob * modelView`, not `modelView * bob`).
         */
         boolean iris$areShadersOn = net.irisshaders.iris.mixin.IrisMixinPlugin.isEnabled() && net.irisshaders.iris.Iris.isPackInUseQuick();
-        Matrix4f iris$bobMatrix = null;
+        Matrix4f effects = this.sigma$worldCameraEffects(cameraState, worldPartialTicks);
+        Matrix4f iris$bobMatrix = iris$areShadersOn ? effects : null;
         Matrix4f projectionMatrix = new Matrix4f(cameraState.projectionMatrix);
-        PoseStack bobStack = new PoseStack();
-        this.bobHurt(cameraState, bobStack);
-        if (optionsState.bobView) {
-            this.bobView(cameraState, bobStack);
-        }
-
-        if (iris$areShadersOn) {
-            iris$bobMatrix = new Matrix4f(bobStack.last().pose());
-        } else {
-            projectionMatrix.mul(bobStack.last().pose());
-        }
-        float screenEffectScale = optionsState.screenEffectScale;
-        float portalIntensity = Mth.lerp(worldPartialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
-        float nauseaIntensity = player.getEffectBlendFactor(MobEffects.NAUSEA, worldPartialTicks);
-        float spinningEffectIntensity = Math.max(portalIntensity, nauseaIntensity) * (screenEffectScale * screenEffectScale);
-        if (spinningEffectIntensity > 0.0F) {
-            float skew = 5.0F / (spinningEffectIntensity * spinningEffectIntensity + 5.0F) - spinningEffectIntensity * 0.04F;
-            skew *= skew;
-            Vector3f axis = new Vector3f(0.0F, Mth.SQRT_OF_TWO / 2.0F, Mth.SQRT_OF_TWO / 2.0F);
-            float angle = (this.spinningEffectTime + worldPartialTicks * this.spinningEffectSpeed) * (float) (Math.PI / 180.0);
-            // MODIFIED for porting: iris MixinModelViewBobbing#iris$applySpinningRotate / #iris$applySpinningScale - the spin
-            // goes onto the bob matrix as well.
-            Matrix4f iris$spinTarget = iris$areShadersOn ? iris$bobMatrix : projectionMatrix;
-            iris$spinTarget.rotate(angle, axis);
-            iris$spinTarget.scale(1.0F / skew, 1.0F, 1.0F);
-            iris$spinTarget.rotate(-angle, axis);
+        if (!iris$areShadersOn) {
+            projectionMatrix.mul(effects);
         }
 
         // MODIFIED for porting: sodium core.render.world GameRendererMixin#sodium$setProjection (@WrapOperation) -

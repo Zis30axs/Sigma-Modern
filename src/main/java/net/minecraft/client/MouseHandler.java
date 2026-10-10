@@ -7,6 +7,7 @@ import com.mojang.blaze3d.platform.Window;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventMouseScroll;
+import com.mentalfrostbyte.jello.util.client.MouseClickTracker;
 import com.mojang.logging.LogUtils;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -64,9 +65,12 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
         this.scrollWheelHandler = new ScrollWheelHandler();
     }
 
-    private void onButton(final long handle, final MouseButtonInfo rawButtonInfo, final @MouseButtonInfo.Action int action) {
+    private void onButton(final long handle, final MouseButtonInfo rawButtonInfo, final @MouseButtonInfo.Action int action,
+                          final MouseClickTracker.InputContext clickContext) {
         Window window = this.minecraft.getWindow();
         if (handle == window.handle()) {
+            // Sigma hook: count physical gameplay presses before consumers or platform remapping; never EventAttack.
+            MouseClickTracker.onButton(this.minecraft, rawButtonInfo.button(), action, clickContext);
             this.minecraft.getFramerateLimitTracker().onInputReceived();
             // Sigma hook: mouse buttons take the same route as keys, so a keybind can be bound to one.
             // Gated on nothing being on screen for the same reason as the keyboard hook. A button has no
@@ -93,6 +97,7 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
 
             if (this.minecraft.gui.overlay() == null) {
                 if (pressed
+                    && !com.mentalfrostbyte.jello.gui.modern.ModernHudEditor.isEditing()
                     && this.minecraft.handleGlobalKeyPress(InputConstants.Type.MOUSE.getOrCreate(buttonInfo.button()), buttonInfo.hasControlDownWithQuirk())) {
                     return;
                 }
@@ -303,7 +308,9 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
         InputConstants.setupMouseCallbacks(
             window, (window1, xpos, ypos) -> this.minecraft.execute(() -> this.onMove(window1, xpos, ypos)), (window1, button, action, mods) -> {
                 MouseButtonInfo buttonInfo = new MouseButtonInfo(button, mods);
-                this.vfpStoreScreenEvent(() -> this.onButton(window1, buttonInfo, action));
+                // Sigma hook: a queued menu click must not become gameplay input for the CPS counter after closing it.
+                var clickContext = MouseClickTracker.captureContext(this.minecraft);
+                this.vfpStoreScreenEvent(() -> this.onButton(window1, buttonInfo, action, clickContext));
             }, (window1, xoffset, yoffset) -> this.minecraft.execute(() -> this.onScroll(window1, xoffset, yoffset)), (window1, count, namesPtr) -> {
                 List<Path> names = new ArrayList<>(count);
                 int failedCount = 0;
@@ -346,6 +353,8 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
     }
 
     public void handleAccumulatedMovement() {
+        // Sigma hook: expire clicks and clear menu, disconnected or unfocused sessions even with the HUD hidden.
+        MouseClickTracker.syncContext(this.minecraft);
         double time = Blaze3D.getTime();
         double mousea = time - this.lastHandleMovementTime;
         this.lastHandleMovementTime = time;
@@ -465,6 +474,14 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
         return this.isRightPressed;
     }
 
+    public int sigma$leftCps() {
+        return MouseClickTracker.getLeftCps(this.minecraft);
+    }
+
+    public int sigma$rightCps() {
+        return MouseClickTracker.getRightCps(this.minecraft);
+    }
+
     public double xpos() {
         return this.xpos;
     }
@@ -474,6 +491,21 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
     }
 
     public void setIgnoreFirstMove() {
+        this.ignoreFirstMove = true;
+    }
+
+    /** Sigma hook: do not apply cursor motion or held attack/use buttons when leaving the temporary HUD editor. */
+    public void sigma$resetHudEditorInput() {
+        MouseClickTracker.reset();
+        this.accumulatedDX = 0.0;
+        this.accumulatedDY = 0.0;
+        this.smoothTurnX.reset();
+        this.smoothTurnY.reset();
+        this.isLeftPressed = false;
+        this.isMiddlePressed = false;
+        this.isRightPressed = false;
+        this.activeButton = null;
+        this.mousePressedTime = 0.0;
         this.ignoreFirstMove = true;
     }
 
@@ -500,6 +532,8 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
     }
 
     public void releaseMouse() {
+        // Opening even a short-lived screen must not carry gameplay clicks back into the next session.
+        MouseClickTracker.reset();
         if (this.mouseGrabbed) {
             this.mouseGrabbed = false;
             this.xpos = this.minecraft.getWindow().getScreenWidth() / 2;

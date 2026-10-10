@@ -42,6 +42,16 @@ class TargetTest {
         assertFalse(target.allows(Target.Kind.MOB, true));
     }
 
+    @Test
+    void antiBotOverridesEnabledCategoriesWithoutRemovingPracticeBots() {
+        Target target = new Target();
+        this.set(target, "Invisibles", true);
+        assertFalse(target.allows(Target.Kind.PLAYER, false, true));
+        assertFalse(target.allows(Target.Kind.BOT, true, true));
+        assertTrue(target.allows(Target.Kind.BOT, false, false), "Local FakePlayer remains selectable for practice");
+        assertTrue(target.allows(Target.Kind.PLAYER, false, false), "Cleared evidence restores ordinary target selection");
+    }
+
     private void set(final Target target, final String name, final boolean value) {
         ((BooleanSetting) target.setting(name).orElseThrow()).set(value);
     }

@@ -70,6 +70,7 @@ import net.minecraft.network.protocol.PacketFlow;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+import com.mentalfrostbyte.jello.module.impl.world.Disabler;
 // Sigma: SelfDetection.
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
@@ -389,6 +390,8 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
         Packet<?> outgoing = packet;
         if (this.receiving == PacketFlow.CLIENTBOUND) {
             EventSendPacket event = EventBus.call(new EventSendPacket(packet));
+            // Sigma hook: Grim's final packet filter runs after buffering/cancellation and before forwarding.
+            Disabler.filterOutgoing(this, event);
             if (event.isCancelled()) {
                 return;
             }
@@ -424,6 +427,16 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
     }
 
     private void doSendPacket(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush) {
+        // Sigma hook: final uncancelled movement packets, in the channel's actual write order. Queued and
+        // module-created packets pass here too; the earlier EventSendPacket is still cancellable/replaceable.
+        if (this.receiving == PacketFlow.CLIENTBOUND && this.isConnected()
+            && packet instanceof net.minecraft.network.protocol.game.ServerboundMovePlayerPacket move && move.hasRotation()) {
+            net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+            net.minecraft.client.player.LocalPlayer player = minecraft == null ? null : minecraft.player;
+            if (player != null && player.connection.getConnection() == this) {
+                player.getReportedRotations().record(move.getYRot(0.0F), move.getXRot(0.0F));
+            }
+        }
         if (listener != null) {
             ChannelFuture future = flush ? this.channel.writeAndFlush(packet) : this.channel.write(packet);
             future.addListener(listener);

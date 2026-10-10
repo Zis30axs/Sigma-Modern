@@ -11,6 +11,8 @@ import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
@@ -693,8 +695,9 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 ModernStyle.rounded(g, sx - 1, mid - 8, 16, 16, 5, 0x3315303E);
                 ModernStyle.rounded(g, sx, mid - 7, 14, 14, 4, SWATCHES[i]);
             }
-        } else if (s instanceof TextSetting) {
-            boolean editing = this.interactions.isEditing(s);
+        } else if (s instanceof TextSetting || s instanceof KeySetting || s instanceof ItemListSetting) {
+            boolean editing = this.interactions.isEditing(s)
+                || s instanceof KeySetting key && this.interactions.isBinding(key);
             ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, editing ? PILL_EDITING : PILL);
             ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.fit(this.interactions.displayValue(s), controlW - 16),
                 cx + 8, mid - 4.6F, VALUE_SCALE, editing ? ModernStyle.BLUE : ModernStyle.INK);
@@ -1066,6 +1069,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void markContentChanged() {
+        this.interactions.cancelKeyCapture();
         this.contentChangeStart = System.nanoTime();
         this.popover = null;
     }
@@ -1121,7 +1125,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     @Override public void removed() { this.interactions.mouseReleased(); this.music.blur(); Client.getInstance().saveConfig(); super.removed(); }
 
-    @Override public boolean isTypingText() { return this.music.isTyping(); }
+    @Override public boolean isTypingText() { return this.music.isTyping() || this.interactions.isCapturingKey(); }
 
     @Override public boolean preeditUpdated(net.minecraft.client.input.@org.jspecify.annotations.Nullable PreeditEvent e) {
         return this.music.preeditUpdated(e) || super.preeditUpdated(e);

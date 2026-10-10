@@ -147,6 +147,14 @@ public class GuiGraphicsExtractor {
         this.guiRenderState.blurBeforeThisStratum();
     }
 
+    /** Sigma hook: sample the blurred world only inside this rounded, transformed HUD rectangle. */
+    public void sigma$blurRounded(final int x, final int y, final int width, final int height, final int radius, final float opacity) {
+        var element = com.mentalfrostbyte.jello.gui.modern.ModernHudBlur.extract(this.pose, this.scissorStack.peek(),
+                x, y, width, height, radius, opacity * com.mentalfrostbyte.jello.gui.modern.ModernStyle.groupAlpha(),
+                this.guiWidth(), this.guiHeight());
+        if (element != null) this.guiRenderState.sigma$addHudBlur(element);
+    }
+
     public void enableScissor(final int x0, final int y0, final int x1, final int y1) {
         ScreenRectangle rectangle = new ScreenRectangle(x0, y0, x1 - x0, y1 - y0).transformAxisAligned(this.pose);
         this.scissorStack.push(rectangle);

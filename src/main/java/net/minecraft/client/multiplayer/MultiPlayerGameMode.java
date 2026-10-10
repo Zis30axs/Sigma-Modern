@@ -2,6 +2,9 @@ package net.minecraft.client.multiplayer;
 
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
+import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.viaversion.viafabricplus.features.interaction.r1_18_2_block_ack_emulation.ClientPlayerInteractionManager1_18_2;
 import com.viaversion.viafabricplus.features.interaction.replace_block_placement_logic.ActionResultException1_12_2;
 import com.viaversion.viafabricplus.injection.access.interaction.container_clicking.IAbstractContainerMenu;
@@ -408,6 +411,11 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
         return pos.equals(this.destroyBlockPos) && ItemStack.isSameItemSameComponents(selected, this.destroyingItem);
     }
 
+    /** Synchronizes a module's hotbar selection immediately, including a restored silent selection. */
+    public void syncCarriedItem() {
+        this.ensureHasSentCarriedItem();
+    }
+
     private void ensureHasSentCarriedItem() {
         int index = this.minecraft.player.getInventory().getSelectedSlot();
         if (index != this.carriedIndex) {
@@ -566,10 +574,15 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
         // (@Inject useItem after ensureHasSentCarriedItem). 1.17..1.20.5 reported the position again right before
         // using an item, which those servers use for the interaction ray.
         if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_17, ProtocolVersion.v1_20_5)) {
+            // Sigma hook: item use must not replace the local player's active silent look with the camera rotation.
+            KillAura aura = player == this.minecraft.player ? Modules.enabled(KillAura.class) : null;
+            Rotation silentRotation = aura == null ? null : aura.getSilentRotation();
+            float yaw = silentRotation == null ? player.getYRot() : silentRotation.yaw();
+            float pitch = silentRotation == null ? player.getXRot() : silentRotation.pitch();
             this.connection
                 .send(
                     new ServerboundMovePlayerPacket.PosRot(
-                        player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot(), player.onGround(), player.horizontalCollision
+                        player.getX(), player.getY(), player.getZ(), yaw, pitch, player.onGround(), player.horizontalCollision
                     )
                 );
         }

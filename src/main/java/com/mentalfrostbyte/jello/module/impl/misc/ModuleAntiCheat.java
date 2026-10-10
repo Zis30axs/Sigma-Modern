@@ -19,10 +19,14 @@ import com.mojang.logging.LogUtils;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.util.StringDecomposer;
 import org.slf4j.Logger;
 
 /**
@@ -93,7 +97,7 @@ public class ModuleAntiCheat extends Module {
             "Prints a chat line when a player is flagged. Off, flags are still logged and listed.", true));
 
     private final BooleanSetting nameTag = this.register(new BooleanSetting("NameTag",
-            "Adds a red violation level to the name tag of players who have reached the alert level.", true));
+            "Colors the entire name red and adds a warning icon when total violation level reaches the alert level, independently of NameTags.", true));
 
     private final Suspects suspects = new Suspects();
     private final ObservedPlayers players = new ObservedPlayers(new Detector(new Announcer()), new ClientWorldProbe());
@@ -145,21 +149,46 @@ public class ModuleAntiCheat extends Module {
         this.players.clearLevels();
     }
 
-    /**
-     * The name tag for {@code uuid}: the name as given, with a red violation level after it once the player has
-     * reached the alert level and the tag is switched on.
-     */
+    /** Whether enabled render hooks should mark this player's name and show the warning icon. */
+    public boolean marksName(final UUID uuid) {
+        return this.nameTag.get() && this.suspects.totalLevel(uuid) >= this.alertLevel.get();
+    }
+
+    /** Keeps the complete name and its non-color styles, coloring every visible run red when marked. */
     public Component tagged(final UUID uuid, final Component name) {
-        if (!this.nameTag.get()) {
+        if (!this.marksName(uuid)) {
             return name;
         }
 
-        double level = this.suspects.totalLevel(uuid);
-        if (level < this.alertLevel.get()) {
-            return name;
+        MutableComponent marked = Component.empty();
+        // Resolve inherited styles first so an explicit color on a prefix or child cannot hide the mark.
+        name.visit((style, text) -> {
+            appendMarkedText(marked, style, text);
+            return Optional.empty();
+        }, Style.EMPTY);
+        return marked;
+    }
+
+    private static void appendMarkedText(final MutableComponent marked, final Style style, final String text) {
+        if (text.indexOf('§') < 0) {
+            marked.append(Component.literal(text).setStyle(style.withColor(ChatFormatting.RED)));
+            return;
         }
 
-        return name.copy().append(Component.literal(String.format(Locale.ROOT, " ⚠ VL %.0f", level)).withStyle(ChatFormatting.RED));
+        // Old servers can embed legacy colors in a literal; decode them before forcing the final color.
+        StringBuilder run = new StringBuilder();
+        Style[] runStyle = {style.withColor(ChatFormatting.RED)};
+        StringDecomposer.iterateFormatted(text, style, (position, glyphStyle, codePoint) -> {
+            Style red = glyphStyle.withColor(ChatFormatting.RED);
+            if (!red.equals(runStyle[0])) {
+                if (!run.isEmpty()) marked.append(Component.literal(run.toString()).setStyle(runStyle[0]));
+                run.setLength(0);
+                runStyle[0] = red;
+            }
+            run.appendCodePoint(codePoint);
+            return true;
+        });
+        if (!run.isEmpty()) marked.append(Component.literal(run.toString()).setStyle(runStyle[0]));
     }
 
     private CheckSettings checkSettings() {

@@ -114,6 +114,18 @@ public class ModuleArrayList extends Module {
     private final NumberSetting background = this.register(new NumberSetting(
             "Background", "How solid the dark glass behind each line is. 0 draws none.", 0.0F, 0.0F, 1.0F, 0.05F));
 
+    private final BooleanSetting blur = this.register(new BooleanSetting(
+            "Blur", "Modern: locally blurs the scenery behind the list's rows.", true));
+
+    private final NumberSetting blurStrength = this.register(new NumberSetting(
+            "Blur Strength", "Modern: strength of the local background blur behind each row.", 0.8F, 0.0F, 1.0F, 0.05F));
+
+    private final BooleanSetting bloom = this.register(new BooleanSetting(
+            "Bloom", "Modern: adds a soft glow in each row's color.", true));
+
+    private final NumberSetting bloomStrength = this.register(new NumberSetting(
+            "Bloom Strength", "Modern: brightness of the soft glow around each row.", 0.35F, 0.0F, 1.0F, 0.05F));
+
     private final BooleanSetting accentBar = this.register(new BooleanSetting(
             "Accent Bar", "A thin bar in each line's color along the list's outer edge.", false));
 
@@ -144,6 +156,8 @@ public class ModuleArrayList extends Module {
     public ModuleArrayList() {
         super(ModuleCategory.INTERFACE, "ArrayList", "Lists the modules that are switched on down the side of the screen");
         this.color.visibleWhen(() -> !this.colorMode.is(ColorMode.RAINBOW));
+        this.blurStrength.visibleWhen(this.blur::get);
+        this.bloomStrength.visibleWhen(this.bloom::get);
     }
 
     /** The list was always on screen before it was a module; it stays that way for configs that predate it. */
@@ -215,6 +229,22 @@ public class ModuleArrayList extends Module {
 
     public float getBackground() {
         return this.background.get();
+    }
+
+    public boolean hasBlur() {
+        return this.blur.get();
+    }
+
+    public float getBlurStrength() {
+        return this.blurStrength.get();
+    }
+
+    public boolean hasBloom() {
+        return this.bloom.get();
+    }
+
+    public float getBloomStrength() {
+        return this.bloomStrength.get();
     }
 
     public boolean hasAccentBar() {

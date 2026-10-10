@@ -24,10 +24,12 @@ import java.util.function.BooleanSupplier;
  *     case EnumSetting<?> choice -> renderDropdown(choice);
  *     case ColorSetting color -> renderColorPicker(color);
  *     case TextSetting text -> renderTextBox(text);
+ *     case KeySetting key -> renderShortcut(key);
+ *     case ItemListSetting items -> renderItemPicker(items);
  * }
  * }</pre>
  */
-public sealed abstract class Setting<T> permits BooleanSetting, ColorSetting, EnumSetting, NumberSetting, TextSetting {
+public sealed abstract class Setting<T> permits BooleanSetting, ColorSetting, EnumSetting, ItemListSetting, KeySetting, NumberSetting, TextSetting {
 
     private final String name;
 

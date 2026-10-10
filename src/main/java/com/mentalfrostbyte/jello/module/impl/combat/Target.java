@@ -18,9 +18,8 @@ import org.jspecify.annotations.Nullable;
  * <p>Range, priority and aim strategy still belong to the module doing the targeting. This module only owns the
  * categories that should be considered targets, so KillAura and future combat modules can agree on them.</p>
  *
- * <p>There is no server-side AntiBot classifier yet. For now {@link Kind#BOT} positively identifies Sigma's own
- * {@link FakePlayer}; a future AntiBot only needs to extend {@link #isKnownBot(LivingEntity)} instead of teaching
- * every combat module about bots separately.</p>
+ * <p>The enabled {@link AntiBot} independently excludes suspected server bots before category selection.
+ * {@link Kind#BOT} identifies Sigma's own {@link FakePlayer}, which remains available for combat practice.</p>
  */
 public final class Target extends Module {
 
@@ -35,7 +34,7 @@ public final class Target extends Module {
             "Players", "Targets real players that are not known bots.", true));
 
     private final BooleanSetting bots = this.register(new BooleanSetting(
-            "Bots", "Targets players known to be bots or fakes. Without AntiBot, this currently identifies FakePlayer.", true));
+            "Bots", "Targets the local FakePlayer for practice. Does not override AntiBot's server-player filter.", true));
 
     private final BooleanSetting mobs = this.register(new BooleanSetting(
             "Mobs", "Targets hostile mobs.", true));
@@ -70,11 +69,18 @@ public final class Target extends Module {
             return false;
         }
 
-        return this.allows(this.kindOf(entity), entity.isInvisible());
+        return this.allows(this.kindOf(entity), entity.isInvisible(), AntiBot.isBot(entity));
     }
 
     /** Pure settings decision, kept separate so the category semantics are easy to regression-test. */
     boolean allows(final Kind kind, final boolean invisible) {
+        return this.allows(kind, invisible, false);
+    }
+
+    boolean allows(final Kind kind, final boolean invisible, final boolean suspectedBot) {
+        if (suspectedBot) {
+            return false;
+        }
         if (invisible && !this.invisibles.get()) {
             return false;
         }
@@ -101,8 +107,7 @@ public final class Target extends Module {
     }
 
     /**
-     * Bots we can prove today. AntiBot can extend this single point later; until then normal server players are never
-     * guessed to be bots, while the client's own FakePlayer is independently selectable through the Bots setting.
+     * The local practice entity is independently selectable; server heuristics belong to AntiBot's separate gate.
      */
     boolean isKnownBot(final LivingEntity entity) {
         FakePlayer fakePlayer = Modules.enabled(FakePlayer.class);

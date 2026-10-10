@@ -155,7 +155,8 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
         }
 
         if (state.nameTag != null) {
-            submitNodeCollector.submitNameTag(poseStack, state.nameTagAttachment, offset, state.nameTag, !state.isDiscrete, state.lightCoords, camera);
+            submitNodeCollector.submitNameTag(poseStack, state.nameTagAttachment, offset, state.nameTag, !state.isDiscrete, state.lightCoords, camera,
+                    state.sigmaSuspectNameTag);
         }
 
         poseStack.popPose();
@@ -163,7 +164,7 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
 
     protected @Nullable Component getNameTag(final T entity) {
         Component name = entity.getDisplayName();
-        // Sigma hook: AntiCheat adds a violation level after the name of a player it has flagged.
+        // Sigma hook: AntiCheat colors the complete display name of a player it has flagged.
         if (name != null && entity instanceof net.minecraft.client.player.RemotePlayer) {
             com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat antiCheat =
                 com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat.class);
@@ -189,6 +190,8 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
         S state = this.createRenderState();
         this.extractRenderState(entity, state, partialTicks);
         this.finalizeRenderState(entity, state);
+        // Sigma hook: capture Modern's label only during world extraction, after vanilla visibility and attachments.
+        com.mentalfrostbyte.jello.gui.modern.ModernNameTags.capture(entity, state, this.getRenderOffset(state));
         return state;
     }
 
@@ -281,12 +284,18 @@ public abstract class EntityRenderer<T extends Entity, S extends EntityRenderSta
     }
 
     protected final void extractNameTags(final T entity, final S state, final float partialTicks, final double nameTagDistance, final double belowNameDistance) {
+        state.sigmaSuspectNameTag = false;
         if (this.entityRenderDispatcher.camera != null) {
             state.distanceToCameraSq = this.entityRenderDispatcher.distanceToSqr(entity);
             boolean shouldShowName = state.distanceToCameraSq < Mth.square(nameTagDistance) && this.shouldShowName(entity, state.distanceToCameraSq);
             if (shouldShowName) {
                 state.nameTag = this.getNameTag(entity);
                 state.nameTagAttachment = entity.getAttachments().getNullable(EntityAttachment.NAME_TAG, 0, entity.getYRot(partialTicks));
+                if (state.nameTag != null && entity instanceof net.minecraft.client.player.RemotePlayer) {
+                    com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat antiCheat =
+                            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat.class);
+                    state.sigmaSuspectNameTag = antiCheat != null && antiCheat.marksName(entity.getUUID());
+                }
             } else {
                 state.nameTag = null;
             }

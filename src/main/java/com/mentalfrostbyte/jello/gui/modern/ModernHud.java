@@ -3,17 +3,21 @@ package com.mentalfrostbyte.jello.gui.modern;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClientMode;
 import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.gui.Keyboard;
 import com.mentalfrostbyte.jello.module.impl.gui.PotionStatus;
+import com.mentalfrostbyte.jello.module.impl.gui.TargetHud;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.world.effect.MobEffectInstance;
 
 /**
  * SigmaModern's in-game HUD decorations: the ArrayList module's list of switched-on modules
- * ({@link ModernArrayList}), the PotionStatus module's status effects in the bottom-right corner ({@link ModernPotionStatus}), the TabGUI module's keyboard menu ({@link ModernTabGui}), a WASD keystroke display and the music "dynamic island" ({@link ModernIsland}), which
- * shows the music player's state and flashes module toggles made in game, and the suspect list's drawer
- * ({@link ModernSuspectDrawer}) while it is left out.
+ * ({@link ModernArrayList}), status effects ({@link ModernPotionStatus}), the keyboard menu
+ * ({@link ModernTabGui}), keyboard/mouse input, the clock ({@link ModernClock}), and the target card
+ * ({@link ModernTargetHud}). The music "dynamic island" ({@link ModernIsland}) shows playback and
+ * module toggles, alongside the suspect list's drawer ({@link ModernSuspectDrawer}) while it is left out.
  *
  * <p>These are pure overlay chrome: they never write to module/setting state. Gameplay decorations draw with no
  * screen open; {@link #renderBrand} is a separate resident layer above in-game screens.</p>
@@ -40,6 +44,8 @@ public final class ModernHud {
     // Where the brand is drawn: eased between its corner and, while F3 is up, the top centre under the island.
     private static float brandX = -1F, brandY = -1F;
     private static long brandFrame;
+    private static GuiGraphicsExtractor brandGraphics;
+    private static HudLayout.Rect brandBounds;
 
     private ModernHud() {}
 
@@ -135,21 +141,12 @@ public final class ModernHud {
         float italicX = wordX + ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, 1F) + 4.2F;
         int w = Math.round(italicX + ModernTypography.width(ModernTypography.Face.DISPLAY_ITALIC, "Modern", BRAND_ITALIC) + 10F);
         int radius = BRAND_H / 2;
-
-        boolean aside = debugShowing();
-        float targetX = aside ? (g.guiWidth() - w) / 2F : BRAND_X;
-        float targetY = aside ? Math.max(BRAND_Y, ModernIsland.bottom() + 6) : BRAND_Y;
-        long now = System.nanoTime();
-        float dt = Math.min(0.05F, (now - brandFrame) / 1_000_000_000F);
-        boolean snap = brandX < 0F || now - brandFrame > 250_000_000L;
-        brandFrame = now;
-        brandX = snap ? targetX : ModernStyle.smooth(brandX, targetX, dt, 12F);
-        brandY = snap ? targetY : ModernStyle.smooth(brandY, targetY, dt, 12F);
+        var placement = placeBrand(g, w);
 
         g.nextStratum();
         g.pose().pushMatrix();
         try {
-            g.pose().translate(Math.round(brandX), Math.round(brandY));
+            g.pose().translate(placement.x(), placement.y());
             ModernStyle.dropShadow(g, 0, 2, w, BRAND_H, radius, 0.6F);
             ModernStyle.rounded(g, 0, 0, w, BRAND_H, radius, 0x80EDFAFF);
             ModernStyle.rounded(g, 1, 1, w - 2, BRAND_H - 2, radius - 1, 0x9C000000 | (ModernCoverColors.ICE_DEEP & 0xFFFFFF));
@@ -176,25 +173,90 @@ public final class ModernHud {
         }
     }
 
+    /** Measure/reserve early, but keep the resident brand's actual draw above screens and the rest of the HUD. */
+    private static HudLayout.Rect placeBrand(GuiGraphicsExtractor g, int width) {
+        if (brandGraphics == g) return brandBounds;
+        brandGraphics = g;
+        boolean aside = debugShowing() && !ModernHudEditor.isEditing();
+        float targetX = aside ? (g.guiWidth() - width) / 2F : BRAND_X;
+        float targetY = aside ? Math.max(BRAND_Y, ModernIsland.bottom() + 6) : BRAND_Y;
+        long now = System.nanoTime();
+        float dt = Math.min(0.05F, (now - brandFrame) / 1_000_000_000F);
+        boolean snap = ModernHudEditor.isEditing() || brandX < 0F || now - brandFrame > 250_000_000L;
+        brandFrame = now;
+        brandX = snap ? targetX : ModernStyle.smooth(brandX, targetX, dt, 12F);
+        brandY = snap ? targetY : ModernStyle.smooth(brandY, targetY, dt, 12F);
+        brandBounds = ModernHudEditor.place(g, "watermark", "Watermark", Math.round(brandX), Math.round(brandY), width, BRAND_H);
+        return brandBounds;
+    }
+
+    private static int brandWidth() {
+        float wordX = 8F + BRAND_MARK * 0.92F + 5F;
+        float italicX = wordX + ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, 1F) + 4.2F;
+        return Math.round(italicX + ModernTypography.width(ModernTypography.Face.DISPLAY_ITALIC, "Modern", BRAND_ITALIC) + 10F);
+    }
+
     public static void render(GuiGraphicsExtractor g) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.gui.screen() != null || mc.player == null || !isActive()) return;
+        if (mc.player == null || mc.level == null || !isActive()) return;
+        ModernHudEditor.beginFrame(g);
+        if (mc.gui.screen() instanceof LevelLoadingScreen) return;
+        reserveVanillaHud(g, mc);
+        if (!ModernHudEditor.allowsHud()) {
+            // The sidebar has always remained behind in-game screens, while gameplay widgets hide there.
+            ModernScoreboard.render(g);
+            return;
+        }
         leftStack = BRAND_BOTTOM;
         rightStack = Math.max(RIGHT_TOP, vanillaEffectsBottom(mc) + STACK_GAP);
-        ModernTabGui.render(g);
-        drawKeystrokes(g, mc.options);
-        // After the list: the effects stack up from the bottom-right corner, on a list hanging there and clear of a
-        // top-right one, whose extent the list records as it draws.
-        ModernArrayList.render(g);
-        ModernPotionStatus.render(g);
-        ModernIsland.render(g);
         ModernSuspectDrawer.renderHud(g);
+        // Pinned widgets claim their exact rectangles first, including ones drawn late in the normal priority.
+        // No previous-frame reservations: disabling a module immediately frees its space.
+        renderWidgets(g, true);
+        renderWidgets(g, false);
+    }
+
+    private static void renderWidgets(GuiGraphicsExtractor g, boolean pinned) {
+        if (ModernHudEditor.hasPosition("music_island") == pinned) ModernIsland.render(g);
+        if (ModernHudEditor.hasPosition("watermark") == pinned) {
+            if (ModernHudEditor.isEditing()) renderBrand(g);
+            else placeBrand(g, brandWidth());
+        }
+        if (ModernHudEditor.hasPosition("tab-gui") == pinned) ModernTabGui.render(g);
+        if (ModernHudEditor.hasPosition("keystrokes") == pinned) drawKeystrokes(g, Minecraft.getInstance().options);
+        if (ModernHudEditor.hasPosition("array-list") == pinned) ModernArrayList.render(g);
+        // Keep the existing potion folding rules, then fit the sidebar around both right-hand stacks.
+        if (ModernHudEditor.hasPosition("potion-status") == pinned) ModernPotionStatus.render(g);
+        if (ModernHudEditor.hasPosition("scoreboard") == pinned) ModernScoreboard.render(g);
+        if (ModernHudEditor.hasPosition("clock") == pinned) ModernClock.render(g);
+        TargetHud target = Modules.enabled(TargetHud.class);
+        boolean pinnedTarget = target != null && target.getMode() == TargetHud.Mode.NORMAL && ModernHudEditor.hasPosition("target_hud");
+        if (pinnedTarget == pinned) ModernTargetHud.render(g);
+        if (ModernHudEditor.hasPosition("radar") == pinned) ModernRadar.render(g);
+        if (ModernHudEditor.hasPosition("rwr") == pinned) ModernRwr.render(g);
+    }
+
+    private static void reserveVanillaHud(GuiGraphicsExtractor g, Minecraft mc) {
+        if (mc.gui.hud.isHidden()) return;
+        ModernHudEditor.reserve(g, "vanilla-hotbar", (g.guiWidth() - 182F) / 2F, g.guiHeight() - 22F, 182F, 22F);
+        if (replacesEffectIcons() || mc.gui.screen() != null && mc.gui.screen().showsActiveEffects()) return;
+        int beneficial = 0, harmful = 0;
+        for (MobEffectInstance effect : mc.player.getActiveEffects()) {
+            if (!effect.showIcon()) continue;
+            if (effect.getEffect().value().isBeneficial()) beneficial++;
+            else harmful++;
+        }
+        int top = mc.isDemo() ? 16 : 1;
+        if (beneficial > 0) ModernHudEditor.reserve(g, "vanilla-beneficial-effects",
+                g.guiWidth() - beneficial * 25F, top, beneficial * 25F - 1F, 24F);
+        if (harmful > 0) ModernHudEditor.reserve(g, "vanilla-harmful-effects",
+                g.guiWidth() - harmful * 25F, top + 26, harmful * 25F - 1F, 24F);
     }
 
     /** The music visuals, under everything else on the HUD; called first thing in {@code Hud}'s pass. */
     public static void renderBackdrop(GuiGraphicsExtractor g) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.gui.screen() != null || mc.player == null || !isActive()) return;
+        if (!ModernHudEditor.allowsHud() || mc.player == null || !isActive()) return;
         ModernMusicFx.render(g);
     }
 
@@ -210,25 +272,70 @@ public final class ModernHud {
     }
 
     /**
-     * WASD on the left side under the TabGUI, as the old client's KeyStrokes sat - clear of the chat in the bottom-left
-     * corner - and hidden while F3's text is up.
+     * WASD and LMB/RMB with physical CPS, sharing the original draggable keyboard position below TabGUI.
      */
     private static void drawKeystrokes(GuiGraphicsExtractor g, Options options) {
-        if (debugShowing()) return;
+        Minecraft mc = Minecraft.getInstance();
+        Keyboard keyboard = Modules.enabled(Keyboard.class);
+        if (keyboard == null || ((debugShowing() || mc.gui.hud.isHidden()) && !ModernHudEditor.isEditing())) return;
         int size = 20, gap = 3;
-        int x = BRAND_X, y = leftStack();
-        stack(size * 2 + gap);
-        key(g, x + size + gap, y, size, "W", options.keyUp.isDown());
-        key(g, x, y + size + gap, size, "A", options.keyLeft.isDown());
-        key(g, x + size + gap, y + size + gap, size, "S", options.keyDown.isDown());
-        key(g, x + (size + gap) * 2, y + size + gap, size, "D", options.keyRight.isDown());
+        int width = size * 3 + gap * 2;
+        int mouseHeight = keyboard.showsCps() ? 27 : size;
+        int height = size * 2 + gap + (keyboard.showsMouseButtons() ? gap + mouseHeight : 0);
+        float scale = Math.min(keyboard.getScale(), Math.min(Math.max(0, g.guiWidth() - 8) / (float)width,
+                Math.max(0, g.guiHeight() - 8) / (float)height));
+        if (scale <= 0F) return;
+        int y = leftStack();
+        if (!ModernHudEditor.hasPosition("keystrokes")) stack((int)Math.ceil(height * scale));
+        var placement = ModernHudEditor.place(g, "keystrokes", "Keyboard", BRAND_X, y, width * scale, height * scale);
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(placement.x(), placement.y());
+            g.pose().scale(scale, scale);
+            key(g, size + gap, 0, size, "W", options.keyUp.isDown(), keyboard.getBackground());
+            key(g, 0, size + gap, size, "A", options.keyLeft.isDown(), keyboard.getBackground());
+            key(g, size + gap, size + gap, size, "S", options.keyDown.isDown(), keyboard.getBackground());
+            key(g, (size + gap) * 2, size + gap, size, "D", options.keyRight.isDown(), keyboard.getBackground());
+            if (keyboard.showsMouseButtons()) {
+                int leftWidth = (width - gap) / 2;
+                int mouseY = size * 2 + gap * 2;
+                mouseKey(g, 0, mouseY, leftWidth, mouseHeight, "LMB", mc.mouseHandler.isLeftPressed(),
+                        keyboard.showsCps(), mc.mouseHandler.sigma$leftCps(), keyboard.getBackground());
+                mouseKey(g, leftWidth + gap, mouseY, width - leftWidth - gap, mouseHeight, "RMB", mc.mouseHandler.isRightPressed(),
+                        keyboard.showsCps(), mc.mouseHandler.sigma$rightCps(), keyboard.getBackground());
+            }
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
-    private static void key(GuiGraphicsExtractor g, int x, int y, int size, String label, boolean pressed) {
-        ModernStyle.darkGlass(g, x, y, size, size, 5, pressed ? 0xE6C7EBFF : 0x4D1C2A38);
+    private static void key(GuiGraphicsExtractor g, int x, int y, int size, String label, boolean pressed, float background) {
+        keyBackground(g, x, y, size, size, pressed, background);
         int color = pressed ? 0xFF204C63 : ModernStyle.MUTED;
         int w = ModernTypography.width(label);
         ModernTypography.draw(g, label, x + (size - w) / 2, y + size / 2 - 4, color, false);
+    }
+
+    private static void mouseKey(GuiGraphicsExtractor g, int x, int y, int width, int height, String label,
+                                 boolean pressed, boolean showCps, int cps, float background) {
+        keyBackground(g, x, y, width, height, pressed, background);
+        int color = pressed ? 0xFF204C63 : ModernStyle.MUTED;
+        float labelScale = 0.7F;
+        ModernTypography.draw(g, label, x + (width - ModernTypography.width(label) * labelScale) / 2F,
+                y + (showCps ? 4F : 6F), labelScale, color, false);
+        if (showCps) {
+            String value = cps + " CPS";
+            float textScale = Math.min(0.62F, (width - 4F) / Math.max(1, ModernTypography.width(value)));
+            ModernTypography.draw(g, value, x + (width - ModernTypography.width(value) * textScale) / 2F,
+                    y + 16F, textScale, color, false);
+        }
+    }
+
+    private static void keyBackground(GuiGraphicsExtractor g, int x, int y, int width, int height, boolean pressed, float background) {
+        if (pressed || background > 0F) {
+            ModernStyle.darkGlass(g, x, y, width, height, 5,
+                    pressed ? 0xE6C7EBFF : (Math.round(background * 255) << 24 | 0x1C2A38));
+        }
     }
 
 }

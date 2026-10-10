@@ -13,6 +13,8 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
@@ -51,7 +53,7 @@ final class JelloSettingsPage {
     private static final int LIGHT_BLUE = 0xFF29A6FF;
 
     private enum Kind {
-        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR
+        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR, KEY, ITEMS
     }
 
     private record Row(Kind kind, Setting<?> setting, int top, int height) {
@@ -103,6 +105,7 @@ final class JelloSettingsPage {
     }
 
     void close() {
+        this.interactions.cancelKeyCapture();
         this.closing = true;
         this.appear.changeDirection(Animation.Direction.BACKWARDS);
         for (LegacyTextField field : this.fields.values()) {
@@ -116,7 +119,7 @@ final class JelloSettingsPage {
                 return true;
             }
         }
-        return this.interactions.isBinding(this.module);
+        return this.interactions.isBinding(this.module) || this.interactions.isCapturingKey();
     }
 
     // ------------------------------------------------------------------ layout
@@ -152,6 +155,12 @@ final class JelloSettingsPage {
             } else if (setting instanceof ColorSetting) {
                 kind = Kind.COLOR;
                 height = 114;
+            } else if (setting instanceof KeySetting) {
+                kind = Kind.KEY;
+                height = 27;
+            } else if (setting instanceof ItemListSetting) {
+                kind = Kind.ITEMS;
+                height = 27;
             } else {
                 kind = Kind.TEXT;
                 height = 27;
@@ -251,6 +260,25 @@ final class JelloSettingsPage {
                 float modeW = c.textWidth(Face.JELLO_LIGHT, 14, mode);
                 c.text(Face.JELLO_LIGHT, 14, mode, pillX - modeW - 12, top + row.height() / 2.0F - c.textHeight(Face.JELLO_LIGHT, 14) / 2.0F,
                     LegacyCanvas.alpha(GREY, p));
+            }
+            case KEY -> {
+                KeySetting setting = (KeySetting) row.setting();
+                this.label(c, setting.getName(), top, p);
+                boolean binding = this.interactions.isBinding(setting);
+                int pillW = 170, pillX = this.right() - pillW;
+                boolean hover = mx >= pillX && mx < pillX + pillW && my >= top && my < top + row.height();
+                c.rounded(pillX, top, pillW, row.height(), 4, LegacyCanvas.alpha(hover || binding ? 0xFFE6E6E6 : 0xFFF2F2F2, p));
+                c.textCentered(Face.JELLO_LIGHT, 18, c.fit(Face.JELLO_LIGHT, 18, this.interactions.displayValue(setting), pillW - 12),
+                    pillX + pillW / 2.0F, top + row.height() / 2.0F, LegacyCanvas.alpha(binding ? LIGHT_BLUE : 0xFF010101, p * 0.85F));
+            }
+            case ITEMS -> {
+                ItemListSetting setting = (ItemListSetting) row.setting();
+                this.label(c, setting.getName(), top, p);
+                int pillW = 170, pillX = this.right() - pillW;
+                boolean hover = mx >= pillX && mx < pillX + pillW && my >= top && my < top + row.height();
+                c.rounded(pillX, top, pillW, row.height(), 4, LegacyCanvas.alpha(hover ? 0xFFE6E6E6 : 0xFFF2F2F2, p));
+                c.textCentered(Face.JELLO_LIGHT, 18, setting.displayLabel() + "  >", pillX + pillW / 2.0F,
+                        top + row.height() / 2.0F, LegacyCanvas.alpha(LIGHT_BLUE, p * 0.85F));
             }
             case BOOLEAN -> {
                 BooleanSetting setting = (BooleanSetting) row.setting();
@@ -460,6 +488,16 @@ final class JelloSettingsPage {
                     int pillX = this.right() - 150;
                     if (mx >= pillX && mx < pillX + 150) {
                         this.interactions.handleKeybindClick(this.module, event.button());
+                    }
+                }
+                case KEY -> {
+                    if (event.button() == 0 && mx >= this.right() - 170 && mx < this.right()) {
+                        this.interactions.startBind((KeySetting) row.setting());
+                    }
+                }
+                case ITEMS -> {
+                    if (event.button() == 0 && mx >= this.right() - 170 && mx < this.right()) {
+                        this.interactions.handleSettingClick(row.setting(), 0, 0, 1);
                     }
                 }
                 case BOOLEAN -> {

@@ -25,6 +25,7 @@ import org.jspecify.annotations.Nullable;
  * world was loading) the list snaps to where it should be instead of replaying what changed meanwhile.</p>
  */
 final class ModernArrayList {
+    private static final String LAYOUT_ID = "array-list";
     /** Distance from the screen edges, as the list always had. */
     private static final int MARGIN = 10;
     /** How far a line's background reaches past its text on either side. */
@@ -53,6 +54,9 @@ final class ModernArrayList {
         boolean listed;
     }
 
+    /** One frame's geometry is shared by the glow, glass and ink passes, including departing lines. */
+    private record Line(String name, @Nullable String suffix, float width, float x, float y, int color, float alpha) {}
+
     static void render(GuiGraphicsExtractor g) {
         ModuleArrayList list = Modules.enabled(ModuleArrayList.class);
         bottomRightTop = Integer.MAX_VALUE;
@@ -65,7 +69,9 @@ final class ModernArrayList {
 
         long now = System.nanoTime();
         float dt = lastDraw == 0L ? 0F : Math.min(0.05F, (now - lastDraw) / 1_000_000_000F);
-        boolean snap = !list.isAnimated() || now - lastDraw > GAP_NANOS;
+        boolean editing = ModernHudEditor.isEditing();
+        boolean custom = ModernHudEditor.hasPosition(LAYOUT_ID);
+        boolean snap = editing || !list.isAnimated() || now - lastDraw > GAP_NANOS;
         lastDraw = now;
         time += dt;
 
@@ -111,11 +117,51 @@ final class ModernArrayList {
         listTop = snap || listTop < 0F ? target : ModernStyle.smooth(listTop, target, dt, 14F);
         int top = Math.round(listTop);
         float reach = 0F;
-        for (Row row : ROWS.values()) reach = Math.max(reach, row.offset + rowH);
-        if (!ROWS.isEmpty() && list.getPosition() == Corner.BOTTOM_RIGHT) bottomRightTop = Math.round(g.guiHeight() - MARGIN - reach);
-        if (!ROWS.isEmpty() && list.getPosition() == Corner.TOP_RIGHT) topRightBottom = Math.round(top + reach);
-        for (Map.Entry<Module, Row> entry : leaving) drawRow(g, list, entry.getKey(), entry.getValue(), scale, rowH, top);
-        for (Module module : listed) drawRow(g, list, module, ROWS.get(module), scale, rowH, top);
+        float widest = 0F;
+        for (Map.Entry<Module, Row> entry : ROWS.entrySet()) {
+            reach = Math.max(reach, entry.getValue().offset + rowH);
+            widest = Math.max(widest, ModernTypography.width(ModernTypography.Face.TEXT,
+                    label(entry.getKey().getName(), list.suffixOf(entry.getKey())), scale));
+        }
+        // Empty enabled lists can still be placed; this is a label, never an enabled preview module.
+        String preview = ROWS.isEmpty() && editing ? ModernText.t("ArrayList · Preview", "模块列表 · 预览") : null;
+        if (preview != null) {
+            widest = ModernTypography.width(ModernTypography.Face.TEXT, preview, scale);
+            reach = rowH;
+        }
+        if (reach <= 0F) return;
+        Corner corner = list.getPosition();
+        float accent = list.hasAccentBar() ? BAR_W + 1 : 0;
+        float left = corner.isRight() ? g.guiWidth() - MARGIN - widest - PAD_X : MARGIN - PAD_X - accent;
+        float y = corner.isBottom() ? g.guiHeight() - MARGIN - reach : top;
+        var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Module list", "模块列表"),
+                left, y, (float)Math.ceil(widest) + PAD_X * 2 + accent + 1, reach);
+        // A manually placed list no longer reserves either automatic right-side stack.
+        if (!custom && !ROWS.isEmpty() && corner == Corner.BOTTOM_RIGHT) bottomRightTop = Math.round(bounds.y());
+        if (!custom && !ROWS.isEmpty() && corner == Corner.TOP_RIGHT) topRightBottom = Math.round(bounds.y() + reach);
+        List<Line> lines = new ArrayList<>(leaving.size() + listed.size() + (preview != null ? 1 : 0));
+        for (Map.Entry<Module, Row> entry : leaving) lines.add(line(g, list, entry.getKey(), entry.getValue(), scale, rowH, top));
+        for (Module module : listed) lines.add(line(g, list, module, ROWS.get(module), scale, rowH, top));
+        if (preview != null) {
+            float textX = corner.isRight() ? g.guiWidth() - MARGIN - widest : MARGIN;
+            lines.add(new Line(preview, null, widest, textX, y, ModernStyle.MUTED, 1F));
+        }
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(bounds.dx(), bounds.dy());
+            // Finish every halo before any glass or text: neighbouring rows must not glow over each other's ink.
+            if (list.hasBloom() && list.getBloomStrength() > 0F) {
+                for (Line line : lines) drawGlow(g, list, line, rowH);
+                g.nextStratum();
+            }
+            // Departing lines precede active ones, preserving their occlusion while the remaining rows close a gap.
+            for (Line line : lines) {
+                drawSurface(g, list, line, rowH);
+                drawInk(g, list, line, scale, rowH);
+            }
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
     /**
@@ -131,7 +177,7 @@ final class ModernArrayList {
         return Math.max(topRightBottom, 0);
     }
 
-    private static void drawRow(GuiGraphicsExtractor g, ModuleArrayList list, Module module, Row row, float scale, int rowH, int top) {
+    private static Line line(GuiGraphicsExtractor g, ModuleArrayList list, Module module, Row row, float scale, int rowH, int top) {
         String name = module.getName();
         String suffix = list.suffixOf(module);
         float width = ModernTypography.width(ModernTypography.Face.TEXT, label(name, suffix), scale);
@@ -141,26 +187,57 @@ final class ModernArrayList {
         float x = corner.isRight() ? g.guiWidth() - MARGIN - width + slide : MARGIN - slide;
         float y = corner.isBottom() ? g.guiHeight() - MARGIN - rowH - row.offset : top + row.offset;
         int color = lineColor(list.getColorMode(), list.getColor(), row.offset / rowH, time);
+        return new Line(name, suffix, width, x, y, color, row.appear);
+    }
 
-        try (ModernStyle.AlphaScope ignored = ModernStyle.alphaScope(row.appear)) {
+    private static void drawGlow(GuiGraphicsExtractor g, ModuleArrayList list, Line line, int rowH) {
+        try (var ignored = ModernStyle.alphaScope(line.alpha)) {
             g.pose().pushMatrix();
             try {
-                g.pose().translate(x, y);
-                int boxW = (int)Math.ceil(width) + PAD_X * 2;
+                g.pose().translate(line.x, line.y);
+                int boxW = (int)Math.ceil(line.width) + PAD_X * 2;
+                ModernBloom.rounded(g, -PAD_X, 0, boxW, rowH, 3, line.color, list.getBloomStrength());
+            } finally {
+                g.pose().popMatrix();
+            }
+        }
+    }
+
+    private static void drawSurface(GuiGraphicsExtractor g, ModuleArrayList list, Line line, int rowH) {
+        try (var ignored = ModernStyle.alphaScope(line.alpha)) {
+            g.pose().pushMatrix();
+            try {
+                g.pose().translate(line.x, line.y);
+                int boxW = (int)Math.ceil(line.width) + PAD_X * 2;
+                if (list.hasBlur() && list.getBlurStrength() > 0F) {
+                    g.sigma$blurRounded(-PAD_X, 0, boxW, rowH, 3, list.getBlurStrength());
+                }
                 if (list.getBackground() > 0F) {
                     int alpha = Math.round(list.getBackground() * 0xCC);
                     ModernStyle.rounded(g, -PAD_X, 0, boxW, rowH, 3, alpha << 24 | BACKGROUND_RGB);
                 }
+            } finally {
+                g.pose().popMatrix();
+            }
+        }
+    }
+
+    private static void drawInk(GuiGraphicsExtractor g, ModuleArrayList list, Line line, float scale, int rowH) {
+        try (var ignored = ModernStyle.alphaScope(line.alpha)) {
+            g.pose().pushMatrix();
+            try {
+                g.pose().translate(line.x, line.y);
+                int boxW = (int)Math.ceil(line.width) + PAD_X * 2;
                 if (list.hasAccentBar()) {
-                    int barX = corner.isRight() ? boxW - PAD_X + 1 : -PAD_X - 1 - BAR_W;
-                    ModernStyle.rounded(g, barX, 0, BAR_W, rowH, 1, color);
+                    int barX = list.getPosition().isRight() ? boxW - PAD_X + 1 : -PAD_X - 1 - BAR_W;
+                    ModernStyle.rounded(g, barX, 0, BAR_W, rowH, 1, line.color);
                 }
                 float textY = list.getSpacing() / 2F;
-                ModernTypography.draw(g, name, 0F, textY, scale, color, list.hasTextShadow());
-                if (suffix != null) {
+                ModernTypography.draw(g, line.name, 0F, textY, scale, line.color, list.hasTextShadow());
+                if (line.suffix != null) {
                     // Right-aligned to the whole label's measured end, so it never overlaps the name.
-                    float suffixX = width - ModernTypography.width(ModernTypography.Face.TEXT, suffix, scale);
-                    ModernTypography.draw(g, suffix, suffixX, textY, scale, ModernStyle.MUTED, list.hasTextShadow());
+                    float suffixX = line.width - ModernTypography.width(ModernTypography.Face.TEXT, line.suffix, scale);
+                    ModernTypography.draw(g, line.suffix, suffixX, textY, scale, ModernStyle.MUTED, list.hasTextShadow());
                 }
             } finally {
                 g.pose().popMatrix();

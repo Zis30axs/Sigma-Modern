@@ -80,7 +80,7 @@ public final class ModernWindowFrame {
         boolean wanted = Client.getInstance().getClientModeManager().get() == ClientMode.SIGMA_MODERN
             && !current.isFullscreen()
             && !(screen instanceof ModeSelectScreen);
-        updateFrame(current.handle(), wanted, current.getGuiScale(), screen != null);
+        updateFrame(current.handle(), wanted, current.getGuiScale(), screen != null && !(screen instanceof ModernHudEditor));
         if (DEBUG_DWM_STATE) logDwmState(current.handle(), screen);
     }
 
@@ -208,7 +208,7 @@ public final class ModernWindowFrame {
     }
 
     public static void render(GuiGraphicsExtractor g) {
-        if (previous == null) return;
+        if (previous == null || ModernHudEditor.isEditing()) return;
         long now = System.nanoTime();
         float dt = lastRender == 0 ? 0F : Math.min(0.05F, (now - lastRender) / 1_000_000_000F);
         lastRender = now;

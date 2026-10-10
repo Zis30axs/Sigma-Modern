@@ -175,7 +175,11 @@ public final class ModernSuspectDrawer {
         float dt = frame();
         spring(dt);
         if (!visible()) return;
-        drawWindow(g, window(), list, suspects, -10000, -10000);
+        ModernMusicView.Box occupied = window();
+        int visibleLeft = Math.max(0, occupied.x());
+        ModernHudEditor.reserve(g, "suspect-drawer", visibleLeft, occupied.y(),
+                Math.max(0, occupied.x() + occupied.w() - visibleLeft), occupied.h());
+        if (!ModernHudEditor.isEditing()) drawWindow(g, window(), list, suspects, -10000, -10000);
     }
 
     private static float frame() {
@@ -356,6 +360,7 @@ public final class ModernSuspectDrawer {
 
     /** True when the press landed on the tab or the window, which then owns it. */
     public static boolean mouseClicked(double mx, double my, int button) {
+        if (ModernHudEditor.isEditing()) return false;
         SuspectList list = list();
         if (list == null) return false;
         place(Minecraft.getInstance().getWindow().getGuiScaledWidth(), Minecraft.getInstance().getWindow().getGuiScaledHeight());
@@ -393,6 +398,7 @@ public final class ModernSuspectDrawer {
 
     /** True while the drawer is being dragged. */
     public static boolean mouseDragged(double mx, double my) {
+        if (ModernHudEditor.isEditing()) { dragging = false; return false; }
         if (!dragging) return false;
         if (Math.abs(mx - pressX) > 2.0) moved = true;
         float right = (float) (mx - grabOffset);
@@ -408,6 +414,7 @@ public final class ModernSuspectDrawer {
 
     /** Ends a drag; true if there was one to end. */
     public static boolean mouseReleased() {
+        if (ModernHudEditor.isEditing()) { dragging = false; return false; }
         if (!dragging) return false;
         dragging = false;
         if (!moved) {
@@ -422,6 +429,7 @@ public final class ModernSuspectDrawer {
 
     /** The wheel scrolls the list while the pointer is over the window. */
     public static boolean mouseScrolled(double mx, double my, double amount) {
+        if (ModernHudEditor.isEditing()) return false;
         SuspectList list = list();
         if (list == null || !visible() || !window().contains(mx, my)) return false;
         int max = Math.max(0, list.ranked().size() - visibleRows(window()));

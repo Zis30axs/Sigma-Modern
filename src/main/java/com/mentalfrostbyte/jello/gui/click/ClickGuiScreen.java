@@ -11,6 +11,8 @@ import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
@@ -394,7 +396,7 @@ public class ClickGuiScreen extends Screen implements SigmaClickGui {
             return;
         }
 
-        if (setting instanceof TextSetting) {
+        if (setting instanceof TextSetting || setting instanceof KeySetting || setting instanceof ItemListSetting) {
             String value = this.interactions.displayValue(setting);
             graphics.text(this.font, setting.getName() + ": " + value, panelX + 4, y + 5, TEXT);
         }

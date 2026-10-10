@@ -83,6 +83,7 @@ public final class ModernIsland {
         lastDraw = now;
         time += dt;
         float appear = ModernStyle.easeOut((now - appearStart) / 1_000_000_000F / 0.38F);
+        if (ModernHudEditor.isEditing()) appear = 1F;
 
         Track track = player.current();
         boolean playing = player.isPlaying();
@@ -144,11 +145,13 @@ public final class ModernIsland {
 
         int w = Math.round(width), h = Math.round(height);
         int x = (g.guiWidth() - w) / 2, y = 8;
-        lastBottom = y + h;
+        var placement = ModernHudEditor.place(g, "music_island", "Music", x, y, w, h);
+        lastBottom = ModernHudEditor.hasPosition("music_island") ? 0 : Math.round(placement.y() + placement.height());
         int radius = Math.min(15, h / 2);
         float scale = 0.93F + 0.07F * appear;
         g.pose().pushMatrix();
         try (var fade = ModernStyle.alphaScope(appear)) {
+            g.pose().translate(placement.dx(), placement.dy());
             g.pose().translate(g.guiWidth() / 2F, y - (1F - appear) * 10F);
             g.pose().scale(scale, scale);
             g.pose().translate(-g.guiWidth() / 2F, -y);

@@ -702,6 +702,13 @@ public class ItemInHandRenderer implements net.irisshaders.iris.mixinterface.Ite
         LocalPlayer player = this.minecraft.player;
         ItemStack nextMainHand = player.getMainHandItem();
         ItemStack nextOffHand = player.getOffhandItem();
+        // Sigma hook: Custom/LCustom may keep the original hand item visible while placing from another slot.
+        com.mentalfrostbyte.jello.module.impl.movement.BlockFly blockFly =
+            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.movement.BlockFly.class);
+        if (blockFly != null) {
+            nextMainHand = blockFly.renderedItem(InteractionHand.MAIN_HAND, nextMainHand);
+            nextOffHand = blockFly.renderedItem(InteractionHand.OFF_HAND, nextOffHand);
+        }
         if (this.shouldInstantlyReplaceVisibleItem(this.mainHandItem, nextMainHand)) {
             this.mainHandItem = nextMainHand;
         }
