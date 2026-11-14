@@ -31,6 +31,8 @@ import com.mentalfrostbyte.jello.module.impl.gui.Spotlight;
 import com.mentalfrostbyte.jello.module.impl.gui.SuspectList;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.module.impl.gui.TargetHud;
+import com.mentalfrostbyte.jello.module.impl.misc.ClientIdSpoofer;
+import com.mentalfrostbyte.jello.module.impl.misc.ClientSpoof;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.Derp;
 import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
@@ -97,6 +99,8 @@ public final class ModuleManager {
         this.register(new Compass());
         this.register(new Coords());
         this.register(new Criticals());
+        this.register(new ClientIdSpoofer());
+        this.register(new ClientSpoof());
         this.register(new CustomTitle());
         this.register(new Derp());
         this.register(new Disabler());
