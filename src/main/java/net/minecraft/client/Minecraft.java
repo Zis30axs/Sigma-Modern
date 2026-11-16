@@ -1358,6 +1358,9 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 profiler.pop();
             }
 
+            // Sigma hook: TickBase holds back ticks to save up time and runs extra burst ticks to spend it.
+            ticksToDo = com.mentalfrostbyte.jello.module.impl.combat.TickBase.adjustTicksToDo(ticksToDo);
+
             for (int i = 0; i < Math.min(10, ticksToDo); i++) {
                 profiler.incrementCounter("clientTick");
 
@@ -3347,6 +3350,13 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         com.mentalfrostbyte.jello.module.impl.movement.BlockFly blockFly =
             com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.movement.BlockFly.class);
         float multiplier = blockFly == null ? 1.0F : blockFly.timerMultiplier();
+        // Sigma hook: TickBase requests its own game speed (below 1 while charging, above 1 while
+        // boosting); the two multipliers combine.
+        com.mentalfrostbyte.jello.module.impl.combat.TickBase tickBase =
+            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.combat.TickBase.class);
+        if (tickBase != null) {
+            multiplier *= tickBase.timerMultiplier();
+        }
         if (this.level != null) {
             TickRateManager manager = this.level.tickRateManager();
             if (manager.runsNormally()) {
