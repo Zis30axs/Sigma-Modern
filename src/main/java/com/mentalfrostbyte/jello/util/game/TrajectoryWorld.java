@@ -65,13 +65,16 @@ final class TrajectoryWorld implements ProjectileTrajectories.Environment {
 
     @Override
     public boolean water(Vec3 position, ProjectileLaunch.Shot shot) {
-        if (!validPosition(position) || !Float.isFinite(shot.width()) || !Float.isFinite(shot.height())
-                || shot.width() <= 0.002F || shot.height() <= 0.002F
-                || shot.width() > 16F || shot.height() > 16F) return false;
-        double half = shot.width() / 2.0;
-        double bottom = position.y - (shot.physics() == ProjectileLaunch.Physics.WIND_CHARGE ? 0.15F : 0);
+        return water(position, shot.width(), shot.height(), shot.physics() == ProjectileLaunch.Physics.WIND_CHARGE ? 0.15F : 0);
+    }
+
+    boolean water(Vec3 position, float width, float height, float yOffset) {
+        if (!validPosition(position) || !Float.isFinite(width) || !Float.isFinite(height)
+                || width <= 0.002F || height <= 0.002F || width > 16F || height > 16F) return false;
+        double half = width / 2.0;
+        double bottom = position.y - yOffset;
         AABB box = new AABB(position.x - half, bottom, position.z - half,
-                position.x + half, bottom + shot.height(), position.z + half).deflate(0.001);
+                position.x + half, bottom + height, position.z + half).deflate(0.001);
         if (!loadedArea(box.minX, box.minZ, box.maxX, box.maxZ)) return false;
         int firstY = Math.max(Mth.floor(box.minY), this.level.getMinY());
         int lastY = Math.min(Mth.ceil(box.maxY) - 1, this.level.getMaxY());
@@ -120,7 +123,7 @@ final class TrajectoryWorld implements ProjectileTrajectories.Environment {
         return hit;
     }
 
-    private @Nullable Vec3 unobstructedEnd(Vec3 from, Vec3 to) {
+    @Nullable Vec3 unobstructedEnd(Vec3 from, Vec3 to) {
         if (!loaded(from, to)) return null;
         BlockHitResult block = this.level.clipIncludingBorder(new ClipContext(from, to,
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));

@@ -614,6 +614,11 @@ public abstract class AbstractArrow extends Projectile {
         );
     }
 
+    // Sigma hook: read-only query for incoming flight prediction, including vanilla PvP and piercing exclusions.
+    public boolean canHitOnCurrentFlight(final Entity entity) {
+        return this.isAlive() && !this.isInGround() && !this.isNoPhysics() && this.canHitEntity(entity);
+    }
+
     @Override
     protected boolean canHitEntity(final Entity entity) {
         return entity instanceof Player playerEntity && this.getOwner() instanceof Player player && !player.canHarmPlayer(playerEntity)

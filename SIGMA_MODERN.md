@@ -214,6 +214,14 @@ Once confirmed, AutoPearl borrows Stuck, searches loaded safe platforms (default
 
 References consulted for behavior and lifecycle: [LiquidBounce Freeze](https://github.com/CCBlueX/LiquidBounce/blob/nextgen/src/main/kotlin/net/ccbluex/liquidbounce/features/module/modules/movement/ModuleFreeze.kt), [LiquidBounce AntiVoid](https://github.com/CCBlueX/LiquidBounce/blob/nextgen/src/main/kotlin/net/ccbluex/liquidbounce/features/module/modules/player/antivoid/ModuleAntiVoid.kt), [Meteor AntiVoid](https://github.com/MeteorDevelopment/meteor-client/blob/master/src/main/java/meteordevelopment/meteorclient/systems/modules/movement/AntiVoid.java). The implementation uses Sigma's own events and local 26.2 projectile/collision code.
 
+## Adaptive projectile defense
+
+Enable `Combat → AdaptiveProjectileDefense` to react to incoming arrows (including spectral and crossbow arrows) and non-returning tridents. The module checks loaded projectiles within 64 blocks and predicts 16 ticks by default. It leaves the current input alone when that path already avoids the shot.
+
+**Use Shield** checks an equipped shield in either hand, its blocking angle, cooldown, startup time, and the slower walk while blocking. Piercing arrows require evasion. If blocking cannot cover the volley, the module tries movement directions against the same trajectories, accounting for walls, footing and current momentum. It changes only that tick’s directional input. The module yields during manual item use, automated combat actions and scaffolding. Movement prediction covers ordinary ground and airborne movement.
+
+The flight prediction and lateral evasion are adapted from [LiquidBounce AutoDodge and DodgePlanner](https://github.com/CCBlueX/LiquidBounce/tree/b426c1c1fc044059ed83137dd91034c66472bb91/src/main/kotlin/net/ccbluex/liquidbounce/features/module/modules/movement/autododge). Shield selection and volley evaluation are Sigma additions.
+
 ## Automatic projectiles
 
 `Combat → AutoProjectile` selects nearby targets through the enabled **Target** module and uses only whitelisted items in hotbar slots 1–9. **Range** is the maximum target distance; **Delay** is the initial acquisition and between-burst delay in milliseconds; **Amount** is shots per burst; **Frequency** is the maximum shots per second within a burst. Native item cooldowns and weapon charging still apply. Defaults are 16 blocks, 500 ms, one shot and 4 shots/second, with only snowballs and ordinary eggs selected.

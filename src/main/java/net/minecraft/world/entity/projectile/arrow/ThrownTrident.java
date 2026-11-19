@@ -105,6 +105,12 @@ public class ThrownTrident extends AbstractArrow {
         return this.entityData.get(ID_FOIL);
     }
 
+    // Sigma hook: a spent or returning trident cannot deal another hit even while it is still in the air.
+    @Override
+    public boolean canHitOnCurrentFlight(final Entity entity) {
+        return !this.dealtDamage && this.clientSideReturnTridentTickCount == 0 && super.canHitOnCurrentFlight(entity);
+    }
+
     @Override
     protected @Nullable EntityHitResult findHitEntity(final Vec3 from, final Vec3 to) {
         return this.dealtDamage ? null : super.findHitEntity(from, to);
