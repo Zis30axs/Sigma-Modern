@@ -16,6 +16,7 @@ class PearlRescueCycleTest {
         cycle.planned();
         assertTrue(cycle.shot(12, 10));
         assertEquals(PearlRescueCycle.Stage.WAITING, cycle.stage());
+        cycle.replan();
         assertFalse(cycle.shot(13, 10));
         cycle.planned();
         assertEquals(PearlRescueCycle.Stage.WAITING, cycle.stage());
@@ -27,6 +28,8 @@ class PearlRescueCycleTest {
         PearlRescueCycle cycle = new PearlRescueCycle();
         cycle.begin(20, 30);
         cycle.planned();
+        cycle.replan();
+        assertEquals(PearlRescueCycle.Stage.SEARCHING, cycle.stage());
         assertEquals(15, cycle.remainingTicks(35));
         cycle.planned();
         assertFalse(cycle.begin(49, 200));

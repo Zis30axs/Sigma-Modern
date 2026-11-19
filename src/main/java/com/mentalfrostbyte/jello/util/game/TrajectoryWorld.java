@@ -98,6 +98,11 @@ final class TrajectoryWorld implements ProjectileTrajectories.Environment {
     public ProjectileTrajectories.@Nullable Hit collision(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick) {
         BlockHitResult block = this.level.clipIncludingBorder(new ClipContext(from, to,
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));
+        return collision(from, to, shot, tick, block);
+    }
+
+    ProjectileTrajectories.@Nullable Hit collision(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick,
+                                                  BlockHitResult block) {
         boolean blockHit = block.getType() != HitResult.Type.MISS;
         Vec3 end = blockHit ? block.getLocation() : to;
         double nearest = blockHit ? from.distanceToSqr(end) : Double.POSITIVE_INFINITY;

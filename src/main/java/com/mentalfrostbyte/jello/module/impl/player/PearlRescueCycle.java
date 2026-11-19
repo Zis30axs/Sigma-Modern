@@ -25,6 +25,10 @@ final class PearlRescueCycle {
         if (this.stage == Stage.SEARCHING) this.stage = Stage.AIMING;
     }
 
+    void replan() {
+        if (this.stage == Stage.AIMING) this.stage = Stage.SEARCHING;
+    }
+
     boolean shot(final long tick, final double flightTicks) {
         if (this.stage != Stage.AIMING || this.expired(tick)
                 || !Double.isFinite(flightTicks) || flightTicks < 0) return false;

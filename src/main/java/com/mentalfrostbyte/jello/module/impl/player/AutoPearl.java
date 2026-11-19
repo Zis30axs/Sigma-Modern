@@ -55,6 +55,7 @@ public final class AutoPearl extends Module {
     private @Nullable Stuck stuck;
     private @Nullable Vec3 anchor;
     private @Nullable Vec3 preferredLanding;
+    private PearlLandingPlanner.@Nullable Search search;
     private PearlLandingPlanner.@Nullable Plan plan;
     private @Nullable EventMotion motion;
     private @Nullable EventSendPacket movementPacket;
@@ -151,8 +152,10 @@ public final class AutoPearl extends Module {
                 return;
             }
             // Tick listeners have now relinquished combat/scaffold rotation and any held hotbar slot.
-            plan = PearlLandingPlanner.find(player, preferredLanding, searchRange.get());
+            if (search == null) search = PearlLandingPlanner.start(player, preferredLanding, searchRange.get());
+            plan = search == null ? null : search.advance(player, cycle.remainingTicks(tick), turnSpeed.get());
             if (plan == null) {
+                if (search != null && !search.exhausted()) return;
                 finish("No clear pearl path to safe land was found.");
                 return;
             }
@@ -166,14 +169,18 @@ public final class AutoPearl extends Module {
         }
         if (cycle.stage() != PearlRescueCycle.Stage.AIMING || plan == null || !aligned(player, plan)) return;
         if (plan.flightTicks() + 4 >= cycle.remainingTicks(tick)) {
-            finish("Not enough suspension time remains for this landing.");
+            plan = null;
+            cycle.replan();
+            notice("Checking for a shorter pearl path.");
             return;
         }
         if (motion == null || motion.isCancelled() || movementPacket == null || movementPacket.isCancelled()
                 || !(movementPacket.getPacket() instanceof ServerboundMovePlayerPacket sent) || !sent.hasRotation()
                 || !sameLook(sent.getYRot(0), sent.getXRot(0), player.getYRot(), player.getXRot())) return;
-        if (!PearlLandingPlanner.revalidate(player, plan)) {
-            finish("The landing path changed; no pearl thrown.");
+        if (!PearlLandingPlanner.revalidate(player, plan, cycle.remainingTicks(tick) - 5)) {
+            plan = null;
+            cycle.replan();
+            notice("Landing changed: checking other pearl paths.");
             return;
         }
         Pearl pearl = findPearl(player);
@@ -272,6 +279,7 @@ public final class AutoPearl extends Module {
             cycle.reset();
             detector.reset(); // Re-arm only after a new stable landing; no repeated pearls during the same fall.
             plan = null;
+            search = null;
             anchor = preferredLanding = null;
             motion = null;
             movementPacket = usePacket = null;

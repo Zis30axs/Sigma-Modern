@@ -81,6 +81,77 @@ public final class ProjectileAim {
         return List.copyOf(solutions);
     }
 
+    record Launch(float yaw, float pitch, double timeTicks, ProjectileLaunch.Shot shot) { }
+
+    /** One launch origin and one coefficient table shared by a batch of stationary landing targets. */
+    static final class StationarySolver {
+        private final ProjectileLaunch.Template template;
+        private final Vec3 eye, origin, inherited;
+        private final Coefficients table;
+
+        StationarySolver(ProjectileLaunch.Template template, Vec3 eye, Vec3 inherited) {
+            this.template = template;
+            this.eye = eye;
+            this.origin = eye.add(0, template.originY(), 0);
+            this.inherited = template.inheritsMovement() ? inherited : Vec3.ZERO;
+            this.table = coefficients(template, Math.min(MAX_TICKS, template.maxTicks()));
+        }
+
+        double highestY() {
+            double peak = origin.y;
+            for (int tick = 1; tick < table.travel.length; tick++) {
+                peak = Math.max(peak, origin.y + (template.speed() + inherited.y) * table.travel[tick] + table.drop[tick]);
+            }
+            return peak;
+        }
+
+        List<Launch> solve(Vec3 target, int horizon) {
+            Input input = new Input(template, eye, inherited, target, Vec3.ZERO);
+            if (!valid(input) || origin.distanceToSqr(target) < 1.0E-8
+                    || origin.distanceToSqr(target) > MAX_RANGE * MAX_RANGE) return List.of();
+            List<Launch> aims = new ArrayList<>(2);
+            double dx = target.x - origin.x, dy = target.y - origin.y, dz = target.z - origin.z;
+            double speed2 = (double) template.speed() * template.speed();
+            // Between integer ticks both travel and drop are linear. Solve
+            // |target - origin - drop - inherited * travel|² = speed² * travel² on each segment.
+            for (int tick = 0; tick < Math.min(horizon, table.travel.length - 1); tick++) {
+                double t = table.travel[tick], dt = table.travel[tick + 1] - t;
+                double x = dx - inherited.x * t, y = dy - table.drop[tick] - inherited.y * t, z = dz - inherited.z * t;
+                double vx = -inherited.x * dt, vy = table.drop[tick] - table.drop[tick + 1] - inherited.y * dt;
+                double vz = -inherited.z * dt;
+                double a = vx * vx + vy * vy + vz * vz - speed2 * dt * dt;
+                double b = 2 * (x * vx + y * vy + z * vz - speed2 * t * dt);
+                double c = x * x + y * y + z * z - speed2 * t * t;
+                if (Math.abs(a) < 1.0E-12) {
+                    if (Math.abs(b) > 1.0E-12) add(aims, input, tick, -c / b);
+                    continue;
+                }
+                double discriminant = b * b - 4 * a * c;
+                if (discriminant < 0) continue;
+                double q = -0.5 * (b + Math.copySign(Math.sqrt(discriminant), b));
+                double r1 = q / a, r2 = q == 0 ? r1 : c / q;
+                add(aims, input, tick, Math.min(r1, r2));
+                add(aims, input, tick, Math.max(r1, r2));
+            }
+            return aims;
+        }
+
+        private void add(List<Launch> aims, Input input, int tick, double fraction) {
+            if (!(fraction >= -1.0E-9 && fraction <= 1 + 1.0E-9)) return;
+            double time = tick + Math.clamp(fraction, 0, 1);
+            if (time < 1.0E-6 || (!aims.isEmpty() && time - aims.getLast().timeTicks() < 1.0E-6)) return;
+            Vec3 launch = input.targetPoint().subtract(origin).add(0, -table.drop(time), 0)
+                    .scale(1 / table.travel(time)).subtract(inherited);
+            Angles angles = angles(template, launch);
+            if (angles == null) return;
+            var shot = template.launch(eye, inherited, angles.yaw(), angles.pitch());
+            Vec3 end = origin.add(shot.velocity().scale(table.travel(time))).add(0, table.drop(time), 0);
+            if (end.distanceToSqr(input.targetPoint()) <= 0.0025) {
+                aims.add(new Launch(angles.yaw(), angles.pitch(), time, shot));
+            }
+        }
+    }
+
     /**
      * Rebuilds the flight from a fresh launch position while preserving the facing used for this tick's movement.
      * The endpoint can differ from the ideal target center; a world validator must confirm it is in the future box.
@@ -129,14 +200,21 @@ public final class ProjectileAim {
                 .scale(1 / coefficients.travel(time)).subtract(inherited);
         // A moving target is not assumed to stop when the prediction horizon expires.
         if (targetVelocity.lengthSqr() > 1.0E-8 && time > predictionTime(targetVelocity, time) + 1.0E-6) return null;
+        Angles angles = angles(input.template(), launch);
+        return angles == null ? null : flight(input, targetVelocity, coefficients, time, angles.yaw, angles.pitch, hit);
+    }
+
+    private record Angles(float yaw, float pitch) { }
+
+    private static @Nullable Angles angles(ProjectileLaunch.Template template, Vec3 launch) {
         double horizontal = launch.horizontalDistance();
         float yaw = (float) Math.toDegrees(Math.atan2(-launch.x, launch.z));
-        double offset = Math.toRadians(input.template().pitchOffset());
+        double offset = Math.toRadians(template.pitchOffset());
         // shootFromRotation offsets only Y. Applying -20 degrees to the whole pitch aims potions incorrectly.
         float pitch = horizontal < 1.0E-10 ? (launch.y >= 0 ? -90F : 90F)
                 : (float) Math.toDegrees(Math.atan((-launch.y / horizontal - Math.sin(offset)) / Math.cos(offset)));
         if (!Float.isFinite(yaw) || !Float.isFinite(pitch) || pitch < -90 || pitch > 90) return null;
-        return flight(input, targetVelocity, coefficients, time, yaw, pitch, hit);
+        return new Angles(yaw, pitch);
     }
 
     private static @Nullable Aim flight(Input input, Vec3 targetVelocity, Coefficients coefficients,

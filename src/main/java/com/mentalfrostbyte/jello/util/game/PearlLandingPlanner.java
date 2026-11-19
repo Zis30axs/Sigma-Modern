@@ -1,10 +1,10 @@
 package com.mentalfrostbyte.jello.util.game;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntFunction;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -12,10 +12,13 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -26,11 +29,7 @@ import org.jspecify.annotations.Nullable;
 
 /** Bounded, read-only pearl recovery search. Never treats a wall impact as a safe landing. */
 public final class PearlLandingPlanner {
-    private static final int MAX_COLUMNS = 1024;
-    private static final int MAX_BLOCK_CHECKS = 24_000;
-    private static final int MAX_CANDIDATES = 96;
-    private static final int MAX_AIMS = 48;
-    static final int MAX_ROBUST_CANDIDATES = 8;
+    private static final double MAX_FLIGHT_DISTANCE = 160;
     // Projectile.getMovementToShoot adds each triangle sample before multiplying by pearl shoot power.
     static final double PEARL_VELOCITY_SPREAD = 0.0172275 * 1.5;
     private static final double MAX_RANGE = 48;
@@ -42,82 +41,183 @@ public final class PearlLandingPlanner {
         public Plan { path = List.copyOf(path); }
     }
 
-    private record Candidate(Vec3 point, double rank) { }
-    record RankedPlan(Plan plan, ProjectileLaunch.Shot shot) { }
     record Impact(Vec3 position, Direction face, BlockPos block) { }
     record Flight(Vec3 landing, Impact impact, List<Vec3> path, int ticks) {
         Flight { path = List.copyOf(path); }
     }
 
     /** Small geometry boundary lets tests exercise first-impact and old-position semantics. */
+    record Step(boolean clear, @Nullable Impact impact) {
+        static final Step OPEN = new Step(true, null), BLOCKED = new Step(false, null);
+    }
+
     interface FlightWorld {
-        boolean clearSegment(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick);
-        @Nullable Impact impact(Vec3 from, Vec3 to);
+        Step step(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick);
         boolean safeLanding(Vec3 feet);
     }
 
     private PearlLandingPlanner() { }
 
-    public static @Nullable Plan find(LocalPlayer player, @Nullable Vec3 preferredLanding, double range) {
-        if (player == null || !player.isAlive() || !Double.isFinite(range) || range < 1) return null;
-        range = Math.min(MAX_RANGE, range);
-        World world = new World(player);
-        Vec3 eye = player.getEyePosition();
-        if (!finite(eye)) return null;
-        Vec3 preferred = finite(preferredLanding) && eye.distanceToSqr(preferredLanding) <= range * range * 4
-                ? preferredLanding : null;
-        List<Candidate> candidates = candidates(world, eye, preferred, range);
-        ProjectileLaunch.Template template = pearlTemplate();
-        if (template == null) return null;
-        Vec3 inherited = inherited(player);
-        List<List<ProjectileAim.Aim>> solutions = new ArrayList<>(candidates.size());
-        for (Candidate candidate : candidates) {
-            // Aim slightly through the top so a rounded float endpoint still intersects its surface.
-            solutions.add(ProjectileAim.solveAll(new ProjectileAim.Input(template, eye, inherited,
-                    candidate.point().add(0, -0.015, 0), Vec3.ZERO)));
+    /** A cursor belongs to one held fall. World access stays on the client thread and resumes next tick. */
+    public static final class Search {
+        private final SearchWorld world;
+        private final Vec3 eye;
+        private final @Nullable Vec3 preferred;
+        private final double range;
+        private final List<Column> columns;
+        private final ArrayDeque<BlockPos> surfaces = new ArrayDeque<>();
+        private final ArrayDeque<Sample> refinements = new ArrayDeque<>();
+        private final ProjectileLaunch.Template template;
+        private final ArrayDeque<Sample> alternatives = new ArrayDeque<>();
+        private int column, attempts;
+
+        Search(SearchWorld world, Vec3 eye, @Nullable Vec3 preferred, double range, ProjectileLaunch.Template template) {
+            this.world = world;
+            this.eye = eye;
+            this.preferred = finite(preferred) ? preferred : null;
+            this.range = range;
+            this.template = template;
+            this.columns = columns(eye, this.preferred, range);
         }
-        // Prefer short flight over a long loft. Only try high arcs when every low arc is obstructed/unsafe.
-        for (int arc = 0; arc < 2; arc++) {
-            List<RankedPlan> ranked = new ArrayList<>();
-            for (int index = 0; index < solutions.size(); index++) {
-                List<ProjectileAim.Aim> aims = solutions.get(index);
-                if (aims.size() <= arc) continue;
-                ProjectileAim.Aim aim = aims.get(arc);
-                Flight flight = trace(aim.shot(), world);
-                if (flight == null || horizontalDistance(eye, flight.landing()) > range) continue;
-                double score = flight.ticks() + eye.distanceTo(flight.landing()) * 0.15
-                        + (preferred == null ? 0 : preferred.distanceTo(flight.landing()) * 0.35);
-                Plan plan = new Plan(aim.yaw(), aim.pitch(), flight.landing(), flight.impact().position(),
-                        flight.impact().block(), flight.path(), flight.ticks(), score);
-                ranked.add(new RankedPlan(plan, aim.shot()));
+
+        public boolean exhausted() {
+            return column == columns.size() && surfaces.isEmpty() && refinements.isEmpty() && alternatives.isEmpty();
+        }
+
+        public @Nullable Plan advance(LocalPlayer player, int remainingTicks, float turnSpeed) {
+            return advance(player.getEyePosition(), inherited(player), player.getYRot(), player.getXRot(), remainingTicks, turnSpeed);
+        }
+
+        @Nullable Plan advance(Vec3 launchEye, Vec3 motion, float yaw, float pitch, int remainingTicks, float turnSpeed) {
+            var solver = new ProjectileAim.StationarySolver(template, launchEye, motion);
+            int minY = Mth.floor(launchEye.y - MAX_FLIGHT_DISTANCE - 2);
+            int maxY = Mth.ceil(solver.highestY());
+            long start = System.nanoTime();
+            for (int i = 0; i < 256 && column < columns.size(); i++) {
+                world.scanColumn(columns.get(column++), minY, maxY, surfaces::addLast);
+                if (System.nanoTime() - start >= 1_500_000L) break;
             }
-            Plan best = firstRobust(ranked, world);
-            if (best != null) return best;
+            Plan best = null;
+            Sample bestSample = null;
+            List<Sample> otherViable = new ArrayList<>();
+            long aimStart = System.nanoTime();
+            for (int i = 0; i < 16; i++) {
+                Sample sample;
+                if (!alternatives.isEmpty()) sample = alternatives.removeFirst();
+                else if (!refinements.isEmpty() && (surfaces.isEmpty() || attempts++ % 4 == 3)) sample = refinements.removeFirst();
+                else if (!surfaces.isEmpty()) sample = new Sample(surfaces.removeFirst(), 0);
+                else break;
+                Plan plan = aim(sample, launchEye, solver, remainingTicks, turnSpeed, yaw, pitch);
+                if (plan != null && (best == null || plan.score() < best.score())) {
+                    if (bestSample != null) otherViable.add(bestSample);
+                    best = plan;
+                    bestSample = sample;
+                } else if (plan != null) {
+                    otherViable.add(sample);
+                } else {
+                    refine(sample);
+                }
+                if (System.nanoTime() - aimStart >= 3_000_000L) break;
+            }
+            // If the winner fails live revalidation, resume with the other viable throws from this slice.
+            alternatives.addAll(otherViable);
+            if (bestSample != null) refine(bestSample);
+            return best;
+        }
+
+        private void refine(Sample sample) {
+            if (sample.index + 1 < SAMPLE_X.length) refinements.addLast(new Sample(sample.block, sample.index + 1));
+        }
+
+        private @Nullable Plan aim(Sample sample, Vec3 origin, ProjectileAim.StationarySolver solver,
+                                   int remainingTicks, float turnSpeed, float yaw, float pitch) {
+            Vec3 target = world.target(sample, eye, range);
+            if (target == null) return null;
+            if (horizontalDistance(eye, target) > range) return null;
+            for (var aim : solver.solve(target, remainingTicks - 4)) {
+                int turns = (int) Math.ceil(Math.max(Math.abs(Mth.wrapDegrees(aim.yaw() - yaw)),
+                        Math.abs(aim.pitch() - pitch)) / turnSpeed);
+                int flightBudget = remainingTicks - Math.max(1, turns) - 5;
+                if (flightBudget < 1) continue;
+                Flight flight = trace(aim.shot(), world, flightBudget, true);
+                if (flight == null || horizontalDistance(eye, flight.landing()) > range
+                        || !spreadSafe(aim.shot(), world, flightBudget)) continue;
+                double score = turns + flight.ticks() + origin.distanceTo(flight.landing()) * 0.15
+                        + (preferred == null ? 0 : preferred.distanceTo(flight.landing()) * 0.35);
+                return new Plan(aim.yaw(), aim.pitch(), flight.landing(), flight.impact().position(),
+                        flight.impact().block(), flight.path(), flight.ticks(), score);
+            }
+            return null;
+        }
+    }
+
+    record Sample(BlockPos block, int index) { }
+    record Column(int x, int z) { }
+    private static final double[] SAMPLE_X = {0.5, 0.25, 0.75, 0.5, 0.5, 0.25, 0.75, 0.25, 0.75};
+    private static final double[] SAMPLE_Z = {0.5, 0.5, 0.5, 0.25, 0.75, 0.25, 0.75, 0.75, 0.25};
+
+    /** Progressively halve the lattice spacing. Each intersecting column is visited exactly once. */
+    static List<Column> columns(Vec3 eye, @Nullable Vec3 preferred, double range) {
+        int cx = Mth.floor(eye.x), cz = Mth.floor(eye.z), radius = Mth.ceil(range) + 1;
+        List<Column> result = new ArrayList<>();
+        Column remembered = preferred == null ? null : new Column(Mth.floor(preferred.x), Mth.floor(preferred.z));
+        if (remembered != null && touchesDisk(remembered, eye, range)) result.add(remembered);
+        for (int stride = 8; stride >= 1; stride /= 2) {
+            for (int r = 0; r <= radius; r += stride) {
+                for (int k = -r; k < Math.max(1, r); k += stride) {
+                    if (stride < 8 && r % (2 * stride) == 0 && k % (2 * stride) == 0) continue;
+                    int dx = k, dz = -r;
+                    for (int side = 0; side < (r == 0 ? 1 : 4); side++) {
+                        Column point = new Column(cx + dx, cz + dz);
+                        if (!point.equals(remembered) && touchesDisk(point, eye, range)) result.add(point);
+                        int oldX = dx;
+                        dx = -dz;
+                        dz = oldX;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private static boolean touchesDisk(Column c, Vec3 eye, double range) {
+        double dx = eye.x - Mth.clamp(eye.x, c.x, c.x + 1);
+        double dz = eye.z - Mth.clamp(eye.z, c.z, c.z + 1);
+        return dx * dx + dz * dz <= range * range;
+    }
+
+    public static @Nullable Search start(LocalPlayer player, @Nullable Vec3 preferred, double range) {
+        if (player == null || !player.isAlive() || !finite(player.getEyePosition())
+                || !Double.isFinite(range) || range < 1) return null;
+        var template = pearlTemplate();
+        return template == null ? null : new Search(new World(player), player.getEyePosition(), preferred, Math.min(MAX_RANGE, range), template);
+    }
+
+    /** Synchronous entry point for callers outside the tick-driven AutoPearl state machine. */
+    public static @Nullable Plan find(LocalPlayer player, @Nullable Vec3 preferred, double range) {
+        Search search = start(player, preferred, range);
+        while (search != null && !search.exhausted()) {
+            Plan plan = search.advance(player, 200, 180F);
+            if (plan != null) return plan;
         }
         return null;
     }
 
     /** Replays the chosen visible rotation from the current origin immediately before item use. */
     public static boolean revalidate(LocalPlayer player, Plan plan) {
+        return revalidate(player, plan, 160);
+    }
+
+    public static boolean revalidate(LocalPlayer player, Plan plan, int remainingFlightTicks) {
         if (player == null || plan == null || !player.isAlive() || !Float.isFinite(plan.yaw())
                 || !Float.isFinite(plan.pitch()) || Math.abs(plan.pitch()) > 90) return false;
         ProjectileLaunch.Template template = pearlTemplate();
         if (template == null) return false;
         ProjectileLaunch.Shot shot = template.launch(player.getEyePosition(), inherited(player), plan.yaw(), plan.pitch());
         World world = new World(player);
-        Flight flight = trace(shot, world);
+        Flight flight = trace(shot, world, remainingFlightTicks, false);
         return flight != null && flight.impact().block().equals(plan.support())
-                && flight.landing().distanceToSqr(plan.landing()) < 0.25 && spreadSafe(shot, world);
-    }
-
-    /** Expensive spread checks are limited to the best nominal candidates, independently for each arc. */
-    static @Nullable Plan firstRobust(List<RankedPlan> candidates, FlightWorld world) {
-        List<RankedPlan> ranked = candidates.stream().sorted(Comparator.comparingDouble(value -> value.plan().score())).toList();
-        for (int index = 0; index < Math.min(MAX_ROBUST_CANDIDATES, ranked.size()); index++) {
-            RankedPlan candidate = ranked.get(index);
-            if (spreadSafe(candidate.shot(), world)) return candidate.plan();
-        }
-        return null;
+                && flight.landing().distanceToSqr(plan.landing()) < 0.25 && spreadSafe(shot, world, remainingFlightTicks);
     }
 
     /**
@@ -126,6 +226,10 @@ public final class PearlLandingPlanner {
      * A nominal safe trace is required separately; each corner must also end on a supported top surface.
      */
     static boolean spreadSafe(ProjectileLaunch.Shot shot, FlightWorld world) {
+        return spreadSafe(shot, world, shot.maxTicks());
+    }
+
+    private static boolean spreadSafe(ProjectileLaunch.Shot shot, FlightWorld world, int ticks) {
         for (int x = -1; x <= 1; x += 2) {
             for (int y = -1; y <= 1; y += 2) {
                 for (int z = -1; z <= 1; z += 2) {
@@ -133,7 +237,7 @@ public final class PearlLandingPlanner {
                             y * PEARL_VELOCITY_SPREAD, z * PEARL_VELOCITY_SPREAD);
                     ProjectileLaunch.Shot perturbed = new ProjectileLaunch.Shot(shot.origin(), velocity, shot.physics(),
                             shot.gravity(), shot.airDrag(), shot.waterDrag(), shot.width(), shot.height(), shot.maxTicks(), shot.preview());
-                    if (trace(perturbed, world) == null) return false;
+                    if (trace(perturbed, world, ticks, false) == null) return false;
                 }
             }
         }
@@ -158,83 +262,32 @@ public final class PearlLandingPlanner {
         return ProjectileLaunch.inheritedMovement(player.getKnownMovement(), player.onGround());
     }
 
-    private static List<Candidate> candidates(World world, Vec3 eye, @Nullable Vec3 preferred, double range) {
-        List<Candidate> result = new ArrayList<>();
-        Set<Long> columns = new HashSet<>();
-        Set<BlockPos> checked = new HashSet<>();
-        int[] work = {0};
-        if (preferred != null) scanRings(world, eye, preferred, preferred, 4, range, columns, checked, result, work);
-        scanRings(world, eye, eye, preferred, Mth.ceil(range), range, columns, checked, result, work);
-        result.sort(Comparator.comparingDouble(Candidate::rank));
-        return List.copyOf(result.subList(0, Math.min(MAX_AIMS, result.size())));
-    }
-
-    private static void scanRings(World world, Vec3 eye, Vec3 center, @Nullable Vec3 preferred, int radius,
-                                  double range, Set<Long> columns, Set<BlockPos> checked,
-                                  List<Candidate> result, int[] work) {
-        int cx = Mth.floor(center.x), cz = Mth.floor(center.z);
-        for (int ring = 0; ring <= radius; ring++) {
-            int step = ring > 12 ? 2 : 1;
-            for (int dx = -ring; dx <= ring; dx += step) {
-                for (int dz = -ring; dz <= ring; dz += step) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
-                    if (columns.size() >= MAX_COLUMNS || work[0] >= MAX_BLOCK_CHECKS || result.size() >= MAX_CANDIDATES) return;
-                    int x = cx + dx, z = cz + dz;
-                    if (horizontalDistance(eye, new Vec3(x + 0.5, eye.y, z + 0.5)) > range) continue;
-                    long key = ((long) x << 32) ^ (z & 0xffffffffL);
-                    if (!columns.add(key) || !world.loaded(x - 1, z - 1, x + 2, z + 2)) continue;
-                    // Heightmap is read only after verifying the chunk exists; no search generates chunks.
-                    int top = world.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
-                    candidate(world, eye, preferred, new BlockPos(x, top, z), checked, result, work);
-                    int middle = Mth.floor(preferred != null ? preferred.y : eye.y) - 1;
-                    // Search every height near the freeze/remembered position, then a sparse cave sample.
-                    // Outdoor/End platforms are still found at their exact height through the heightmap.
-                    for (int distance = 0; distance <= 24; distance += ring <= 4 ? 1 : 6) {
-                        candidate(world, eye, preferred, new BlockPos(x, middle - distance, z), checked, result, work);
-                        if (distance > 0) candidate(world, eye, preferred, new BlockPos(x, middle + distance, z), checked, result, work);
-                        if (work[0] >= MAX_BLOCK_CHECKS || result.size() >= MAX_CANDIDATES) break;
-                    }
-                }
-            }
-        }
-    }
-
-    private static void candidate(World world, Vec3 eye, @Nullable Vec3 preferred, BlockPos pos,
-                                   Set<BlockPos> checked, List<Candidate> result, int[] work) {
-        if (work[0] >= MAX_BLOCK_CHECKS || result.size() >= MAX_CANDIDATES || !checked.add(pos)
-                || pos.getY() < world.level.getMinY() || pos.getY() > world.level.getMaxY()
-                || pos.getY() < eye.y - 36 || pos.getY() > eye.y + 28) return;
-        work[0]++;
-        BlockState state = world.level.getBlockState(pos);
-        if (state.isAir() || hazard(state) || !state.getFluidState().isEmpty()) return;
-        var shape = state.getCollisionShape(world.level, pos, CollisionContext.empty());
-        if (shape.isEmpty()) return;
-        Vec3 feet = new Vec3(pos.getX() + 0.5, pos.getY() + shape.max(Direction.Axis.Y), pos.getZ() + 0.5);
-        if (!world.safeFeet(feet, 0.12)) return;
-        double rank = eye.distanceTo(feet) + (preferred == null ? 0 : preferred.distanceTo(feet) * 0.2);
-        result.add(new Candidate(feet, rank));
-    }
-
     /** Simulates full ticks, not just the solver's intercept prefix (which can finish on ascent). */
     static @Nullable Flight trace(ProjectileLaunch.Shot shot, FlightWorld world) {
+        return trace(shot, world, 160, true);
+    }
+
+    private static @Nullable Flight trace(ProjectileLaunch.Shot shot, FlightWorld world, int ticks, boolean capturePath) {
         if (shot == null || !finite(shot.origin()) || !finite(shot.velocity())) return null;
         Vec3 position = shot.origin(), velocity = shot.velocity();
-        List<Vec3> path = new ArrayList<>();
-        path.add(position);
+        List<Vec3> path = capturePath ? new ArrayList<>() : List.of();
+        if (capturePath) path.add(position);
         double travelled = 0;
-        for (int tick = 1; tick <= Math.min(160, shot.maxTicks()); tick++) {
+        for (int tick = 1; tick <= Math.min(ticks, shot.maxTicks()); tick++) {
             velocity = velocity.add(0, -shot.gravity(), 0).scale(shot.airDrag());
             Vec3 next = position.add(velocity);
             travelled += velocity.length();
-            if (travelled > 160 || !finite(next) || !world.clearSegment(position, next, shot, tick)) return null;
-            Impact hit = world.impact(position, next);
+            if (travelled > MAX_FLIGHT_DISTANCE || !finite(next)) return null;
+            Step step = world.step(position, next, shot, tick);
+            if (!step.clear()) return null;
+            Impact hit = step.impact();
             if (hit != null) {
                 // ThrownEnderpearl.onHit teleports to oldPosition(), before this tick's movement.
                 if (hit.face() != Direction.UP || velocity.y >= 0 || !world.safeLanding(position)) return null;
-                path.add(hit.position());
+                if (capturePath) path.add(hit.position());
                 return new Flight(position, hit, path, tick);
             }
-            path.add(next);
+            if (capturePath) path.add(next);
             position = next;
         }
         return null;
@@ -257,7 +310,37 @@ public final class PearlLandingPlanner {
         return Math.hypot(first.x - second.x, first.z - second.z);
     }
 
-    private static final class World implements FlightWorld {
+    /** Visit every exposed collision surface in nonempty sections, including cave floors below the heightmap. */
+    static void scanSurfaces(BlockGetter level, Column column, int minY, int top,
+                             IntFunction<@Nullable PalettedContainer<BlockState>> sectionAtY, Consumer<BlockPos> emit) {
+        var pos = new BlockPos.MutableBlockPos();
+        boolean covered = false;
+        for (int sectionTop = top; sectionTop >= minY; sectionTop = (sectionTop & ~15) - 1) {
+            var states = sectionAtY.apply(sectionTop);
+            if (states == null) {
+                covered = false;
+                continue;
+            }
+            for (int y = sectionTop; y >= Math.max(minY, sectionTop & ~15); y--) {
+                BlockState state = states.get(column.x & 15, y & 15, column.z & 15);
+                if (state.isAir()) {
+                    covered = false;
+                    continue;
+                }
+                pos.set(column.x, y, column.z);
+                if (!covered && state.getFluidState().isEmpty() && !hazard(state)
+                        && !state.getCollisionShape(level, pos).isEmpty()) emit.accept(pos.immutable());
+                covered = state.isCollisionShapeFullBlock(level, pos);
+            }
+        }
+    }
+
+    interface SearchWorld extends FlightWorld {
+        void scanColumn(Column column, int minY, int maxY, Consumer<BlockPos> emit);
+        @Nullable Vec3 target(Sample sample, Vec3 eye, double range);
+    }
+
+    private static final class World implements SearchWorld {
         private final LocalPlayer player;
         private final Level level;
         private final TrajectoryWorld trajectory;
@@ -273,17 +356,48 @@ public final class PearlLandingPlanner {
             this.height = dimensions.height();
         }
 
-        @Override public boolean clearSegment(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick) {
-            if (!this.trajectory.loaded(from, to)) return false;
-            AABB swept = new AABB(from, to).inflate(shot.width() * 0.5);
-            if (!clearFluidsAndHazards(swept)) return false;
-            ProjectileTrajectories.Hit hit = this.trajectory.collision(from, to, shot, tick);
-            return hit == null || !hit.entityHit();
+        @Override public void scanColumn(Column column, int minY, int maxY, Consumer<BlockPos> emit) {
+            int x = column.x, z = column.z;
+            LevelChunk chunk = this.level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+            if (chunk == null) return;
+            // WORLD_SURFACE includes leaves and fluids. A missing heightmap is optional acceleration.
+            minY = Math.max(minY, level.getMinY());
+            maxY = Math.min(maxY, level.getMaxY());
+            int top = chunk.hasPrimedHeightmap(Heightmap.Types.WORLD_SURFACE)
+                    ? Math.min(maxY, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z)) : maxY;
+            scanSurfaces(level, column, minY, top, y -> {
+                var section = chunk.getSection(chunk.getSectionIndex(y));
+                return section.hasOnlyAir() ? null : section.getStates();
+            }, emit);
         }
 
-        @Override public @Nullable Impact impact(Vec3 from, Vec3 to) {
-            BlockHitResult hit = clip(from, to);
-            return hit.getType() == HitResult.Type.MISS ? null : new Impact(hit.getLocation(), hit.getDirection(), hit.getBlockPos());
+        @Override public @Nullable Vec3 target(Sample sample, Vec3 eye, double range) {
+            BlockPos pos = sample.block;
+            if (!loaded(pos.getX(), pos.getZ(), pos.getX(), pos.getZ())) return null;
+            BlockState state = this.level.getBlockState(pos);
+            if (state.isAir() || !state.getFluidState().isEmpty() || hazard(state)) return null;
+            double x = SAMPLE_X[sample.index], z = SAMPLE_Z[sample.index];
+            // A boundary cell can intersect the disk while its center is outside. Aim at the
+            // nearest interior point on its first try; the surface query still checks its actual height.
+            if (sample.index == 0 && Math.hypot(pos.getX() + x - eye.x, pos.getZ() + z - eye.z) > range) {
+                x = Mth.clamp(eye.x - pos.getX(), 0.0001, 0.9999);
+                z = Mth.clamp(eye.z - pos.getZ(), 0.0001, 0.9999);
+            }
+            var shape = state.getCollisionShape(this.level, pos);
+            double top = shape.max(Direction.Axis.Y, z, x);
+            if (!Double.isFinite(top)) return null;
+            return new Vec3(pos.getX() + x, pos.getY() + top - 0.015, pos.getZ() + z);
+        }
+
+        @Override public Step step(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick) {
+            if (!this.trajectory.loaded(from, to)) return Step.BLOCKED;
+            BlockHitResult block = clip(from, to);
+            Vec3 end = block.getType() == HitResult.Type.MISS ? to : block.getLocation();
+            if (!clearFluidsAndHazards(new AABB(from, end).inflate(shot.width() * 0.5))) return Step.BLOCKED;
+            ProjectileTrajectories.Hit first = this.trajectory.collision(from, to, shot, tick, block);
+            if (first == null) return Step.OPEN;
+            return first.entityHit() ? Step.BLOCKED
+                    : new Step(true, new Impact(block.getLocation(), block.getDirection(), block.getBlockPos()));
         }
 
         @Override public boolean safeLanding(Vec3 feet) { return safeFeet(feet, MAX_LANDING_DROP); }
