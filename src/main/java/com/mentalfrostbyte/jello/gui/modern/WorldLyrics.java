@@ -31,7 +31,7 @@ public final class WorldLyrics {
     private int index = -1;
     private Vec3 origin = Vec3.ZERO, anchor = Vec3.ZERO;
     private @Nullable Caption current, previous;
-    private @Nullable Lyrics.Line cachedLine;
+    private Lyrics.@Nullable Line cachedLine;
     private @Nullable String cachedExtra;
     private int cachedLit;
     private List<Row> rows = List.of();
