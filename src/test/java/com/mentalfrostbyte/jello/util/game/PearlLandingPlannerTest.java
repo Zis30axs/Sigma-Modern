@@ -266,7 +266,7 @@ class PearlLandingPlannerTest {
                 return null;
             }
             public PearlLandingPlanner.Step step(Vec3 from, Vec3 to, ProjectileLaunch.Shot shot, int tick) {
-                throw new AssertionError();
+                return PearlLandingPlanner.Step.BLOCKED;
             }
             public boolean safeLanding(Vec3 feet) { throw new AssertionError(); }
         };

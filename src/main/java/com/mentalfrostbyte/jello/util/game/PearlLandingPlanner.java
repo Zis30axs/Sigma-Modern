@@ -2,7 +2,9 @@ package com.mentalfrostbyte.jello.util.game;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.function.Consumer;
 import java.util.function.IntFunction;
 import net.minecraft.client.player.LocalPlayer;
@@ -35,7 +37,7 @@ public final class PearlLandingPlanner {
     private static final double MAX_RANGE = 48;
     private static final double MAX_LANDING_DROP = 2.5;
 
-    /** landing is the actual teleport destination (the collision tick's old pearl position). */
+    /** Landing is the old pearl position at impact. Score is remaining turn ticks plus actual flight ticks. */
     public record Plan(float yaw, float pitch, Vec3 landing, Vec3 hitPosition, BlockPos support,
                        List<Vec3> path, double flightTicks, double score) {
         public Plan { path = List.copyOf(path); }
@@ -65,7 +67,7 @@ public final class PearlLandingPlanner {
         private final @Nullable Vec3 preferred;
         private final double range;
         private final List<Column> columns;
-        private final ArrayDeque<BlockPos> surfaces = new ArrayDeque<>();
+        private final PriorityQueue<BlockPos> surfaces;
         private final ArrayDeque<Sample> refinements = new ArrayDeque<>();
         private final ProjectileLaunch.Template template;
         private final ArrayDeque<Sample> alternatives = new ArrayDeque<>();
@@ -78,6 +80,8 @@ public final class PearlLandingPlanner {
             this.range = range;
             this.template = template;
             this.columns = columns(eye, this.preferred, range);
+            this.surfaces = new PriorityQueue<>(Comparator.comparingDouble((BlockPos p) -> p.distToCenterSqr(eye))
+                    .thenComparingLong(BlockPos::asLong));
         }
 
         public boolean exhausted() {
@@ -85,30 +89,52 @@ public final class PearlLandingPlanner {
         }
 
         public @Nullable Plan advance(LocalPlayer player, int remainingTicks, float turnSpeed) {
-            return advance(player.getEyePosition(), inherited(player), player.getYRot(), player.getXRot(), remainingTicks, turnSpeed);
+            return advance(player, remainingTicks, turnSpeed, null);
+        }
+
+        public @Nullable Plan advance(LocalPlayer player, int remainingTicks, float turnSpeed, @Nullable Plan incumbent) {
+            return advance(player.getEyePosition(), inherited(player), player.getYRot(), player.getXRot(),
+                    remainingTicks, turnSpeed, incumbent);
         }
 
         @Nullable Plan advance(Vec3 launchEye, Vec3 motion, float yaw, float pitch, int remainingTicks, float turnSpeed) {
+            return advance(launchEye, motion, yaw, pitch, remainingTicks, turnSpeed, null);
+        }
+
+        @Nullable Plan advance(Vec3 launchEye, Vec3 motion, float yaw, float pitch, int remainingTicks,
+                               float turnSpeed, @Nullable Plan incumbent) {
             var solver = new ProjectileAim.StationarySolver(template, launchEye, motion);
             int minY = Mth.floor(launchEye.y - MAX_FLIGHT_DISTANCE - 2);
             int maxY = Mth.ceil(solver.highestY());
             long start = System.nanoTime();
             for (int i = 0; i < 256 && column < columns.size(); i++) {
-                world.scanColumn(columns.get(column++), minY, maxY, surfaces::addLast);
+                world.scanColumn(columns.get(column++), minY, maxY, surfaces::add);
                 if (System.nanoTime() - start >= 1_500_000L) break;
             }
-            Plan best = null;
+            // Forward prediction works even when the pearl is still in another hotbar slot. The
+            // current look wins equal ETAs and can be used on this tick's confirmed rotation report.
+            Plan best = predict(template.launch(launchEye, motion, yaw, pitch), yaw, pitch, 0, remainingTicks, null);
+            if (incumbent != null) {
+                int turns = turnTicks(yaw, pitch, incumbent.yaw(), incumbent.pitch(), turnSpeed);
+                if (turns > 0) {
+                    var shot = template.launch(launchEye, motion, incumbent.yaw(), incumbent.pitch());
+                    Plan refreshed = predict(shot, incumbent.yaw(), incumbent.pitch(), turns, remainingTicks, best);
+                    if (refreshed != null) best = refreshed;
+                }
+            }
+            boolean recoverAlternatives = best == null;
             Sample bestSample = null;
             List<Sample> otherViable = new ArrayList<>();
             long aimStart = System.nanoTime();
             for (int i = 0; i < 16; i++) {
                 Sample sample;
-                if (!alternatives.isEmpty()) sample = alternatives.removeFirst();
+                if (recoverAlternatives && !alternatives.isEmpty()) sample = alternatives.removeFirst();
                 else if (!refinements.isEmpty() && (surfaces.isEmpty() || attempts++ % 4 == 3)) sample = refinements.removeFirst();
-                else if (!surfaces.isEmpty()) sample = new Sample(surfaces.removeFirst(), 0);
+                else if (!surfaces.isEmpty()) sample = new Sample(surfaces.remove(), 0);
                 else break;
-                Plan plan = aim(sample, launchEye, solver, remainingTicks, turnSpeed, yaw, pitch);
-                if (plan != null && (best == null || plan.score() < best.score())) {
+                Plan plan = aim(sample, solver, remainingTicks, turnSpeed, yaw, pitch);
+                if (plan != null && (best == null || plan.score() < best.score()
+                        || (bestSample != null && plan.score() == best.score() && nearerPreferred(plan, best)))) {
                     if (bestSample != null) otherViable.add(bestSample);
                     best = plan;
                     bestSample = sample;
@@ -129,26 +155,42 @@ public final class PearlLandingPlanner {
             if (sample.index + 1 < SAMPLE_X.length) refinements.addLast(new Sample(sample.block, sample.index + 1));
         }
 
-        private @Nullable Plan aim(Sample sample, Vec3 origin, ProjectileAim.StationarySolver solver,
+        private boolean nearerPreferred(Plan candidate, Plan best) {
+            return preferred != null && candidate.landing().distanceToSqr(preferred) < best.landing().distanceToSqr(preferred);
+        }
+
+        private @Nullable Plan aim(Sample sample, ProjectileAim.StationarySolver solver,
                                    int remainingTicks, float turnSpeed, float yaw, float pitch) {
             Vec3 target = world.target(sample, eye, range);
-            if (target == null) return null;
-            if (horizontalDistance(eye, target) > range) return null;
+            if (target == null || horizontalDistance(eye, target) > range) return null;
+            Plan best = null;
             for (var aim : solver.solve(target, remainingTicks - 4)) {
-                int turns = (int) Math.ceil(Math.max(Math.abs(Mth.wrapDegrees(aim.yaw() - yaw)),
-                        Math.abs(aim.pitch() - pitch)) / turnSpeed);
-                int flightBudget = remainingTicks - Math.max(1, turns) - 5;
-                if (flightBudget < 1) continue;
-                Flight flight = trace(aim.shot(), world, flightBudget, true);
-                if (flight == null || horizontalDistance(eye, flight.landing()) > range
-                        || !spreadSafe(aim.shot(), world, flightBudget)) continue;
-                double score = turns + flight.ticks() + origin.distanceTo(flight.landing()) * 0.15
-                        + (preferred == null ? 0 : preferred.distanceTo(flight.landing()) * 0.35);
-                return new Plan(aim.yaw(), aim.pitch(), flight.landing(), flight.impact().position(),
-                        flight.impact().block(), flight.path(), flight.ticks(), score);
+                int turns = turnTicks(yaw, pitch, aim.yaw(), aim.pitch(), turnSpeed);
+                Plan candidate = predict(aim.shot(), aim.yaw(), aim.pitch(), turns, remainingTicks, best);
+                if (candidate != null) best = candidate;
             }
-            return null;
+            return best;
         }
+
+        private @Nullable Plan predict(ProjectileLaunch.Shot shot, float yaw, float pitch, int turns,
+                                       int remainingTicks, @Nullable Plan toBeat) {
+            int budget = remainingTicks - turns - 5;
+            // A high arc can hit intervening terrain before its mathematical intercept. Only the
+            // actual traced collision time counts. Stop when even that hit could no longer win.
+            int nominalBudget = toBeat == null ? budget : Math.min(budget, (int) toBeat.score() - turns - 1);
+            if (nominalBudget < 1) return null;
+            Flight flight = trace(shot, world, nominalBudget, true);
+            if (flight == null || horizontalDistance(eye, flight.landing()) > range || !spreadSafe(shot, world, budget)) {
+                return null;
+            }
+            return new Plan(yaw, pitch, flight.landing(), flight.impact().position(), flight.impact().block(),
+                    flight.path(), flight.ticks(), turns + flight.ticks());
+        }
+    }
+
+    static int turnTicks(float yaw, float pitch, float wantedYaw, float wantedPitch, float speed) {
+        double angle = Math.max(Math.abs(Mth.wrapDegrees(wantedYaw - yaw)), Math.abs(wantedPitch - pitch));
+        return angle < 0.01 ? 0 : (int) Math.ceil(angle / speed);
     }
 
     record Sample(BlockPos block, int index) { }
@@ -162,12 +204,20 @@ public final class PearlLandingPlanner {
         List<Column> result = new ArrayList<>();
         Column remembered = preferred == null ? null : new Column(Mth.floor(preferred.x), Mth.floor(preferred.z));
         if (remembered != null && touchesDisk(remembered, eye, range)) result.add(remembered);
+        // Seed the nearest blocks before the wide survey so short, flat throws get an early trial.
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                Column near = new Column(cx + dx, cz + dz);
+                if (!near.equals(remembered) && touchesDisk(near, eye, range)) result.add(near);
+            }
+        }
         for (int stride = 8; stride >= 1; stride /= 2) {
-            for (int r = 0; r <= radius; r += stride) {
-                for (int k = -r; k < Math.max(1, r); k += stride) {
+            for (int r = stride; r <= radius; r += stride) {
+                if (r <= 2) continue;
+                for (int k = -r; k < r; k += stride) {
                     if (stride < 8 && r % (2 * stride) == 0 && k % (2 * stride) == 0) continue;
                     int dx = k, dz = -r;
-                    for (int side = 0; side < (r == 0 ? 1 : 4); side++) {
+                    for (int side = 0; side < 4; side++) {
                         Column point = new Column(cx + dx, cz + dz);
                         if (!point.equals(remembered) && touchesDisk(point, eye, range)) result.add(point);
                         int oldX = dx;
@@ -213,7 +263,9 @@ public final class PearlLandingPlanner {
                 || !Float.isFinite(plan.pitch()) || Math.abs(plan.pitch()) > 90) return false;
         ProjectileLaunch.Template template = pearlTemplate();
         if (template == null) return false;
-        ProjectileLaunch.Shot shot = template.launch(player.getEyePosition(), inherited(player), plan.yaw(), plan.pitch());
+        float yaw = player.getYRot(), pitch = player.getXRot();
+        if (Math.abs(Mth.wrapDegrees(yaw - plan.yaw())) >= 0.01F || Math.abs(pitch - plan.pitch()) >= 0.01F) return false;
+        ProjectileLaunch.Shot shot = template.launch(player.getEyePosition(), inherited(player), yaw, pitch);
         World world = new World(player);
         Flight flight = trace(shot, world, remainingFlightTicks, false);
         return flight != null && flight.impact().block().equals(plan.support())

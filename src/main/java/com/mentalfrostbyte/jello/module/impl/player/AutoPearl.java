@@ -146,34 +146,23 @@ public final class AutoPearl extends Module {
             finish(null);
             return;
         }
-        if (cycle.stage() == PearlRescueCycle.Stage.SEARCHING) {
-            if (findPearl(player) == null) {
-                finish("No ready ender pearl in the hotbar or offhand.");
-                return;
-            }
-            // Tick listeners have now relinquished combat/scaffold rotation and any held hotbar slot.
-            if (search == null) search = PearlLandingPlanner.start(player, preferredLanding, searchRange.get());
-            plan = search == null ? null : search.advance(player, cycle.remainingTicks(tick), turnSpeed.get());
-            if (plan == null) {
-                if (search != null && !search.exhausted()) return;
-                finish("No clear pearl path to safe land was found.");
-                return;
-            }
-            if (plan.flightTicks() + 4 >= cycle.remainingTicks(tick)) {
-                finish("Safe landing is beyond the suspension time limit.");
-                return;
-            }
-            cycle.planned();
-            notice("Safe landing found: turning to throw.");
+        if (cycle.stage() == PearlRescueCycle.Stage.WAITING) return;
+        if (findPearl(player) == null) {
+            finish("No ready ender pearl in the hotbar or offhand.");
             return;
         }
-        if (cycle.stage() != PearlRescueCycle.Stage.AIMING || plan == null || !aligned(player, plan)) return;
-        if (plan.flightTicks() + 4 >= cycle.remainingTicks(tick)) {
-            plan = null;
+        if (search == null) search = PearlLandingPlanner.start(player, preferredLanding, searchRange.get());
+        plan = search == null ? null : search.advance(player, cycle.remainingTicks(tick), turnSpeed.get(), plan);
+        if (plan == null) {
             cycle.replan();
-            notice("Checking for a shorter pearl path.");
+            if (search == null || search.exhausted()) finish("No clear pearl path to safe land was found.");
             return;
         }
+        if (cycle.stage() == PearlRescueCycle.Stage.SEARCHING) {
+            cycle.planned();
+            if (!aligned(player, plan)) notice("Safe landing found: turning to throw.");
+        }
+        if (!aligned(player, plan)) return;
         if (motion == null || motion.isCancelled() || movementPacket == null || movementPacket.isCancelled()
                 || !(movementPacket.getPacket() instanceof ServerboundMovePlayerPacket sent) || !sent.hasRotation()
                 || !sameLook(sent.getYRot(0), sent.getXRot(0), player.getYRot(), player.getXRot())) return;
