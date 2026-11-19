@@ -131,6 +131,10 @@ final class ModernMusicSettings {
         return new ModernMusicView.Box(c.x(), c.y() + 38, c.w(), 20);
     }
 
+    private static ModernMusicView.Box worldLyrics(ModernMusicView.Box c) {
+        return new ModernMusicView.Box(c.x() + c.w() - 92, c.y() + 20, 92, 16);
+    }
+
     private static ModernMusicView.Box languages(ModernMusicView.Box c) {
         return new ModernMusicView.Box(c.x(), c.y() + 104, c.w(), 20);
     }
@@ -233,6 +237,10 @@ final class ModernMusicSettings {
     private static void draw(GuiGraphicsExtractor g, ModernMusicView.Box c, MusicPlayer player, LyricsService lyrics, int mx, int my) {
 
         section(g, c, c.y() + 25F, ModernText.t("LYRICS", "歌词模式"));
+        ModernMusicView.Box world = worldLyrics(c);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernText.t("World lyrics", "世界歌词"),
+            world.x(), world.y() + 4F, 0.76F, world.contains(mx, my) ? 0xFFFFFFFF : 0xFFB4CADB);
+        ModernStyle.toggle(g, world.x() + world.w() - 24, world.y() + 2, 24, 12, lyrics.worldLyrics() ? 1F : 0F);
         segmented(g, modes(c), modeLabels(), lyrics.mode().ordinal(), mx, my);
         about(g, c, c.y() + 63F, switch (lyrics.mode()) {
             case AUTO -> ModernText.t("Word by word when the lyrics are word-timed, otherwise line by line.", "有逐词歌词时逐词显示，否则逐行显示。");
@@ -342,7 +350,9 @@ final class ModernMusicSettings {
         LyricsService lyrics = Client.getInstance().getMusicLibrary().lyrics();
         int mode = segmentAt(modes(c), 3, mx, my);
         int language = segmentAt(languages(c), 4, mx, my);
-        if (mode >= 0) lyrics.setMode(LyricsService.Mode.values()[mode]);
+        if (!c.contains(mx, my)) return;
+        if (worldLyrics(c).contains(mx, my)) lyrics.setWorldLyrics(!lyrics.worldLyrics());
+        else if (mode >= 0) lyrics.setMode(LyricsService.Mode.values()[mode]);
         else if (language >= 0) lyrics.setLanguage(LyricsService.Language.values()[language]);
         else return;
         Client.getInstance().saveConfig();

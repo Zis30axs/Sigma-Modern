@@ -144,6 +144,10 @@ public final class MusicLibrary {
         if (mode != null) this.lyrics.setMode(mode);
         LyricsService.Language language = option(music.getAsJsonObject(), "lyricLanguage", LyricsService.Language.class);
         if (language != null) this.lyrics.setLanguage(language);
+        JsonElement world = music.getAsJsonObject().get("worldLyrics");
+        if (world != null && world.isJsonPrimitive() && world.getAsJsonPrimitive().isBoolean()) {
+            this.lyrics.setWorldLyrics(world.getAsBoolean());
+        }
     }
 
     /** Adds the lyric settings to the {@code "music"} object, keeping whatever else is saved there. */
@@ -151,6 +155,7 @@ public final class MusicLibrary {
         JsonElement existing = config.get("music");
         JsonObject music = existing != null && existing.isJsonObject() ? existing.getAsJsonObject() : new JsonObject();
         music.addProperty("lyricChannel", this.lyrics.channel().name().toLowerCase(Locale.ROOT));
+        music.addProperty("worldLyrics", this.lyrics.worldLyrics());
         music.addProperty("lyricMode", this.lyrics.mode().name().toLowerCase(Locale.ROOT));
         music.addProperty("lyricLanguage", this.lyrics.language().name().toLowerCase(Locale.ROOT));
         config.add("music", music);

@@ -144,6 +144,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
     private static final float PORTAL_SPINNING_SPEED = 20.0F;
     private static final float NAUSEA_SPINNING_SPEED = 7.0F;
     private final Minecraft minecraft;
+    private final com.mentalfrostbyte.jello.gui.modern.WorldLyrics worldLyrics = new com.mentalfrostbyte.jello.gui.modern.WorldLyrics();
     private final GameRenderState gameRenderState = new GameRenderState();
     private final RandomSource random = RandomSource.create();
     public final ItemInHandRenderer itemInHandRenderer;
@@ -572,10 +573,13 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
             }
             try {
                 this.minecraft.levelExtractor.extract(deltaTracker, this.mainCamera, worldPartialTicks);
+                this.gameRenderState.levelRenderState.worldLyrics = this.worldLyrics.extract(this.minecraft, cameraState, worldPartialTicks);
             } finally {
                 com.mentalfrostbyte.jello.gui.modern.ModernNameTags.finishFrame();
             }
         } else {
+            this.worldLyrics.clear();
+            this.gameRenderState.levelRenderState.worldLyrics = null;
             com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(null, null);
             com.mentalfrostbyte.jello.gui.modern.ModernNameTags.beginFrame(null, null);
         }

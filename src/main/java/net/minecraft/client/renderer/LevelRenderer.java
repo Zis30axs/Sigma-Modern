@@ -504,6 +504,9 @@ public class LevelRenderer implements AutoCloseable, net.caffeinemc.mods.sodium.
     private void submitFeatures(final LevelRenderState levelRenderState, final SubmitNodeCollector submitNodeCollector, final boolean renderOutline) {
         PoseStack poseStack = new PoseStack();
         this.submitEntities(poseStack, levelRenderState, submitNodeCollector);
+        if (levelRenderState.worldLyrics != null) {
+            levelRenderState.worldLyrics.submit(poseStack, submitNodeCollector, levelRenderState.cameraRenderState);
+        }
         levelRenderState.entityRenderStates.clear();
         this.submitBlockEntities(poseStack, levelRenderState, submitNodeCollector);
         levelRenderState.blockEntityRenderStates.clear();

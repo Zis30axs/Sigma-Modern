@@ -26,6 +26,8 @@ class MusicSettingsConfigTest {
     void volumeAndLyricSettingsSurviveEachOthersWrites() {
         MusicLibrary library = new MusicLibrary(null);
         try {
+            assertTrue(library.lyrics().worldLyrics());
+            library.lyrics().setWorldLyrics(false);
             library.lyrics().setChannel(LyricsService.Channel.QQ);
             library.lyrics().setMode(LyricsService.Mode.WORD);
             library.lyrics().setLanguage(LyricsService.Language.ROMANIZATION);
@@ -52,6 +54,7 @@ class MusicSettingsConfigTest {
             MusicLibrary reread = new MusicLibrary(null);
             try {
                 reread.read(config);
+                assertFalse(reread.lyrics().worldLyrics());
                 assertEquals(LyricsService.Channel.QQ, reread.lyrics().channel());
                 assertEquals(LyricsService.Mode.WORD, reread.lyrics().mode());
                 assertEquals(LyricsService.Language.ROMANIZATION, reread.lyrics().language());

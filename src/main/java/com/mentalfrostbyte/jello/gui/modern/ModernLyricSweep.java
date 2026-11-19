@@ -31,11 +31,14 @@ public final class ModernLyricSweep {
      * track's details for them instead.
      */
     static @Nullable Now now(MusicPlayer player) {
+        return now(player, player.positionMs());
+    }
+
+    static @Nullable Now now(MusicPlayer player, long position) {
         Track track = player.current();
         if (track == null) return null;
         Lyrics lyrics = Client.getInstance().getMusicLibrary().lyrics().get(track);
         if (!lyrics.hasLines()) return null;
-        long position = player.positionMs();
         int index = lyrics.indexAt(position);
         if (index < 0) return null;
         Lyrics.Line line = lyrics.lines().get(index);

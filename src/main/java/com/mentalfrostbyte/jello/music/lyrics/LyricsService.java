@@ -66,6 +66,12 @@ public final class LyricsService {
         }
     };
     private volatile Channel channel = Channel.MIX;
+    private boolean worldLyrics = true;
+
+    public boolean worldLyrics() { return this.worldLyrics; }
+
+    public void setWorldLyrics(boolean enabled) { this.worldLyrics = enabled; }
+
     private volatile Mode mode = Mode.AUTO;
     private volatile Language language = Language.TRANSLATION;
 

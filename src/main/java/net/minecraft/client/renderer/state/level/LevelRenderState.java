@@ -20,6 +20,7 @@ public class LevelRenderState {
     public final WorldBorderRenderState worldBorderRenderState = new WorldBorderRenderState();
     public final SkyRenderState skyRenderState = new SkyRenderState();
     public final ParticlesRenderState particlesRenderState = new ParticlesRenderState();
+    public com.mentalfrostbyte.jello.gui.modern.WorldLyrics.@Nullable Frame worldLyrics;
     public long gameTime;
     public int lastEntityRenderStateCount;
     public int cloudColor;
@@ -42,6 +43,7 @@ public class LevelRenderState {
         this.skyRenderState.reset();
         this.particlesRenderState.reset();
         this.chunkLoadingRenderState.reset();
+        this.worldLyrics = null;
         this.gameTime = 0L;
     }
 }
