@@ -7,6 +7,7 @@ import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -15,6 +16,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Locale;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -173,13 +175,15 @@ public final class ClickGuiInteractions {
             minecraft.gui.setScreen(AimAssistTrainingScreen.open(minecraft.gui.screen()));
             return;
         }
-        if (setting instanceof ItemListSetting items) {
+        if (setting instanceof ItemListSetting || setting instanceof InventoryLayoutSetting) {
             this.bindingSetting = null;
             this.bindingModule = null;
             this.editingSetting = null;
             this.draggingNumber = null;
             Minecraft minecraft = Minecraft.getInstance();
-            minecraft.gui.setScreen(new ProjectileWhitelistScreen(minecraft.gui.screen(), items));
+            Screen parent = minecraft.gui.screen();
+            minecraft.gui.setScreen(setting instanceof ItemListSetting items ? new ProjectileWhitelistScreen(parent, items)
+                    : new InventoryLayoutScreen(parent, (InventoryLayoutSetting) setting));
             return;
         }
         if (setting instanceof KeySetting key) {
@@ -235,6 +239,7 @@ public final class ClickGuiInteractions {
     public String displayValue(final Setting<?> setting) {
         if (AimAssistTrainingScreen.isTrainingSetting(setting)) return AimAssistTrainingScreen.settingLabel();
         if (setting instanceof ItemListSetting items) return items.displayLabel();
+        if (setting instanceof InventoryLayoutSetting layout) return layout.get().size() + " assigned";
         if (setting instanceof KeySetting key) {
             return this.bindingSetting == key ? "Press a key..." : key.displayLabel();
         }

@@ -12,6 +12,7 @@ import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -695,7 +696,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 ModernStyle.rounded(g, sx - 1, mid - 8, 16, 16, 5, 0x3315303E);
                 ModernStyle.rounded(g, sx, mid - 7, 14, 14, 4, SWATCHES[i]);
             }
-        } else if (s instanceof TextSetting || s instanceof KeySetting || s instanceof ItemListSetting) {
+        } else if (s instanceof TextSetting || s instanceof KeySetting || s instanceof ItemListSetting || s instanceof InventoryLayoutSetting) {
             boolean editing = this.interactions.isEditing(s)
                 || s instanceof KeySetting key && this.interactions.isBinding(key);
             ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, editing ? PILL_EDITING : PILL);

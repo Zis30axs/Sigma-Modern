@@ -29,7 +29,7 @@ import java.util.function.BooleanSupplier;
  * }
  * }</pre>
  */
-public sealed abstract class Setting<T> permits BooleanSetting, ColorSetting, EnumSetting, ItemListSetting, KeySetting, NumberSetting, TextSetting {
+public sealed abstract class Setting<T> permits BooleanSetting, ColorSetting, EnumSetting, InventoryLayoutSetting, ItemListSetting, KeySetting, NumberSetting, TextSetting {
 
     private final String name;
 

@@ -61,6 +61,7 @@ public abstract class AbstractContainerMenu
     private final IntList remoteDataSlots = new IntArrayList();
     private RemoteSlot remoteCarried = RemoteSlot.PLACEHOLDER;
     private int stateId;
+    private boolean receivedInitialContents;
     private final @Nullable MenuType<?> menuType;
     public final int containerId;
     private int quickcraftType = -1;
@@ -629,6 +630,11 @@ public abstract class AbstractContainerMenu
         this.stateId = stateId;
     }
 
+    // Sigma ChestSteal waits for the server snapshot before deciding an opened chest is empty.
+    public boolean hasReceivedInitialContents() {
+        return this.receivedInitialContents;
+    }
+
     public void initializeContents(final int stateId, final List<ItemStack> items, final ItemStack carried) {
         for (int i = 0; i < items.size(); i++) {
             this.getSlot(i).set(items.get(i));
@@ -641,6 +647,7 @@ public abstract class AbstractContainerMenu
             this.carried = carried;
         }
         this.stateId = stateId;
+        this.receivedInitialContents = true;
     }
 
     public void setData(final int id, final int value) {

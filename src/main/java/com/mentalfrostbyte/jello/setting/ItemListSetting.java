@@ -13,7 +13,22 @@ import net.minecraft.resources.Identifier;
 
 /** An immutable selection from a fixed, trusted catalogue of item identifiers. */
 public final class ItemListSetting extends Setting<Set<String>> {
+    // A null fixed catalogue denotes the full registry, resolved only after Minecraft bootstraps.
     private final List<String> allowedIds;
+
+    public ItemListSetting(final String name, final String description) {
+        super(name, description, Set.of());
+        this.allowedIds = null;
+    }
+
+    private static final class RegistryCatalogue {
+        static final List<String> IDS = net.minecraft.core.registries.BuiltInRegistries.ITEM.keySet().stream()
+                .map(Identifier::toString).filter(id -> !id.equals("minecraft:air")).sorted().toList();
+        static final Set<String> LOOKUP = Set.copyOf(IDS);
+    }
+
+    public static List<String> registeredItems() { return RegistryCatalogue.IDS; }
+    public static boolean registeredItem(String id) { return RegistryCatalogue.LOOKUP.contains(id); }
 
     public ItemListSetting(final String name, final String description, final Collection<String> defaultIds,
                            final Collection<String> allowedIds) {
@@ -21,12 +36,15 @@ public final class ItemListSetting extends Setting<Set<String>> {
         this.allowedIds = checkedCatalogue(allowedIds);
     }
 
-    public List<String> getAllowedIds() { return this.allowedIds; }
+    public List<String> getAllowedIds() { return this.allowedIds == null ? registeredItems() : this.allowedIds; }
+    private boolean isAllowed(String id) {
+        return this.allowedIds == null ? registeredItem(id) : this.allowedIds.contains(id);
+    }
     public boolean contains(final String id) { return this.get().contains(id); }
     public String displayLabel() { return this.get().size() + " selected"; }
 
     public void add(final String id) {
-        if (!this.allowedIds.contains(id)) throw new IllegalArgumentException("Item is outside this setting's catalogue: " + id);
+        if (!this.isAllowed(id)) throw new IllegalArgumentException("Item is outside this setting's catalogue: " + id);
         Set<String> next = new LinkedHashSet<>(this.get());
         next.add(id);
         this.set(next);
@@ -44,7 +62,7 @@ public final class ItemListSetting extends Setting<Set<String>> {
     }
 
     @Override protected Set<String> sanitise(final Set<String> value) {
-        return checkedSelection(value, this.allowedIds);
+        return checkedSelection(value, this.getAllowedIds());
     }
 
     @Override public JsonElement toJson() {
@@ -58,7 +76,7 @@ public final class ItemListSetting extends Setting<Set<String>> {
         Set<String> selection = new LinkedHashSet<>();
         for (JsonElement entry : element.getAsJsonArray()) {
             if (entry.isJsonPrimitive() && entry.getAsJsonPrimitive().isString()
-                    && this.allowedIds.contains(entry.getAsString())) selection.add(entry.getAsString());
+                    && this.isAllowed(entry.getAsString())) selection.add(entry.getAsString());
         }
         return Optional.of(selection);
     }

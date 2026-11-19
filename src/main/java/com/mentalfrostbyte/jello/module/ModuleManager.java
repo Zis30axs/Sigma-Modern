@@ -46,6 +46,8 @@ import com.mentalfrostbyte.jello.module.impl.movement.Speed;
 import com.mentalfrostbyte.jello.module.impl.movement.NoJumpDelay;
 import com.mentalfrostbyte.jello.module.impl.movement.Stuck;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
+import com.mentalfrostbyte.jello.module.impl.player.ChestSteal;
+import com.mentalfrostbyte.jello.module.impl.player.InvManager;
 import com.mentalfrostbyte.jello.module.impl.player.NoFall;
 import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
@@ -124,6 +126,8 @@ public final class ModuleManager {
         this.register(new AutoProjectile());
         this.register(new AdaptiveProjectileDefense());
         this.register(new AutoPearl());
+        this.register(new ChestSteal());
+        this.register(new InvManager());
         this.register(new LowFire());
         this.register(new Maps());
         this.register(new MiniMap());

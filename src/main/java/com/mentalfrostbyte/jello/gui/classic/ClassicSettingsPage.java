@@ -14,6 +14,7 @@ import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.ItemListSetting;
+import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -121,7 +122,7 @@ final class ClassicSettingsPage {
             } else if (setting instanceof KeySetting) {
                 kind = Kind.KEY;
                 pitch = 55;
-            } else if (setting instanceof ItemListSetting || AimAssistTrainingScreen.isTrainingSetting(setting)) {
+            } else if (setting instanceof ItemListSetting || setting instanceof InventoryLayoutSetting || AimAssistTrainingScreen.isTrainingSetting(setting)) {
                 kind = Kind.ITEMS;
                 pitch = 55;
             } else {

@@ -108,7 +108,11 @@ public class MenuScreens {
         default void fromPacket(final Component title, final MenuType<T> type, final Minecraft minecraft, final int containerId) {
             U screen = this.create(type.create(containerId, minecraft.player.getInventory()), minecraft.player.getInventory(), title);
             minecraft.player.containerMenu = screen.getMenu();
-            minecraft.gui.setScreen(screen);
+            // Sigma ChestSteal can present the same live menu in a compact item grid.
+            if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> storage
+                    && com.mentalfrostbyte.jello.module.impl.player.ChestSteal.compact(storage))
+                minecraft.gui.setScreen(new com.mentalfrostbyte.jello.gui.ChestLootScreen(storage));
+            else minecraft.gui.setScreen(screen);
         }
 
         U create(T menu, Inventory inventory, final Component title);
