@@ -2,6 +2,7 @@ package net.minecraft.client.renderer;
 
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
+import com.mentalfrostbyte.jello.module.impl.render.NoRender;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -62,16 +63,19 @@ public class ScreenEffectRenderer {
     ) {
         PoseStack poseStack = new PoseStack();
         Player player = this.minecraft.player;
+        NoRender noRender = Modules.enabled(NoRender.class);
         if (isFirstPerson && !isSleeping) {
-            BlockState blockState = getViewBlockingState(player);
-            if (blockState != null) {
-                BlockStateModelSet blockStateModelSet = this.minecraft.getModelManager().getBlockStateModelSet();
-                TextureAtlasSprite sprite = blockStateModelSet.getParticleMaterial(blockState).sprite();
-                submitBlockSprite(sprite, poseStack, submitNodeCollector, -15132391);
+            if (noRender == null || !noRender.hideSuffocation()) {
+                BlockState blockState = getViewBlockingState(player);
+                if (blockState != null) {
+                    BlockStateModelSet blockStateModelSet = this.minecraft.getModelManager().getBlockStateModelSet();
+                    TextureAtlasSprite sprite = blockStateModelSet.getParticleMaterial(blockState).sprite();
+                    submitBlockSprite(sprite, poseStack, submitNodeCollector, -15132391);
+                }
             }
 
             if (!this.minecraft.player.isSpectator()) {
-                if (this.minecraft.player.isEyeInFluid(FluidTags.WATER)) {
+                if (this.minecraft.player.isEyeInFluid(FluidTags.WATER) && (noRender == null || !noRender.hideUnderwater())) {
                     submitWater(this.minecraft, poseStack, submitNodeCollector);
                 }
 
@@ -82,7 +86,7 @@ public class ScreenEffectRenderer {
             }
         }
 
-        if (!hideGui) {
+        if (!hideGui && (noRender == null || !noRender.hideTotem())) {
             this.renderItemActivationAnimation(poseStack, partialTicks, submitNodeCollector);
         }
     }

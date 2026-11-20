@@ -323,7 +323,9 @@ public class Hud {
     }
 
     private void extractCameraOverlays(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
-        if (this.minecraft.options.vignette().get()) {
+        com.mentalfrostbyte.jello.module.impl.render.NoRender noRender =
+            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.render.NoRender.class);
+        if (this.minecraft.options.vignette().get() && (noRender == null || !noRender.hideVignette())) {
             this.extractVignette(graphics, this.minecraft.getCameraEntity());
         }
 
@@ -336,23 +338,29 @@ public class Hud {
             } else {
                 this.scopeScale = 0.5F;
 
-                for (EquipmentSlot slot : EquipmentSlot.values()) {
-                    ItemStack item = player.getItemBySlot(slot);
-                    Equippable equippable = item.get(DataComponents.EQUIPPABLE);
-                    if (equippable != null && equippable.slot() == slot && equippable.cameraOverlay().isPresent()) {
-                        this.extractTextureOverlay(graphics, equippable.cameraOverlay().get().withPath(p -> "textures/" + p + ".png"), 1.0F);
+                if (noRender == null || !noRender.hidePumpkin()) {
+                    for (EquipmentSlot slot : EquipmentSlot.values()) {
+                        ItemStack item = player.getItemBySlot(slot);
+                        Equippable equippable = item.get(DataComponents.EQUIPPABLE);
+                        if (equippable != null && equippable.slot() == slot && equippable.cameraOverlay().isPresent()) {
+                            this.extractTextureOverlay(graphics, equippable.cameraOverlay().get().withPath(p -> "textures/" + p + ".png"), 1.0F);
+                        }
                     }
                 }
             }
         }
 
-        if (player.getTicksFrozen() > 0) {
+        if (player.getTicksFrozen() > 0 && (noRender == null || !noRender.hidePowderSnow())) {
             this.extractTextureOverlay(graphics, POWDER_SNOW_OUTLINE_LOCATION, player.getPercentFrozen());
         }
 
         float partialTicks = deltaTracker.getGameTimeDeltaPartialTick(false);
         float portalIntensity = Mth.lerp(partialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
         float nauseaIntensity = player.getEffectBlendFactor(MobEffects.NAUSEA, partialTicks);
+        if (noRender != null) {
+            if (noRender.hidePortal()) portalIntensity = 0.0F;
+            if (noRender.hideNausea()) nauseaIntensity = 0.0F;
+        }
         if (portalIntensity > 0.0F) {
             this.extractPortalOverlay(graphics, portalIntensity);
         } else if (nauseaIntensity > 0.0F) {

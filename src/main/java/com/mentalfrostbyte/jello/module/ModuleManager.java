@@ -39,6 +39,7 @@ import com.mentalfrostbyte.jello.module.impl.misc.ClientSpoof;
 import com.mentalfrostbyte.jello.module.impl.misc.CustomTitle;
 import com.mentalfrostbyte.jello.module.impl.misc.Derp;
 import com.mentalfrostbyte.jello.module.impl.misc.FakePlayer;
+import com.mentalfrostbyte.jello.module.impl.misc.AutoReconnect;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
@@ -46,6 +47,7 @@ import com.mentalfrostbyte.jello.module.impl.movement.Speed;
 import com.mentalfrostbyte.jello.module.impl.movement.NoJumpDelay;
 import com.mentalfrostbyte.jello.module.impl.movement.Stuck;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
+import com.mentalfrostbyte.jello.module.impl.movement.InvMove;
 import com.mentalfrostbyte.jello.module.impl.player.ChestSteal;
 import com.mentalfrostbyte.jello.module.impl.player.InvManager;
 import com.mentalfrostbyte.jello.module.impl.player.NoFall;
@@ -57,10 +59,12 @@ import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.Esp;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
 import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
+import com.mentalfrostbyte.jello.module.impl.render.NoRender;
 import com.mentalfrostbyte.jello.module.impl.render.NameTags;
 import com.mentalfrostbyte.jello.module.impl.render.Rotation;
 import com.mentalfrostbyte.jello.module.impl.render.RotationIndicator;
 import com.mentalfrostbyte.jello.module.impl.render.Trajectories;
+import com.mentalfrostbyte.jello.module.impl.world.Fucker;
 import com.mentalfrostbyte.jello.module.impl.world.Weather;
 import com.mentalfrostbyte.jello.module.impl.world.Disabler;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
@@ -98,6 +102,7 @@ public final class ModuleManager {
         this.register(new ModuleSelfDetection());
         this.register(new BlockAnimation());
         this.register(new BlockFly());
+        this.register(new InvMove());
         this.register(new Bird());
         this.register(new BrainFreeze());
         this.register(new CameraNoClip());
@@ -137,6 +142,7 @@ public final class ModuleManager {
         this.register(new NoClickDelay());
         this.register(new NoJumpDelay());
         this.register(new NoHurtCam());
+        this.register(new NoRender());
         this.register(new PotionStatus());
         this.register(new Radar());
         this.register(new Rwr());
@@ -154,6 +160,8 @@ public final class ModuleManager {
         this.register(new TabGui(this));
         this.register(new TargetHud());
         this.register(new Velocity());
+        this.register(new AutoReconnect());
+        this.register(new Fucker());
         this.register(new Weather());
     }
 

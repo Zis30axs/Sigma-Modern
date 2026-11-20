@@ -8,7 +8,11 @@ import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import com.mentalfrostbyte.jello.module.Modules;
+import com.mentalfrostbyte.jello.module.impl.misc.AutoReconnect;
+import java.util.Locale;
 import net.minecraft.util.Util;
+import org.jspecify.annotations.Nullable;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -22,6 +26,10 @@ public class DisconnectedScreen extends Screen {
     private final DisconnectionDetails details;
     private final Component buttonText;
     private final LinearLayout layout = LinearLayout.vertical();
+    private @Nullable Button sigmaReconnectButton;
+    private @Nullable Button sigmaPauseButton;
+    private long sigmaReconnectAtNanos = Long.MIN_VALUE;
+    private boolean sigmaReconnectPaused;
 
     public DisconnectedScreen(final Screen parent, final Component title, final Component reason) {
         this(parent, title, new DisconnectionDetails(reason));
@@ -67,6 +75,34 @@ public class DisconnectedScreen extends Screen {
             backButton = Button.builder(TO_TITLE, var1x -> this.minecraft.gui.setScreen(new TitleScreen())).width(200).build();
         }
 
+        AutoReconnect.Target lastTarget = AutoReconnect.lastTarget();
+        if (lastTarget != null && this.minecraft.allowsMultiplayer()) {
+            AutoReconnect autoReconnect = Modules.enabled(AutoReconnect.class);
+            if (autoReconnect != null && autoReconnect.canAttemptRetry()) {
+                this.sigmaReconnectAtNanos = System.nanoTime() + autoReconnect.delayNanos();
+                this.sigmaReconnectPaused = false;
+            } else {
+                this.sigmaReconnectAtNanos = Long.MIN_VALUE;
+            }
+            this.sigmaReconnectButton = Button.builder(this.sigmaReconnectLabel(), b -> this.sigmaReconnectNow()).width(200).build();
+            this.layout.addChild(this.sigmaReconnectButton);
+            if (this.sigmaReconnectAtNanos != Long.MIN_VALUE) {
+                this.sigmaPauseButton = Button.builder(Component.literal("Pause AutoReconnect"), b -> {
+                    this.sigmaReconnectPaused = !this.sigmaReconnectPaused;
+                    b.setMessage(Component.literal(this.sigmaReconnectPaused ? "Resume AutoReconnect" : "Pause AutoReconnect"));
+                    if (!this.sigmaReconnectPaused) {
+                        AutoReconnect active = Modules.enabled(AutoReconnect.class);
+                        if (active != null) {
+                            this.sigmaReconnectAtNanos = System.nanoTime() + active.delayNanos();
+                        }
+                    }
+                    if (this.sigmaReconnectButton != null) {
+                        this.sigmaReconnectButton.setMessage(this.sigmaReconnectLabel());
+                    }
+                }).width(200).build();
+                this.layout.addChild(this.sigmaPauseButton);
+            }
+        }
         this.layout.addChild(backButton);
         this.layout.arrangeElements();
         this.layout.visitWidgets(this::addRenderableWidget);
@@ -81,6 +117,50 @@ public class DisconnectedScreen extends Screen {
     @Override
     public Component getNarrationMessage() {
         return CommonComponents.joinForNarration(this.title, this.details.reason());
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (this.sigmaReconnectAtNanos == Long.MIN_VALUE || this.sigmaReconnectPaused) {
+            return;
+        }
+        AutoReconnect autoReconnect = Modules.enabled(AutoReconnect.class);
+        if (autoReconnect == null || !autoReconnect.canAttemptRetry() || AutoReconnect.lastTarget() == null) {
+            this.sigmaReconnectAtNanos = Long.MIN_VALUE;
+            if (this.sigmaReconnectButton != null) {
+                this.sigmaReconnectButton.setMessage(Component.literal("Reconnect"));
+            }
+            return;
+        }
+        if (System.nanoTime() >= this.sigmaReconnectAtNanos) {
+            this.sigmaReconnectNow();
+            return;
+        }
+        if (this.sigmaReconnectButton != null) {
+            this.sigmaReconnectButton.setMessage(this.sigmaReconnectLabel());
+        }
+    }
+
+    private Component sigmaReconnectLabel() {
+        if (this.sigmaReconnectAtNanos == Long.MIN_VALUE || this.sigmaReconnectPaused) {
+            return Component.literal("Reconnect");
+        }
+        double remaining = Math.max(0.0, (this.sigmaReconnectAtNanos - System.nanoTime()) / 1_000_000_000.0);
+        return Component.literal(String.format(Locale.ROOT, "Reconnect (%.1fs)", remaining));
+    }
+
+    private void sigmaReconnectNow() {
+        AutoReconnect.Target target = AutoReconnect.lastTarget();
+        if (target == null) {
+            return;
+        }
+        AutoReconnect autoReconnect = Modules.enabled(AutoReconnect.class);
+        if (autoReconnect != null) {
+            autoReconnect.recordAttempt();
+        }
+        this.sigmaReconnectAtNanos = Long.MIN_VALUE;
+        ConnectScreen.startConnecting(this.parent, this.minecraft, target.address(), target.data(), false, null);
     }
 
     @Override

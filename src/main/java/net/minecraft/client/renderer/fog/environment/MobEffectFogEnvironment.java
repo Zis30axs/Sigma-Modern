@@ -25,6 +25,17 @@ public abstract class MobEffectFogEnvironment extends FogEnvironment {
 
     @Override
     public boolean isApplicable(final @Nullable FogType fogType, final Entity entity) {
+        com.mentalfrostbyte.jello.module.impl.render.NoRender noRender =
+            com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.render.NoRender.class);
+        if (noRender != null) {
+            Holder<MobEffect> effect = this.getMobEffect();
+            if (noRender.hideBlindness() && effect.equals(net.minecraft.world.effect.MobEffects.BLINDNESS)) {
+                return false;
+            }
+            if (noRender.hideDarkness() && effect.equals(net.minecraft.world.effect.MobEffects.DARKNESS)) {
+                return false;
+            }
+        }
         return entity instanceof LivingEntity livingEntity && livingEntity.hasEffect(this.getMobEffect());
     }
 }

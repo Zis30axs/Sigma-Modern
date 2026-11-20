@@ -28,6 +28,7 @@ import net.minecraft.client.Minecraft;
 // Sigma: world render event.
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
+import com.mentalfrostbyte.jello.module.impl.render.NoRender;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.render.EventRender3D;
 import net.minecraft.client.Options;
@@ -454,6 +455,12 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
         float screenEffectScale = this.gameRenderState.optionsRenderState.screenEffectScale;
         float portalIntensity = Mth.lerp(worldPartialTicks, player.oPortalEffectIntensity, player.portalEffectIntensity);
         float nauseaIntensity = player.getEffectBlendFactor(MobEffects.NAUSEA, worldPartialTicks);
+        // Sigma hook: NoRender suppresses portal and nausea screen warping.
+        NoRender noRender = Modules.enabled(NoRender.class);
+        if (noRender != null) {
+            if (noRender.hidePortal()) portalIntensity = 0.0F;
+            if (noRender.hideNausea()) nauseaIntensity = 0.0F;
+        }
         float spinningEffectIntensity = Math.max(portalIntensity, nauseaIntensity) * (screenEffectScale * screenEffectScale);
         if (spinningEffectIntensity > 0.0F) {
             float skew = 5.0F / (spinningEffectIntensity * spinningEffectIntensity + 5.0F) - spinningEffectIntensity * 0.04F;

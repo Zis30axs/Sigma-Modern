@@ -100,6 +100,8 @@ public class ConnectScreen extends Screen {
                 connectFailedTitle = CommonComponents.CONNECT_FAILED;
             }
 
+            // Sigma hook: remember the last server so AutoReconnect can rejoin from DisconnectedScreen.
+            com.mentalfrostbyte.jello.module.impl.misc.AutoReconnect.remember(hostAndPort, data);
             ConnectScreen screen = new ConnectScreen(parent, connectFailedTitle);
             if (transferState != null) {
                 screen.updateStatus(Component.translatable("connect.transferring"));
