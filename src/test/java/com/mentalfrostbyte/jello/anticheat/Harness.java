@@ -31,6 +31,7 @@ final class Harness {
         double floorY = 0.0;
         boolean loaded = true;
         boolean environment = false;
+        boolean liquid = false;
         double friction = 0.6;
         double lastHorizontalSlack = -1.0;
         double lastVerticalSlack = -1.0;
@@ -56,6 +57,11 @@ final class Harness {
         @Override
         public boolean unjudgedEnvironment(final double x, final double y, final double z) {
             return this.environment;
+        }
+
+        @Override
+        public boolean overLiquid(final double x, final double y, final double z) {
+            return this.liquid;
         }
     }
 
@@ -89,6 +95,15 @@ final class Harness {
                   final int flags, final double moveSpeed) {
         return this.players.onPosition(ID, x, y, z, onGround,
                 new ObservedPlayers.Snapshot(flags, moveSpeed, Sample.DEFAULT_JUMP_STRENGTH, Sample.DEFAULT_GRAVITY, false),
+                nanos, this.settings);
+    }
+
+    Sample report(final long nanos, final double x, final double y, final double z, final boolean onGround,
+                  final int flags, final double moveSpeed, final float yaw, final float pitch,
+                  final double stepHeight, final double sneakingSpeed) {
+        return this.players.onPosition(ID, x, y, z, onGround,
+                new ObservedPlayers.Snapshot(flags, moveSpeed, Sample.DEFAULT_JUMP_STRENGTH, Sample.DEFAULT_GRAVITY, false,
+                        yaw, pitch, stepHeight, sneakingSpeed),
                 nanos, this.settings);
     }
 

@@ -26,4 +26,12 @@ public interface WorldProbe {
      * Movement there follows rules v1 does not model, so it is not judged.
      */
     boolean unjudgedEnvironment(double x, double y, double z);
+
+    /**
+     * Whether the player's feet sit directly on or above a fluid surface (water or lava). Used by
+     * {@code JesusCheck} while general movement checks still exempt liquids via {@link #unjudgedEnvironment}.
+     */
+    default boolean overLiquid(final double x, final double y, final double z) {
+        return false;
+    }
 }

@@ -2,6 +2,8 @@ package com.mentalfrostbyte;
 
 import com.google.gson.JsonObject;
 import com.mentalfrostbyte.jello.account.SigmaAccountManager;
+import com.mentalfrostbyte.jello.command.CommandContext;
+import com.mentalfrostbyte.jello.command.CommandManager;
 import com.mentalfrostbyte.jello.config.ModuleConfig;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.gui.ClientMode;
@@ -39,6 +41,7 @@ public class Client implements MinecraftInstance {
     // The explored maps and waypoints of the world being played (Jello's Maps page), under sigma5/maps.
     private final com.mentalfrostbyte.jello.map.MapManager mapManager;
     private final ModuleManager moduleManager = new ModuleManager();
+    private final CommandManager commandManager = new CommandManager();
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
     private final ClientModeManager clientModeManager = new ClientModeManager();
@@ -140,6 +143,8 @@ public class Client implements MinecraftInstance {
             boolean hasClientMode = this.config.has("clientMode");
             this.clientModeManager.read(this.config);
             this.translations.read(this.config);
+            this.commandManager.registerDefaults();
+            this.commandManager.read(this.config);
             this.hudLayout.read(this.config);
 
             if (!this.modulesRegistered) {
@@ -643,6 +648,7 @@ public class Client implements MinecraftInstance {
         this.keepDebugOverridesOutOf(this.config);
         this.clientModeManager.write(this.config);
         this.translations.write(this.config);
+        this.commandManager.write(this.config);
         this.musicPlayer.write(this.config);
         this.musicLibrary.write(this.config);
         this.musicEffects.write(this.config);
@@ -664,6 +670,22 @@ public class Client implements MinecraftInstance {
 
     public ModuleManager getModuleManager() {
         return this.moduleManager;
+    }
+
+    public CommandManager getCommandManager() {
+        return this.commandManager;
+    }
+
+    /** Runs a local chat command when {@code content} starts with the configured prefix. */
+    public boolean interceptChat(final String content) {
+        CommandContext ctx = new CommandContext(
+            this.moduleManager,
+            this.commandManager,
+            this.directory.resolve("profiles"),
+            com.mentalfrostbyte.jello.util.text.ChatUtil::print,
+            this::saveConfig,
+            () -> this.translations.selected() == com.mentalfrostbyte.jello.lang.ClientLanguage.ZH_CN);
+        return this.commandManager.interceptChat(content, ctx);
     }
 
     /** Keeps the walking in step with a facing that is only reported to the server; see {@link com.mentalfrostbyte.jello.util.movement.MovementCorrector}. */

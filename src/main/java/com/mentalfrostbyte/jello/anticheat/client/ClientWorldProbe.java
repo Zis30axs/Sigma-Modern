@@ -94,6 +94,35 @@ public final class ClientWorldProbe implements WorldProbe {
         return false;
     }
 
+    @Override
+    public boolean overLiquid(final double x, final double y, final double z) {
+        ClientLevel level = this.level();
+        if (level == null) {
+            return false;
+        }
+
+        int minX = (int) Math.floor(x - HALF_WIDTH);
+        int maxX = (int) Math.floor(x + HALF_WIDTH);
+        int minZ = (int) Math.floor(z - HALF_WIDTH);
+        int maxZ = (int) Math.floor(z + HALF_WIDTH);
+        int minY = (int) Math.floor(y - 0.5);
+        int maxY = (int) Math.floor(y + 0.1);
+
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int bx = minX; bx <= maxX; bx++) {
+            for (int by = minY; by <= maxY; by++) {
+                for (int bz = minZ; bz <= maxZ; bz++) {
+                    BlockState state = level.getBlockState(pos.set(bx, by, bz));
+                    if (!state.getFluidState().isEmpty() && !state.is(Blocks.BUBBLE_COLUMN)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
     /** Blocks whose effect on a player v1 does not model: fluids, climbables, and the sticky or bouncy ones. */
     private static boolean changesMovement(final BlockState state) {
         return !state.getFluidState().isEmpty()

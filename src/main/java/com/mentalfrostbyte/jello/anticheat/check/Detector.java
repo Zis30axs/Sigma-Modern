@@ -26,7 +26,16 @@ public final class Detector implements Check.Verdicts {
     private long now;
 
     public Detector(final AlertSink sink) {
-        this(List.of(new SpeedCheck(), new FlightCheck(), new GroundSpoofCheck(), new NoSlowCheck()), sink);
+        this(List.of(
+                new SpeedCheck(),
+                new FlightCheck(),
+                new GroundSpoofCheck(),
+                new NoSlowCheck(),
+                new StepCheck(),
+                new SneakCheck(),
+                new SprintCheck(),
+                new RotationCheck(),
+                new JesusCheck()), sink);
     }
 
     public Detector(final List<Check> checks, final AlertSink sink) {

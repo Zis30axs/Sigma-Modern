@@ -45,7 +45,15 @@ public final class ObservedPlayers {
     }
 
     /** The rest of what the client knows about a player when a report arrives. */
-    public record Snapshot(int flags, double moveSpeed, double jumpStrength, double gravity, boolean unknownEffects) {
+    public record Snapshot(int flags, double moveSpeed, double jumpStrength, double gravity, boolean unknownEffects,
+                           float yaw, float pitch, double stepHeight, double sneakingSpeed) {
+
+        /** Legacy constructor for callers/tests that only populate core v1 fields. */
+        public Snapshot(final int flags, final double moveSpeed, final double jumpStrength, final double gravity,
+                        final boolean unknownEffects) {
+            this(flags, moveSpeed, jumpStrength, gravity, unknownEffects, Float.NaN, Float.NaN,
+                    Sample.DEFAULT_STEP_HEIGHT, Sample.DEFAULT_SNEAKING_SPEED);
+        }
     }
 
     public TrackedPlayer track(final int entityId, final UUID uuid, final String name, final long nanos) {
@@ -156,16 +164,19 @@ public final class ObservedPlayers {
 
         boolean supported = false;
         boolean unjudged = false;
+        boolean overLiquid = false;
         double friction = Sample.DEFAULT_FRICTION;
         if (loaded) {
             supported = this.probe.supported(x, y, z, horizontalSlack, verticalSlack);
             unjudged = this.probe.unjudgedEnvironment(x, y, z);
+            overLiquid = this.probe.overLiquid(x, y, z);
             friction = this.probe.blockFriction(x, y, z);
         }
 
         Sample sample = new Sample(nanos, x, y, z, onGround, snapshot.flags(), snapshot.moveSpeed(),
                 snapshot.jumpStrength(), snapshot.gravity(), snapshot.unknownEffects(), friction, supported,
-                unjudged, loaded, exempt);
+                unjudged, loaded, exempt, snapshot.yaw(), snapshot.pitch(), snapshot.stepHeight(),
+                snapshot.sneakingSpeed(), overLiquid);
         player.addSample(sample);
         this.detector.ingest(player, sample, settings);
         return sample;

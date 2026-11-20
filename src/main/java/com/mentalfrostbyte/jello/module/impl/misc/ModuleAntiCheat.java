@@ -81,13 +81,28 @@ public class ModuleAntiCheat extends Module {
             "Flags sustained horizontal speed above what a sprint-hopper can reach.", true));
 
     private final BooleanSetting flight = this.register(new BooleanSetting("Flight",
-            "Flags jumping far too high, and hovering in the air without falling.", true));
+            "Flags jumping too high, hovering, mid-air jumps, and slow-fall gliding without particles.", true));
 
     private final BooleanSetting groundSpoof = this.register(new BooleanSetting("GroundSpoof",
             "Flags a forged on-ground flag: claimed with nothing underfoot, or denied while standing on solid ground.", true));
 
     private final BooleanSetting noSlow = this.register(new BooleanSetting("NoSlow",
             "Flags moving at full speed while eating, drinking, drawing a bow or blocking.", true));
+
+    private final BooleanSetting step = this.register(new BooleanSetting("Step",
+            "Flags stepping up higher than vanilla step height while staying on the ground.", true));
+
+    private final BooleanSetting sneak = this.register(new BooleanSetting("Sneak",
+            "Flags moving faster than sneaking speed (including Swift Sneak) allows while crouching.", true));
+
+    private final BooleanSetting sprint = this.register(new BooleanSetting("Sprint",
+            "Flags sprinting while using an item, sneaking on ground, or sprinting backwards (OmniSprint).", true));
+
+    private final BooleanSetting rotation = this.register(new BooleanSetting("Rotation",
+            "Flags impossible pitch angles outside [-90, 90] degrees.", true));
+
+    private final BooleanSetting jesus = this.register(new BooleanSetting("Jesus",
+            "Flags walking flat across liquid surfaces without solid support.", true));
 
     private final NumberSetting alertLevel = this.register(new NumberSetting("Alert Level",
             "How high a check's violation level must get before the player is announced. Each flag adds about 1; clean play drains it.",
@@ -195,6 +210,7 @@ public class ModuleAntiCheat extends Module {
         Sensitivity current = this.sensitivity.get();
         double quant = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8) ? QUANT_LEGACY : QUANT_MODERN;
         return new CheckSettings(this.speed.get(), this.flight.get(), this.groundSpoof.get(), this.noSlow.get(),
+                this.step.get(), this.sneak.get(), this.sprint.get(), this.rotation.get(), this.jesus.get(),
                 current.toleranceScale, current.burstTicks, current.strikesRequired, this.alertLevel.get(), quant);
     }
 

@@ -3,7 +3,10 @@ package com.mentalfrostbyte.jello.anticheat.client;
 import com.mentalfrostbyte.jello.anticheat.check.CheckSettings;
 import com.mentalfrostbyte.jello.anticheat.observe.ObservedPlayers;
 import com.mentalfrostbyte.jello.anticheat.observe.PlayerFlags;
+import com.mentalfrostbyte.jello.anticheat.observe.Sample;
 import com.mentalfrostbyte.jello.anticheat.observe.TrackedPlayer;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -12,7 +15,11 @@ import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.Vec3;
 
@@ -26,6 +33,9 @@ import net.minecraft.world.phys.Vec3;
  * "movement" is scripted.</p>
  */
 public final class ClientObserver {
+
+    /** Swift Sneak III maximum sneaking speed factor (0.3 + 3 * 0.15). */
+    private static final double SWIFT_SNEAK_MAX = 0.75;
 
     private final ObservedPlayers players;
     private final Supplier<CheckSettings> settings;
@@ -110,6 +120,53 @@ public final class ClientObserver {
                 player.getAttributeValue(Attributes.MOVEMENT_SPEED),
                 player.getAttributeValue(Attributes.JUMP_STRENGTH),
                 player.getAttributeValue(Attributes.GRAVITY),
-                player.sigmaShowsEffectParticles());
+                player.sigmaShowsEffectParticles(),
+                player.getYHeadRot(),
+                player.getXRot(),
+                player.getAttributeValue(Attributes.STEP_HEIGHT),
+                resolveSneakingSpeed(player));
+    }
+
+    /**
+     * Resolves a remote player's sneaking speed across protocol versions:
+     * <ul>
+     *   <li><b>1.21+</b>: {@link Attributes#SNEAKING_SPEED} is syncable and broadcast by the server, including
+     *       Swift Sneak modifiers.</li>
+     *   <li><b>1.19–1.20.6</b>: {@code SNEAKING_SPEED} did not exist as a synced attribute and ViaFabricPlus
+     *       only emulates it for the local player. Read Swift Sneak from leggings when visible, and conservatively
+     *       assume Swift Sneak III (0.75) if the leggings show an enchantment glint whose NBT was stripped.</li>
+     *   <li><b>1.18.2 and older</b>: Swift Sneak did not exist, so 0.3 is the vanilla ceiling.</li>
+     * </ul>
+     */
+    private static double resolveSneakingSpeed(final RemotePlayer player) {
+        ProtocolVersion target = ProtocolTranslator.getTargetVersion();
+        if (target.newerThan(ProtocolVersion.v1_20_5)) {
+            return player.getAttributeValue(Attributes.SNEAKING_SPEED);
+        }
+
+        if (target.olderThan(ProtocolVersion.v1_19)) {
+            return Sample.DEFAULT_SNEAKING_SPEED;
+        }
+
+        ItemStack leggings = player.getItemBySlot(EquipmentSlot.LEGS);
+        if (leggings.isEmpty()) {
+            return Sample.DEFAULT_SNEAKING_SPEED;
+        }
+
+        int swiftSneak = player.level().registryAccess()
+                .lookup(Enchantments.SWIFT_SNEAK.registryKey())
+                .flatMap(reg -> reg.get(Enchantments.SWIFT_SNEAK))
+                .map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, leggings))
+                .orElse(0);
+        if (swiftSneak > 0) {
+            return Math.min(1.0, Sample.DEFAULT_SNEAKING_SPEED + swiftSneak * 0.15);
+        }
+
+        // Many 1.19-1.20.6 servers obfuscate remote armor enchantment NBT while preserving the glint.
+        if (leggings.hasFoil() || leggings.isEnchanted()) {
+            return SWIFT_SNEAK_MAX;
+        }
+
+        return Sample.DEFAULT_SNEAKING_SPEED;
     }
 }

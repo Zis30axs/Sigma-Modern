@@ -32,7 +32,7 @@ class ModuleAntiCheatTest {
         assertFalse(module.isEnabled());
         assertEquals(ModuleCategory.MISC, module.getCategory());
         assertEquals("AntiCheat", module.getName());
-        for (String check : new String[] {"Speed", "Flight", "GroundSpoof", "NoSlow", "Notify", "NameTag"}) {
+        for (String check : new String[] {"Speed", "Flight", "GroundSpoof", "NoSlow", "Step", "Sneak", "Sprint", "Rotation", "Jesus", "Notify", "NameTag"}) {
             assertTrue(((BooleanSetting) module.setting(check).orElseThrow()).get(), check + " should default on");
         }
 

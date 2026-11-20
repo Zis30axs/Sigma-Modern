@@ -2951,6 +2951,15 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
         if (selfDetection != null && selfDetection.interceptChat(content)) {
             return;
         }
+        // Sigma hook: local client commands (".help", ".toggle", ".bind", etc.) never reach the server.
+        if (com.mentalfrostbyte.Client.getInstance().interceptChat(content)) {
+            return;
+        }
+        this.sendRawChat(content);
+    }
+
+    /** Sends a signed chat message directly to the server without local command interception. */
+    public void sendRawChat(final String content) {
         Instant timeStamp = Instant.now();
         long salt = Crypt.SaltSupplier.getLong();
         LastSeenMessagesTracker.Update lastSeenUpdate = this.lastSeenMessages.generateAndApplyUpdate();
