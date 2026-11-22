@@ -121,9 +121,19 @@ class VisiblePointScanTest {
         assertTrue(rotation.fromJson(JsonParser.parseString("\"VISIBLE_TEST\"")));
         assertEquals("Visible Test", EnumSetting.label(rotation.get()));
         assertFalse(aura.setting("Silent").orElseThrow().isVisible());
-        assertFalse(aura.setting("Timing").orElseThrow().isVisible());
+        assertTrue(aura.setting("Timing").orElseThrow().isVisible());
+        assertTrue(aura.setting("Min CPS").orElseThrow().isVisible());
         rotation.reset();
         assertTrue(aura.setting("Silent").orElseThrow().isVisible());
         assertTrue(aura.setting("Timing").orElseThrow().isVisible());
+    }
+
+    @Test void theNamedRemoteDummyBelongsToThePracticeArena() {
+        assertTrue(VisibleRotationTest.namedDummy("Aim2", false, "as.test.ccbluex.net"));
+        assertTrue(VisibleRotationTest.namedDummy("Aim2", false, "TEST.CCBLUEX.NET.:25565"));
+        assertTrue(VisibleRotationTest.namedDummy("Aim2", true, null));
+        assertFalse(VisibleRotationTest.namedDummy("Aim3", false, "as.test.ccbluex.net"));
+        assertFalse(VisibleRotationTest.namedDummy("Aim2", false, "as.test.ccbluex.net.example.org"));
+        assertFalse(VisibleRotationTest.namedDummy("Aim2", false, null));
     }
 }

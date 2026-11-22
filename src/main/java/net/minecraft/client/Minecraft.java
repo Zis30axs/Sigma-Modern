@@ -2285,6 +2285,13 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             }
         }
 
+        // Sigma hook: the visible rotation trial uses the native click pipeline and a fresh first hit.
+        var testAura = com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.combat.KillAura.class);
+        if (testAura != null) testAura.runVisibleTestInput(this.missTime, () -> {
+            this.pick(1.0F);
+            return this.hitResult;
+        }, () -> this.startAttack(true));
+
         if (this.options.keyUse.isDown() && this.rightClickDelay == 0 && !this.player.isUsingItem()) {
             this.startUseItem();
         }

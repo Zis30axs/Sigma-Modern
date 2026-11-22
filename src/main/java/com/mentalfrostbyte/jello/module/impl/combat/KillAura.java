@@ -24,6 +24,7 @@ import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.Comparator;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
@@ -94,7 +95,7 @@ public class KillAura extends Module {
         SMOOTH,
         /** Experimental: eases towards the nearest point of the target in whole mouse steps. */
         CLAUDE1,
-        /** Turns the real camera to a visible point and logs manual clicks against the same target. */
+        /** Turns the real camera and records timed practice hits alongside manual clicks. */
         VISIBLE_TEST
     }
 
@@ -164,7 +165,7 @@ public class KillAura extends Module {
             "Sol: longest extra pause in milliseconds.", 140.0F, 0.0F, 1000.0F, 5.0F));
 
     private final EnumSetting<RotationMode> rotationMode = this.register(new EnumSetting<>("Rotation",
-            "How it turns to the target. Claude1 is experimental. Visible Test turns the camera and logs manual clicks in logs/rotation-test.",
+            "Claude1 is experimental. Visible Test automatically hits the local FakePlayer or CCBlueX Aim2 dummy and logs in logs/rotation-test.",
             RotationMode.SNAP));
 
     private final NumberSetting turnSpeed = this.register(new NumberSetting("Turn Speed",
@@ -225,7 +226,6 @@ public class KillAura extends Module {
         this.rotationMode.onChange(() -> {
             if (this.isEnabled() && (this.testingVisibility() || this.visibleTest.started())) this.releaseCombat();
         });
-        this.timing.visibleWhen(() -> !this.testingVisibility());
         this.minCps.visibleWhen(this::showsCps);
         this.maxCps.visibleWhen(this::showsCps);
         this.cpsMode.visibleWhen(this::showsCps);
@@ -356,10 +356,10 @@ public class KillAura extends Module {
         this.activityPlayer = player;
         this.activityLevel = level;
         if (this.testingVisibility()) {
-            boolean gameplay = mc.gui.screen() == null && mc.gui.overlay() == null && !mc.isPaused() && mc.isWindowActive()
-                    && mc.mouseHandler.isMouseGrabbed() && mc.getCameraEntity() == player && !player.isSpectator();
+            boolean gameplay = this.testHasInput(player);
             if (this.target != null && this.target.level() != level) this.target = null;
             this.target = gameplay ? this.pickTarget(player, level, player.getEyePosition()) : null;
+            if (this.target == null) this.resetClickScheduler();
             this.visibleTest.tick(mc, player, level, this.target, this.range.get(), gameplay);
             return;
         }
@@ -394,6 +394,35 @@ public class KillAura extends Module {
 
     private boolean testingVisibility() {
         return this.rotationMode.is(RotationMode.VISIBLE_TEST);
+    }
+
+    private boolean testHasInput(LocalPlayer player) {
+        return player.isAlive() && mc.gameMode != null && !mc.gameMode.isSpectator()
+                && mc.gui.screen() == null && mc.gui.overlay() == null && !mc.isPaused() && mc.isWindowActive()
+                && mc.mouseHandler.isMouseGrabbed() && mc.getCameraEntity() == player && !player.isSpectator();
+    }
+
+    /** Called in the native input phase, after the real key queue has had its turn. */
+    public void runVisibleTestInput(int missTime, Supplier<HitResult> refreshPick, Runnable nativeClick) {
+        LocalPlayer player = mc.player;
+        if (!this.testingVisibility() || player == null || this.target == null || !this.testHasInput(player)
+                || !this.visibleTest.claimInput(player, mc.level)) return;
+        boolean due = this.tickClick(player);
+        boolean cooldown = !due && player.getAttackStrengthScale(0.5F) < 1F
+                && (this.timing.is(Timing.COOLDOWN) || this.timing.is(Timing.AUTO) && !legacyCombat());
+        String timing = due ? "ready" : cooldown ? "cooldown" : "click_interval";
+        if (this.visibleTest.autoClick(player, refreshPick.get(), this.isPracticeDummy(this.target), missTime, timing, nativeClick)) {
+            this.actedThisTick = true;
+            this.consumeScheduledClick();
+        }
+    }
+
+    private boolean isPracticeDummy(LivingEntity candidate) {
+        Target filter = Target.current();
+        if (filter != null && filter.isKnownBot(candidate)) return true;
+        var server = mc.getCurrentServer();
+        return VisibleRotationTest.namedDummy(candidate.getName().getString(), mc.hasSingleplayerServer(),
+                server == null ? null : server.ip);
     }
 
     /** Brackets only an original attack-key invocation, including a click on a block or a miss. */
@@ -461,7 +490,8 @@ public class KillAura extends Module {
     private @Nullable LivingEntity pickTarget(final LocalPlayer player, final ClientLevel level, final Vec3 eye) {
         double reach = this.aimRange.get();
         // Stay on the current target while it is still a target; switching every tick makes the look jump about.
-        if (this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach) {
+        boolean keep = this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach;
+        if (keep && (!this.testingVisibility() || this.isPracticeDummy(this.target))) {
             return this.target;
         }
         Comparator<LivingEntity> order = switch (this.priority.get()) {
@@ -470,7 +500,10 @@ public class KillAura extends Module {
                     Rotations.continuous(player.getYRot(), Rotations.towards(eye, entity.getBoundingBox().getCenter()).yaw()) - player.getYRot()));
             case HEALTH -> Comparator.comparingDouble(LivingEntity::getHealth);
         };
-        LivingEntity best = null;
+        if (this.testingVisibility()) {
+            order = Comparator.<LivingEntity, Boolean>comparing(entity -> !this.isPracticeDummy(entity)).thenComparing(order);
+        }
+        LivingEntity best = keep ? this.target : null;
         for (Entity entity : level.entitiesForRendering()) {
             if (entity instanceof LivingEntity living && this.valid(player, living) && distance(eye, living) <= reach
                     && (best == null || order.compare(living, best) < 0)) {
@@ -615,7 +648,7 @@ public class KillAura extends Module {
     }
 
     private boolean showsCps() {
-        return !this.testingVisibility() && !this.timing.is(Timing.COOLDOWN);
+        return !this.timing.is(Timing.COOLDOWN);
     }
 
     private boolean solSettingsVisible() {

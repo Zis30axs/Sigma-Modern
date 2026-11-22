@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module.impl.combat;
 
+import com.google.common.net.HostAndPort;
 import com.google.gson.JsonObject;
 import com.mentalfrostbyte.jello.module.impl.combat.VisiblePointScan.Kind;
 import com.mentalfrostbyte.jello.module.impl.combat.VisiblePointScan.Pick;
@@ -8,9 +9,11 @@ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
@@ -25,7 +28,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-/** A visible camera experiment. Manual input provides the independent measurement of the actual game's pick. */
+/** A visible camera experiment with native practice clicks and independent manual comparisons. */
 final class VisibleRotationTest {
     private final VisiblePointScan scan = new VisiblePointScan();
     private final RotationTestLog log = new RotationTestLog();
@@ -34,7 +37,10 @@ final class VisibleRotationTest {
     private @Nullable LivingEntity target;
     private long tick;
     private int clickId;
-    private boolean inClick;
+    private @Nullable String clickOrigin;
+    private String clickOutcome = "native_guard";
+    private long manualTick = -1;
+    private long inputTick = -1;
     private double range;
     private String lastState = "";
 
@@ -74,6 +80,8 @@ final class VisibleRotationTest {
         Pick before = describe(nativeBefore, player);
         JsonObject row = row("tick");
         row.addProperty("targetName", selected.getName().getString());
+        row.addProperty("targetHealth", selected.getHealth());
+        row.addProperty("hurtTime", selected.hurtTime);
         row.addProperty("configuredRange", configuredRange);
         row.addProperty("range", range);
         row.addProperty("boxDistance", Math.sqrt(box.distanceToSqr(eye)));
@@ -174,26 +182,95 @@ final class VisibleRotationTest {
         lastState = state;
     }
 
-    boolean beginClick(LocalPlayer player, @Nullable HitResult crosshair) {
-        if (player != owner || player.level() != world || inClick) return false;
-        inClick = true;
-        JsonObject row = row("manual_click");
-        row.addProperty("click", ++clickId);
-        putPick(row, "crosshair", describe(crosshair, player));
-        log.write(row, true);
+    /** The remote practice subject for this capture is Aim2 on CCBlueX's test arena. */
+    static boolean namedDummy(String name, boolean singleplayer, @Nullable String address) {
+        if (!"Aim2".equalsIgnoreCase(name)) return false;
+        if (singleplayer) return true;
+        if (address == null) return false;
+        try {
+            String host = HostAndPort.fromString(address).getHost().toLowerCase(Locale.ROOT);
+            if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+            return host.equals("test.ccbluex.net") || host.endsWith(".test.ccbluex.net");
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    boolean claimInput(LocalPlayer player, @Nullable ClientLevel level) {
+        if (player != owner || world != level || target == null || inputTick == tick) return false;
+        inputTick = tick;
         return true;
     }
 
+    boolean autoClick(LocalPlayer player, @Nullable HitResult crosshair, boolean practiceDummy, int missTime,
+                      String timing, Runnable nativeClick) {
+        if (target == null || player != owner || player.level() != world || clickOrigin != null) return false;
+        Pick pick = describe(crosshair, player);
+        String decision = autoDecision(player, practiceDummy, pick, missTime, timing);
+        JsonObject row = row("auto_decision");
+        row.addProperty("reason", decision);
+        row.addProperty("timing", timing);
+        putPick(row, "crosshair", pick);
+        log.write(row, false);
+        if (!decision.equals("ready")) return false;
+
+        startClick("auto", pick);
+        try {
+            nativeClick.run();
+            return true;
+        } catch (RuntimeException | Error failure) {
+            clickOutcome = "client_exception";
+            throw failure;
+        } finally {
+            if ("auto".equals(clickOrigin)) {
+                JsonObject result = row("auto_result");
+                result.addProperty("click", clickId);
+                result.addProperty("status", clickOutcome);
+                log.write(result, true);
+                endClick();
+            }
+        }
+    }
+
+    private String autoDecision(LocalPlayer player, boolean practiceDummy, Pick pick, int missTime, String timing) {
+        if (!practiceDummy) return "other_subject";
+        if (manualTick == tick) return "manual_input";
+        if (target == null || target.isRemoved() || !target.isAlive() || target.level() != world) return "target_lost";
+        if (pick.kind() != Kind.TARGET) return pick.kind().name().toLowerCase(Locale.ROOT);
+        if (player.isUsingItem() || player.isHandsBusy()) return "item_busy";
+        if (missTime > 0) return "miss_delay";
+        if (player.getMainHandItem().has(DataComponents.PIERCING_WEAPON)) return "area_weapon";
+        return timing;
+    }
+
+    boolean beginClick(LocalPlayer player, @Nullable HitResult crosshair) {
+        if (player != owner || player.level() != world || clickOrigin != null) return false;
+        manualTick = tick;
+        startClick("manual", describe(crosshair, player));
+        return true;
+    }
+
+    private void startClick(String origin, Pick crosshair) {
+        clickOrigin = origin;
+        clickOutcome = "native_guard";
+        JsonObject row = row(origin + "_click");
+        row.addProperty("click", ++clickId);
+        putPick(row, "crosshair", crosshair);
+        log.write(row, true);
+    }
+
     void attackEvent(Entity entity, boolean cancelled) {
-        if (!inClick) return;
+        if (clickOrigin == null) return;
+        clickOutcome = entity != target ? "different_entity_event" : cancelled ? "attack_event_cancelled" : "attack_event";
         JsonObject row = row("local_attack_event");
         row.addProperty("click", clickId);
+        row.addProperty("origin", clickOrigin);
         row.addProperty("entityId", entity.getId());
         row.addProperty("cancelledAtListener", cancelled);
         log.write(row, true);
     }
 
-    void endClick() { inClick = false; }
+    void endClick() { clickOrigin = null; }
 
     void close() {
         if (owner != null) log.write(row("end"), true);
@@ -204,7 +281,9 @@ final class VisibleRotationTest {
         target = null;
         tick = 0;
         clickId = 0;
-        inClick = false;
+        endClick();
+        manualTick = -1;
+        inputTick = -1;
         lastState = "";
     }
 }

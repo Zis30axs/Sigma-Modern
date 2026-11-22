@@ -1,6 +1,6 @@
 {
   "text.Visible Test": "可见点测试",
-  "text.How it turns to the target. Claude1 is experimental. Visible Test turns the camera and logs manual clicks in logs/rotation-test.": "选择转向目标的方式。Claude1 为实验选项。可见点测试会转动镜头，并把手动点击记录到 logs/rotation-test。",
+  "text.Claude1 is experimental. Visible Test automatically hits the local FakePlayer or CCBlueX Aim2 dummy and logs in logs/rotation-test.": "Claude1 为实验选项。可见点测试会自动攻击本地 FakePlayer 或 CCBlueX 的 Aim2 假人，并把点击记录到 logs/rotation-test。",
   "aimassist.training.title": "AimAssist · 瞄准训练场",
   "aimassist.training.subtitle": "通过本地低秩适配器学习你的鼠标操作习惯。",
   "aimassist.training.open": "训练 · 当前使用 Assist",

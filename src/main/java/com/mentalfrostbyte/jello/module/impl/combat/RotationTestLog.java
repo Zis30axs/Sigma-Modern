@@ -29,7 +29,7 @@ final class RotationTestLog implements AutoCloseable {
         JsonObject start = event("start", 0);
         start.addProperty("schema", 1);
         start.addProperty("rotation", "VISIBLE_TEST");
-        start.addProperty("probeVersion", 1);
+        start.addProperty("probeVersion", 2);
         start.addProperty("sampleBudget", VisiblePointScan.BUDGET);
         start.addProperty("startedUtc", Instant.now().toString());
         write(start, true);
