@@ -170,7 +170,7 @@ final class ModernMusicSettings {
         MusicEffects fx = Client.getInstance().getMusicEffects();
         FxLayout l = fxLayout(c);
         fxRow(g, c, l, WATER, ModernText.t("Under water", "水下音效"),
-            ModernText.t("Music goes muffled while your head is in water (only for you).", "头部没入水中时音乐变得沉闷（仅本地）"), fx.underwaterSound());
+            ModernText.t("Music goes muffled while your head is in water.", "头部没入水中时音乐变得沉闷"), fx.underwaterSound());
         fxRow(g, c, l, LAVA, ModernText.t("Lava", "岩浆音效"),
             ModernText.t("A deeper, quieter sound while your head is in lava.", "头部没入岩浆时，音乐更厚重、低沉"), fx.lavaSound());
         fxRow(g, c, l, SPACE, ModernText.t("Space reverb", "空间混响"),
