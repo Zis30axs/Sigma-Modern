@@ -1,0 +1,47 @@
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
+index 280ac6a7..221a2324 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
+@@ -46,6 +46,9 @@ public final class ModernHud {
+     private static long brandFrame;
+     private static GuiGraphicsExtractor brandGraphics;
+     private static HudLayout.Rect brandBounds;
++    // Animated hotbar selection slot for smooth sub-pixel sliding transitions.
++    private static float hotbarSlot = -1F;
++    private static long hotbarFrame;
+ 
+     private ModernHud() {}
+ 
+@@ -265,10 +273,28 @@ public final class ModernHud {
+         int w = 182, h = 22;
+         int x = screenCenter - w / 2, y = g.guiHeight() - h;
+         ModernStyle.darkGlass(g, x, y, w, h, 7, 0x611C2738);
+-        int cellW = w / 9;
+-        int cellX = x + selectedSlot * cellW + 1, cellY = y + 1, cellW2 = cellW - 2, cellH2 = h - 2;
+-        ModernStyle.halo(g, cellX, cellY, cellW2, cellH2, 4, ModernStyle.GLOW, 0.35F);
+-        ModernStyle.rounded(g, cellX, cellY, cellW2, cellH2, 4, 0x5CB6E9FF);
++        long now = System.nanoTime();
++        float dt = Math.min(0.05F, (now - hotbarFrame) / 1_000_000_000F);
++        boolean snap = hotbarSlot < 0F || now - hotbarFrame > 250_000_000L;
++        hotbarFrame = now;
++        hotbarSlot = snap ? selectedSlot : ModernStyle.smooth(hotbarSlot, selectedSlot, dt, 22F);
++        if (Math.abs(hotbarSlot - selectedSlot) < 0.002F) hotbarSlot = selectedSlot;
++
++        int cellW = w / 9, cellW2 = cellW - 2, cellH2 = h - 2;
++        float travel = Math.min(1F, Math.abs(selectedSlot - hotbarSlot));
++        int stretch = Math.round(Math.min(3.5F, travel * 2.2F));
++        int pillW = cellW2 + stretch;
++        float pillX = Math.clamp(x + hotbarSlot * cellW + 1F - stretch * 0.5F, x + 1F, x + w - 1F - pillW);
++
++        g.pose().pushMatrix();
++        try {
++            g.pose().translate(pillX, y + 1F);
++            ModernStyle.halo(g, 0, 0, pillW, cellH2, 4, ModernStyle.GLOW, 0.35F + travel * 0.22F);
++            ModernStyle.rounded(g, 0, 0, pillW, cellH2, 4, 0x5CB6E9FF);
++            ModernStyle.rounded(g, 5, cellH2 - 2, Math.max(4, pillW - 10), 2, 1, 0xCC9FE2FF);
++        } finally {
++            g.pose().popMatrix();
++        }
+     }
+ 
+     /**

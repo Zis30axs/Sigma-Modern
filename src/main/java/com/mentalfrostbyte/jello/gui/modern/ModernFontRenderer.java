@@ -133,6 +133,12 @@ final class ModernFontRenderer implements AutoCloseable {
         return text.isEmpty() ? 0F : layout(text).getWidth();
     }
 
+    /** Paints a shaped line directly onto an offscreen Skia canvas, reusing this face's layout cache. */
+    void paint(io.github.humbleui.skija.Canvas canvas, String text, float x, float y, Paint paint) {
+        if (text.isEmpty()) return;
+        canvas.drawTextLine(layout(text), x, y + this.baseline, paint);
+    }
+
     /**
      * True when the bundled face itself has {@code codepoint}; false when a system font stands in. A run that
      * mixes the two can shape the characters at the seam (a space after Chinese, say) in the other font than

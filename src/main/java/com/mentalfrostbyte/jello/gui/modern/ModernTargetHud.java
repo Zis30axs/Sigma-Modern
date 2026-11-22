@@ -51,13 +51,14 @@ public final class ModernTargetHud {
         }
         Snapshot data = snapshot(mc, target, options);
         int height = panelHeight(options.showsArmor(), editing, data.gear.size());
-        float scale = fittingScale(options.getScale(), g.guiWidth(), g.guiHeight(), height);
+        boolean following = options.getMode() == TargetHud.Mode.FOLLOW_TARGET;
+        String layoutId = following ? "target_hud_follow" : "target_hud";
+        float scale = fittingScale(options.getScale() * ModernHudEditor.scaleOf(layoutId), g.guiWidth(), g.guiHeight(), height);
         if (scale <= 0F) return;
         float width = WIDTH * scale;
         float scaledHeight = height * scale;
         float defaultX;
         float defaultY;
-        boolean following = options.getMode() == TargetHud.Mode.FOLLOW_TARGET;
         if (following) {
             NameTagProjection.Point anchor = editing
                     ? new NameTagProjection.Point(g.guiWidth() * 0.5F + 20F, g.guiHeight() * 0.5F)

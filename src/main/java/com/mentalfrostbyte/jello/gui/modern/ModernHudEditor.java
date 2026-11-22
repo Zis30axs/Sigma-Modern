@@ -40,7 +40,15 @@ public final class ModernHudEditor extends Screen {
     public static boolean isEditing() { return Minecraft.getInstance().gui.screen() instanceof ModernHudEditor; }
     public static boolean allowsHud() { return Minecraft.getInstance().gui.screen() == null || isEditing(); }
     public static boolean hasPosition(String id) { return layout().hasPosition(id); }
-    public static boolean hasCustom(String id) { return hasPosition(id); }
+    public static boolean hasCustom(String id) { return hasPosition(id) || layout().hasScale(id); }
+    public static float scaleOf(String id) { return layout().scaleOf(id); }
+
+    public static float fittingScale(String id, float width, float height, float viewportWidth, float viewportHeight) {
+        if (width <= 0F || height <= 0F) return 0F;
+        float maxX = Math.max(0F, viewportWidth - 8F) / width;
+        float maxY = Math.max(0F, viewportHeight - 8F) / height;
+        return Math.min(layout().scaleOf(id), Math.min(maxX, maxY));
+    }
     /** A gameplay chord can take over from held Alt without reopening the editor until Alt is released. */
     public static void finishForShortcut() {
         if (active != null) active.closeEditor(true);
@@ -181,7 +189,25 @@ public final class ModernHudEditor extends Screen {
         return true;
     }
     @Override public boolean keyReleased(KeyEvent event) { return true; }
-    @Override public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) { return true; }
+    @Override public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+        if (scrollY == 0.0) return true;
+        Widget target = dragging != null ? WIDGETS.get(dragging) : null;
+        if (target == null) {
+            ArrayList<Widget> ordered = new ArrayList<>(WIDGETS.values());
+            for (int i = ordered.size() - 1; i >= 0; i--) {
+                Widget widget = ordered.get(i);
+                if (widget.bounds.contains(x, y)) {
+                    target = widget;
+                    break;
+                }
+            }
+        }
+        if (target != null) {
+            float delta = scrollY > 0.0 ? HudLayout.SCALE_STEP : -HudLayout.SCALE_STEP;
+            if (layout().adjustScale(target.id, delta)) dirty = true;
+        }
+        return true;
+    }
 
     @Override public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         ArrayList<Widget> ordered = new ArrayList<>(WIDGETS.values());
@@ -225,9 +251,13 @@ public final class ModernHudEditor extends Screen {
             g.fill(x - 1, bottom, right + 1, bottom + 1, color);
             g.fill(x - 1, y, x, bottom, color);
             g.fill(right, y, right + 1, bottom, color);
-            if (hover) ModernTypography.draw(g, widget.label, x + 3, Math.max(2, y - 13), 0xFFE8F5FF, true);
+            if (hover) {
+                int pct = Math.round(layout().scaleOf(widget.id) * 100F);
+                String caption = pct == 100 ? widget.label : widget.label + " · " + pct + "%";
+                ModernTypography.draw(g, caption, x + 3, Math.max(2, y - 13), 0xFFE8F5FF, true);
+            }
         }
-        String hint = "按住 Alt 编辑 · 左键拖动 · 右键重置 · 松开保存";
+        String hint = "按住 Alt 编辑 · 左键拖动 · 滚轮缩放 · 右键重置 · 松开保存";
         int w = ModernTypography.width(hint) + 22;
         int x = Math.max(4, (g.guiWidth() - w) / 2), y = Math.max(4, g.guiHeight() - 30);
         ModernStyle.rounded(g, x, y, w, 22, 8, 0xDD141C2C);

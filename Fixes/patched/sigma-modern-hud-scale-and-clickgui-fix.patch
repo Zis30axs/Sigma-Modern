@@ -1,0 +1,582 @@
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/HudLayout.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/HudLayout.java
+index ce8fea9e..134c15e5 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/HudLayout.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/HudLayout.java
+@@ -3,7 +3,9 @@ package com.mentalfrostbyte.jello.gui.modern;
+ import com.google.gson.JsonElement;
+ import com.google.gson.JsonObject;
+ import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
+ import java.util.Map;
++import java.util.Set;
+ import java.util.Objects;
+ import java.util.TreeSet;
+ 
+@@ -11,7 +13,12 @@ import java.util.TreeSet;
+ public final class HudLayout {
+     private static final String CONFIG_KEY = "modernHudLayout";
+     private static final int MAX_POSITIONS = 128;
++    public static final float MIN_SCALE = 0.5F;
++    public static final float MAX_SCALE = 2.5F;
++    public static final float SCALE_STEP = 0.05F;
++    private static final float SCALE_EPSILON = 0.001F;
+     private final Map<String, Position> positions = new LinkedHashMap<>();
++    private final Map<String, Float> scales = new LinkedHashMap<>();
+ 
+     private record Position(boolean following, float x, float y) {}
+ 
+@@ -171,7 +178,28 @@ public final class HudLayout {
+     }
+ 
+     public boolean hasPosition(String id) { return positions.containsKey(id); }
+-    public boolean reset(String id) { return positions.remove(id) != null; }
++    public boolean hasScale(String id) { return scales.containsKey(id); }
++    public float scaleOf(String id) { return scales.getOrDefault(id, 1F); }
++
++    public boolean setScale(String id, float scale) {
++        if (!validId(id)) throw new IllegalArgumentException("Invalid HUD id: " + id);
++        if (!Float.isFinite(scale)) throw new IllegalArgumentException("Non-finite HUD scale");
++        float snapped = snapScale(scale);
++        if (Math.abs(snapped - 1F) < SCALE_EPSILON) return scales.remove(id) != null;
++        Float previous = scales.put(id, snapped);
++        return previous == null || Math.abs(previous - snapped) >= SCALE_EPSILON;
++    }
++
++    public boolean adjustScale(String id, float delta) {
++        if (!Float.isFinite(delta)) throw new IllegalArgumentException("Non-finite HUD scale delta");
++        return setScale(id, scaleOf(id) + delta);
++    }
++
++    public boolean reset(String id) {
++        boolean removedPosition = positions.remove(id) != null;
++        boolean removedScale = scales.remove(id) != null;
++        return removedPosition || removedScale;
++    }
+ 
+     public Rect resolve(String id, float defaultX, float defaultY, float width, float height,
+                         float viewportWidth, float viewportHeight, boolean following) {
+@@ -205,38 +233,67 @@ public final class HudLayout {
+ 
+     public void read(JsonObject config) {
+         positions.clear();
++        scales.clear();
+         JsonElement element = config.get(CONFIG_KEY);
+         if (element == null || !element.isJsonObject()) return;
++        int loaded = 0;
+         for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+-            if (positions.size() >= MAX_POSITIONS) break;
++            if (loaded >= MAX_POSITIONS) break;
+             if (!validId(entry.getKey()) || !entry.getValue().isJsonObject()) continue;
+             JsonObject value = entry.getValue().getAsJsonObject();
++            boolean stored = false;
++            if (number(value.get("scale"))) {
++                try {
++                    float scale = value.get("scale").getAsFloat();
++                    if (Float.isFinite(scale)) {
++                        float snapped = snapScale(scale);
++                        if (Math.abs(snapped - 1F) >= SCALE_EPSILON) {
++                            scales.put(entry.getKey(), snapped);
++                            stored = true;
++                        }
++                    }
++                } catch (NumberFormatException ignored) {
++                    // Malformed persisted scale leaves this widget at 100%.
++                }
++            }
+             try {
+-                if (!value.has("mode") || !value.get("mode").isJsonPrimitive()
+-                        || !value.getAsJsonPrimitive("mode").isString()) continue;
+-                String mode = value.get("mode").getAsString();
+-                if (!mode.equals("absolute") && !mode.equals("follow")) continue;
+-                if (!number(value.get("x")) || !number(value.get("y"))) continue;
+-                float x = value.get("x").getAsFloat(), y = value.get("y").getAsFloat();
+-                if (!Float.isFinite(x) || !Float.isFinite(y)) continue;
+-                boolean following = mode.equals("follow");
+-                positions.put(entry.getKey(), new Position(following,
+-                        clamp(x, following ? -1 : 0, 1), clamp(y, following ? -1 : 0, 1)));
++                if (value.has("mode") && value.get("mode").isJsonPrimitive()
++                        && value.getAsJsonPrimitive("mode").isString()) {
++                    String mode = value.get("mode").getAsString();
++                    if ((mode.equals("absolute") || mode.equals("follow"))
++                            && number(value.get("x")) && number(value.get("y"))) {
++                        float x = value.get("x").getAsFloat(), y = value.get("y").getAsFloat();
++                        if (Float.isFinite(x) && Float.isFinite(y)) {
++                            boolean following = mode.equals("follow");
++                            positions.put(entry.getKey(), new Position(following,
++                                    clamp(x, following ? -1 : 0, 1), clamp(y, following ? -1 : 0, 1)));
++                            stored = true;
++                        }
++                    }
++                }
+             } catch (NumberFormatException ignored) {
+                 // Malformed persisted coordinates leave this widget at its default.
+             }
++            if (stored) loaded++;
+         }
+     }
+ 
+     public void write(JsonObject config) {
+         JsonObject saved = new JsonObject();
+-        positions.forEach((id, position) -> {
++        Set<String> ids = new LinkedHashSet<>(positions.keySet());
++        ids.addAll(scales.keySet());
++        for (String id : ids) {
+             JsonObject value = new JsonObject();
+-            value.addProperty("mode", position.following ? "follow" : "absolute");
+-            value.addProperty("x", position.x);
+-            value.addProperty("y", position.y);
++            Position position = positions.get(id);
++            if (position != null) {
++                value.addProperty("mode", position.following ? "follow" : "absolute");
++                value.addProperty("x", position.x);
++                value.addProperty("y", position.y);
++            }
++            Float scale = scales.get(id);
++            if (scale != null) value.addProperty("scale", scale);
+             saved.add(id, value);
+-        });
++        }
+         config.add(CONFIG_KEY, saved);
+     }
+ 
+@@ -244,6 +301,9 @@ public final class HudLayout {
+     private static boolean number(JsonElement value) {
+         return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber();
+     }
++    private static float snapScale(float value) {
++        return Math.round(clamp(value, MIN_SCALE, MAX_SCALE) * 100F) / 100F;
++    }
+     private static float clamp(float value, float min, float max) { return Math.max(min, Math.min(max, value)); }
+     private static void requireGeometry(float x, float y, float w, float h, float sw, float sh) {
+         if (!Float.isFinite(x) || !Float.isFinite(y) || !Float.isFinite(w) || !Float.isFinite(h)
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernArrayList.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernArrayList.java
+index 857476d4..ebaadab7 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernArrayList.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernArrayList.java
+@@ -134,11 +134,17 @@ final class ModernArrayList {
+         float accent = list.hasAccentBar() ? BAR_W + 1 : 0;
+         float left = corner.isRight() ? g.guiWidth() - MARGIN - widest - PAD_X : MARGIN - PAD_X - accent;
+         float y = corner.isBottom() ? g.guiHeight() - MARGIN - reach : top;
++        float boxW = (float)Math.ceil(widest) + PAD_X * 2 + accent + 1;
++        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, reach, g.guiWidth(), g.guiHeight());
++        if (hudScale <= 0F) return;
++        float scaledW = boxW * hudScale, scaledH = reach * hudScale;
++        float defaultX = corner.isRight() ? left + boxW - scaledW : left;
++        float defaultY = corner.isBottom() ? y + reach - scaledH : y;
+         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Module list", "模块列表"),
+-                left, y, (float)Math.ceil(widest) + PAD_X * 2 + accent + 1, reach);
++                defaultX, defaultY, scaledW, scaledH);
+         // A manually placed list no longer reserves either automatic right-side stack.
+         if (!custom && !ROWS.isEmpty() && corner == Corner.BOTTOM_RIGHT) bottomRightTop = Math.round(bounds.y());
+-        if (!custom && !ROWS.isEmpty() && corner == Corner.TOP_RIGHT) topRightBottom = Math.round(bounds.y() + reach);
++        if (!custom && !ROWS.isEmpty() && corner == Corner.TOP_RIGHT) topRightBottom = Math.round(bounds.y() + scaledH);
+         List<Line> lines = new ArrayList<>(leaving.size() + listed.size() + (preview != null ? 1 : 0));
+         for (Map.Entry<Module, Row> entry : leaving) lines.add(line(g, list, entry.getKey(), entry.getValue(), scale, rowH, top));
+         for (Module module : listed) lines.add(line(g, list, module, ROWS.get(module), scale, rowH, top));
+@@ -148,7 +154,9 @@ final class ModernArrayList {
+         }
+         g.pose().pushMatrix();
+         try {
+-            g.pose().translate(bounds.dx(), bounds.dy());
++            g.pose().translate(bounds.x(), bounds.y());
++            g.pose().scale(hudScale, hudScale);
++            g.pose().translate(-left, -y);
+             // Finish every halo before any glass or text: neighbouring rows must not glow over each other's ink.
+             if (list.hasBloom() && list.getBloomStrength() > 0F) {
+                 for (Line line : lines) drawGlow(g, list, line, rowH);
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClickGuiScreen.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClickGuiScreen.java
+index d3d4d44a..02e06e08 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClickGuiScreen.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClickGuiScreen.java
+@@ -297,6 +297,17 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
+                 if (this.view == View.CATEGORY) drawSectionHeading(g);
+                 else if (this.view == View.SEARCH) drawSearchField(g);
+                 else if (this.view == View.LANGUAGE) drawLanguageHeading(g);
++            } finally {
++                g.pose().popMatrix();
++            }
++            g.disableScissor();
++
++            // Clip scrollable rows/tiles below the fixed section heading or search bar so scrolling never overlaps it.
++            int contentTop = visibleContentTop();
++            g.enableScissor(panelX + 4, contentTop, panelX + panelW - 4, Math.max(contentTop, contentBottom));
++            g.pose().pushMatrix();
++            try (var contentFade = ModernStyle.alphaScope(content)) {
++                g.pose().translate(0F, (1F - content) * 7F);
+                 if (this.view == View.DETAIL) drawDetail(g, hits, mx, my);
+                 else if (this.view == View.LANGUAGE) drawLanguages(g, hits, mx, my);
+                 else drawRows(g, hits, mx, my);
+@@ -429,23 +440,23 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
+     }
+ 
+     private void drawSectionHeading(GuiGraphicsExtractor g) {
+-        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
++        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 4;
+         ModernTypography.draw(g, ModernStyle.spaced(ModernText.category(this.activeCategory).toUpperCase(Locale.ROOT)),
+             x, y, ModernStyle.INK_MUTED, false);
+         int enabledInCat = (int)this.modules.byCategory(this.activeCategory).stream().filter(Module::isEnabled).count();
+         int totalInCat = this.modules.byCategory(this.activeCategory).size();
+         String count = ModernText.tr("clickgui.section.enabled", enabledInCat, totalInCat);
+         ModernTypography.draw(g, count, x + w - ModernTypography.width(count), y, ModernStyle.INK_MUTED, false);
+-        ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
++        ModernStyle.fill(g, x, y + 16, x + w, y + 17, 0x1EBFEEFF);
+     }
+ 
+     private void drawLanguageHeading(GuiGraphicsExtractor g) {
+-        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
++        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 4;
+         String heading = ModernStyle.spaced(ModernText.tr("clickgui.language.heading"));
+         ModernTypography.draw(g, heading, x, y, ModernStyle.INK_MUTED, false);
+         String note = ModernTypography.fit(ModernText.tr("clickgui.language.note"), w - ModernTypography.width(heading) - 16);
+         ModernTypography.draw(g, note, x + w - ModernTypography.width(note), y, ModernStyle.INK_MUTED, false);
+-        ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
++        ModernStyle.fill(g, x, y + 16, x + w, y + 17, 0x1EBFEEFF);
+     }
+ 
+     /**
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClock.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClock.java
+index 4e96755b..e9c6351d 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClock.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernClock.java
+@@ -43,7 +43,7 @@ public final class ModernClock {
+         Display display = TIME.update(now, ZoneId.systemDefault(), options.isTwentyFourHour(),
+                 options.showsSeconds(), options.showsDate());
+         Size size = size(options.getStyle(), options.showsDate());
+-        float scale = fittingScale(options.getScale(), size, g.guiWidth(), g.guiHeight());
++        float scale = fittingScale(options.getScale() * ModernHudEditor.scaleOf("clock"), size, g.guiWidth(), g.guiHeight());
+         if (scale <= 0F) return;
+         float width = size.width * scale, height = size.height * scale;
+         float chatHeight = ChatComponent.getHeight(mc.options.chatHeightUnfocused().get())
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
+index 280ac6a7..2687e190 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHud.java
+@@ -141,12 +141,15 @@ public final class ModernHud {
+         float italicX = wordX + ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, 1F) + 4.2F;
+         int w = Math.round(italicX + ModernTypography.width(ModernTypography.Face.DISPLAY_ITALIC, "Modern", BRAND_ITALIC) + 10F);
+         int radius = BRAND_H / 2;
++        float scale = ModernHudEditor.fittingScale("watermark", w, BRAND_H, g.guiWidth(), g.guiHeight());
++        if (scale <= 0F) return;
+         var placement = placeBrand(g, w);
+ 
+         g.nextStratum();
+         g.pose().pushMatrix();
+         try {
+             g.pose().translate(placement.x(), placement.y());
++            g.pose().scale(scale, scale);
+             ModernStyle.dropShadow(g, 0, 2, w, BRAND_H, radius, 0.6F);
+             ModernStyle.rounded(g, 0, 0, w, BRAND_H, radius, 0x80EDFAFF);
+             ModernStyle.rounded(g, 1, 1, w - 2, BRAND_H - 2, radius - 1, 0x9C000000 | (ModernCoverColors.ICE_DEEP & 0xFFFFFF));
+@@ -177,8 +180,10 @@ public final class ModernHud {
+     private static HudLayout.Rect placeBrand(GuiGraphicsExtractor g, int width) {
+         if (brandGraphics == g) return brandBounds;
+         brandGraphics = g;
++        float scale = ModernHudEditor.fittingScale("watermark", width, BRAND_H, g.guiWidth(), g.guiHeight());
++        float scaledW = width * scale, scaledH = BRAND_H * scale;
+         boolean aside = debugShowing() && !ModernHudEditor.isEditing();
+-        float targetX = aside ? (g.guiWidth() - width) / 2F : BRAND_X;
++        float targetX = aside ? (g.guiWidth() - scaledW) / 2F : BRAND_X;
+         float targetY = aside ? Math.max(BRAND_Y, ModernIsland.bottom() + 6) : BRAND_Y;
+         long now = System.nanoTime();
+         float dt = Math.min(0.05F, (now - brandFrame) / 1_000_000_000F);
+@@ -186,7 +191,7 @@ public final class ModernHud {
+         brandFrame = now;
+         brandX = snap ? targetX : ModernStyle.smooth(brandX, targetX, dt, 12F);
+         brandY = snap ? targetY : ModernStyle.smooth(brandY, targetY, dt, 12F);
+-        brandBounds = ModernHudEditor.place(g, "watermark", "Watermark", Math.round(brandX), Math.round(brandY), width, BRAND_H);
++        brandBounds = ModernHudEditor.place(g, "watermark", "Watermark", Math.round(brandX), Math.round(brandY), scaledW, scaledH);
+         return brandBounds;
+     }
+ 
+@@ -282,7 +287,7 @@ public final class ModernHud {
+         int width = size * 3 + gap * 2;
+         int mouseHeight = keyboard.showsCps() ? 27 : size;
+         int height = size * 2 + gap + (keyboard.showsMouseButtons() ? gap + mouseHeight : 0);
+-        float scale = Math.min(keyboard.getScale(), Math.min(Math.max(0, g.guiWidth() - 8) / (float)width,
++        float scale = Math.min(keyboard.getScale() * ModernHudEditor.scaleOf("keystrokes"), Math.min(Math.max(0, g.guiWidth() - 8) / (float)width,
+                 Math.max(0, g.guiHeight() - 8) / (float)height));
+         if (scale <= 0F) return;
+         int y = leftStack();
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
+index 862f2422..dc9134df 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
+@@ -40,7 +40,15 @@ public final class ModernHudEditor extends Screen {
+     public static boolean isEditing() { return Minecraft.getInstance().gui.screen() instanceof ModernHudEditor; }
+     public static boolean allowsHud() { return Minecraft.getInstance().gui.screen() == null || isEditing(); }
+     public static boolean hasPosition(String id) { return layout().hasPosition(id); }
+-    public static boolean hasCustom(String id) { return hasPosition(id); }
++    public static boolean hasCustom(String id) { return hasPosition(id) || layout().hasScale(id); }
++    public static float scaleOf(String id) { return layout().scaleOf(id); }
++
++    public static float fittingScale(String id, float width, float height, float viewportWidth, float viewportHeight) {
++        if (width <= 0F || height <= 0F) return 0F;
++        float maxX = Math.max(0F, viewportWidth - 8F) / width;
++        float maxY = Math.max(0F, viewportHeight - 8F) / height;
++        return Math.min(layout().scaleOf(id), Math.min(maxX, maxY));
++    }
+     /** A gameplay chord can take over from held Alt without reopening the editor until Alt is released. */
+     public static void finishForShortcut() {
+         if (active != null) active.closeEditor(true);
+@@ -181,7 +189,25 @@ public final class ModernHudEditor extends Screen {
+         return true;
+     }
+     @Override public boolean keyReleased(KeyEvent event) { return true; }
+-    @Override public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) { return true; }
++    @Override public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
++        if (scrollY == 0.0) return true;
++        Widget target = dragging != null ? WIDGETS.get(dragging) : null;
++        if (target == null) {
++            ArrayList<Widget> ordered = new ArrayList<>(WIDGETS.values());
++            for (int i = ordered.size() - 1; i >= 0; i--) {
++                Widget widget = ordered.get(i);
++                if (widget.bounds.contains(x, y)) {
++                    target = widget;
++                    break;
++                }
++            }
++        }
++        if (target != null) {
++            float delta = scrollY > 0.0 ? HudLayout.SCALE_STEP : -HudLayout.SCALE_STEP;
++            if (layout().adjustScale(target.id, delta)) dirty = true;
++        }
++        return true;
++    }
+ 
+     @Override public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+         ArrayList<Widget> ordered = new ArrayList<>(WIDGETS.values());
+@@ -225,9 +251,13 @@ public final class ModernHudEditor extends Screen {
+             g.fill(x - 1, bottom, right + 1, bottom + 1, color);
+             g.fill(x - 1, y, x, bottom, color);
+             g.fill(right, y, right + 1, bottom, color);
+-            if (hover) ModernTypography.draw(g, widget.label, x + 3, Math.max(2, y - 13), 0xFFE8F5FF, true);
++            if (hover) {
++                int pct = Math.round(layout().scaleOf(widget.id) * 100F);
++                String caption = pct == 100 ? widget.label : widget.label + " · " + pct + "%";
++                ModernTypography.draw(g, caption, x + 3, Math.max(2, y - 13), 0xFFE8F5FF, true);
++            }
+         }
+-        String hint = "按住 Alt 编辑 · 左键拖动 · 右键重置 · 松开保存";
++        String hint = "按住 Alt 编辑 · 左键拖动 · 滚轮缩放 · 右键重置 · 松开保存";
+         int w = ModernTypography.width(hint) + 22;
+         int x = Math.max(4, (g.guiWidth() - w) / 2), y = Math.max(4, g.guiHeight() - 30);
+         ModernStyle.rounded(g, x, y, w, 22, 8, 0xDD141C2C);
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernIsland.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernIsland.java
+index 3ef66089..55966ff9 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernIsland.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernIsland.java
+@@ -144,17 +144,19 @@ public final class ModernIsland {
+         int barColor = ModernStyle.mix(0xFFC4ECFF, ModernStyle.mix(accent, 0xFFFFFFFF, 0.35F), tint);
+ 
+         int w = Math.round(width), h = Math.round(height);
++        float hudScale = ModernHudEditor.fittingScale("music_island", w, h, g.guiWidth(), g.guiHeight());
++        if (hudScale <= 0F) return;
++        float sw = w * hudScale, sh = h * hudScale;
+         int x = (g.guiWidth() - w) / 2, y = 8;
+-        var placement = ModernHudEditor.place(g, "music_island", "Music", x, y, w, h);
++        var placement = ModernHudEditor.place(g, "music_island", "Music", (g.guiWidth() - sw) / 2F, y, sw, sh);
+         lastBottom = ModernHudEditor.hasPosition("music_island") ? 0 : Math.round(placement.y() + placement.height());
+         int radius = Math.min(15, h / 2);
+         float scale = 0.93F + 0.07F * appear;
+         g.pose().pushMatrix();
+         try (var fade = ModernStyle.alphaScope(appear)) {
+-            g.pose().translate(placement.dx(), placement.dy());
+-            g.pose().translate(g.guiWidth() / 2F, y - (1F - appear) * 10F);
+-            g.pose().scale(scale, scale);
+-            g.pose().translate(-g.guiWidth() / 2F, -y);
++            g.pose().translate(placement.x() + sw / 2F, placement.y() - (1F - appear) * 10F * hudScale);
++            g.pose().scale(scale * hudScale, scale * hudScale);
++            g.pose().translate(-(x + w / 2F), -y);
+ 
+             // Light glass over the world: a bright rim, a translucent navy body, a sheen from the top-left.
+             ModernStyle.dropShadow(g, x, y + 3, w, h, radius, 0.8F);
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernPotionStatus.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernPotionStatus.java
+index 09555b0c..456b14e7 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernPotionStatus.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernPotionStatus.java
+@@ -202,11 +202,18 @@ final class ModernPotionStatus {
+         }
+         if (inline && folded > 0) width = Math.max(width, (int)Math.ceil(foldedInlineWidth(look, folded)));
+         int padding = inline ? INLINE_PAD : 0;
++        float rawX = g.guiWidth() - MARGIN - width - padding;
++        float boxW = width + padding * 2;
++        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, reach, g.guiWidth(), g.guiHeight());
++        if (hudScale <= 0F) return;
++        float scaledW = boxW * hudScale, scaledH = reach * hudScale;
+         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
+-                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, reach);
++                rawX + boxW - scaledW, top + reach - scaledH, scaledW, scaledH);
+         g.pose().pushMatrix();
+         try {
+-            g.pose().translate(bounds.dx(), bounds.dy());
++            g.pose().translate(bounds.x(), bounds.y());
++            g.pose().scale(hudScale, hudScale);
++            g.pose().translate(-rawX, -top);
+             if (inline) {
+                 for (Row row : leaving) drawInline(g, status, look, row, top);
+                 for (MobEffectInstance instance : listed) drawInline(g, status, look, ROWS.get(instance.getEffect()), top);
+@@ -236,11 +243,18 @@ final class ModernPotionStatus {
+         int height = inline ? look.rowH() : size.height();
+         int padding = inline ? INLINE_PAD : 0;
+         int top = floor - height;
++        float rawX = g.guiWidth() - MARGIN - width - padding;
++        float boxW = width + padding * 2;
++        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, height, g.guiWidth(), g.guiHeight());
++        if (hudScale <= 0F) return;
++        float scaledW = boxW * hudScale, scaledH = height * hudScale;
+         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
+-                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, height);
++                rawX + boxW - scaledW, top + height - scaledH, scaledW, scaledH);
+         g.pose().pushMatrix();
+         try {
+-            g.pose().translate(bounds.dx(), bounds.dy());
++            g.pose().translate(bounds.x(), bounds.y());
++            g.pose().scale(hudScale, hudScale);
++            g.pose().translate(-rawX, -top);
+             if (inline) drawInline(g, status, look, preview, top);
+             else drawCard(g, status, size, preview, top, width);
+         } finally {
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRadar.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRadar.java
+index 6f843053..d9d22dd0 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRadar.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRadar.java
+@@ -62,7 +62,7 @@ public final class ModernRadar {
+         boolean editing = ModernHudEditor.isEditing();
+         if (options == null || mc.player == null || mc.level == null || !ModernHud.isActive()
+                 || !ModernHudEditor.allowsHud() || mc.gui.hud.isHidden() && !editing) return;
+-        float scale = RadarScopeDrawing.scale(options.getScale(), WIDTH, HEIGHT, g);
++        float scale = RadarScopeDrawing.scale(options.getScale() * ModernHudEditor.scaleOf("radar"), WIDTH, HEIGHT, g);
+         if (scale <= 0F) return;
+         updateFeedback(mc, options);
+         var bounds = ModernHudEditor.place(g, "radar", "Radar", g.guiWidth() - WIDTH * scale - 10, g.guiHeight() - HEIGHT * scale - 34,
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRwr.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRwr.java
+index b3aaaa2b..20d3fc85 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRwr.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernRwr.java
+@@ -25,7 +25,7 @@ public final class ModernRwr {
+         boolean editing = ModernHudEditor.isEditing();
+         if (options == null || mc.player == null || mc.level == null || !ModernHud.isActive()
+                 || !ModernHudEditor.allowsHud() || mc.gui.hud.isHidden() && !editing) return;
+-        float scale = RadarScopeDrawing.scale(options.getScale(), WIDTH, HEIGHT, g);
++        float scale = RadarScopeDrawing.scale(options.getScale() * ModernHudEditor.scaleOf("rwr"), WIDTH, HEIGHT, g);
+         if (scale <= 0F) return;
+         var bounds = ModernHudEditor.place(g, "rwr", "RWR", 10, g.guiHeight() - HEIGHT * scale - 34,
+                 WIDTH * scale, HEIGHT * scale);
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernScoreboard.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernScoreboard.java
+index f23dc982..4fd2c793 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernScoreboard.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernScoreboard.java
+@@ -56,7 +56,7 @@ public final class ModernScoreboard {
+         }
+         int width = Math.clamp(contentWidth + PAD * 2, MIN_WIDTH, MAX_WIDTH);
+         int height = HEADER + entries.size() * ROW + FOOTER;
+-        float scale = Math.min(module.getScale(), Math.min(Math.max(0, g.guiWidth() - MARGIN * 2) / (float)width,
++        float scale = Math.min(module.getScale() * ModernHudEditor.scaleOf(LAYOUT_ID), Math.min(Math.max(0, g.guiWidth() - MARGIN * 2) / (float)width,
+                 Math.max(0, g.guiHeight() - MARGIN * 2) / (float)height));
+         if (scale <= 0F) return;
+         float scaledWidth = width * scale, scaledHeight = height * scale;
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTabGui.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTabGui.java
+index 75dee4fd..aacde16c 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTabGui.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTabGui.java
+@@ -75,11 +75,15 @@ final class ModernTabGui {
+ 
+         // Only the default placement reserves space in the automatic left-hand stack.
+         int x = MARGIN, y = ModernHud.leftStack();
+-        if (!ModernHudEditor.hasPosition(LAYOUT_ID)) ModernHud.stack(height(categories.size()));
+-        var bounds = ModernHudEditor.place(g, LAYOUT_ID, "TabGUI", x, y, width, height);
++        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, width, height, g.guiWidth(), g.guiHeight());
++        if (hudScale <= 0F) return;
++        if (!ModernHudEditor.hasPosition(LAYOUT_ID)) ModernHud.stack((int)Math.ceil(height(categories.size()) * hudScale));
++        var bounds = ModernHudEditor.place(g, LAYOUT_ID, "TabGUI", x, y, width * hudScale, height * hudScale);
+         g.pose().pushMatrix();
+         try {
+-            g.pose().translate(bounds.dx(), bounds.dy());
++            g.pose().translate(bounds.x(), bounds.y());
++            g.pose().scale(hudScale, hudScale);
++            g.pose().translate(-x, -y);
+             panel(g, tab, x, y, catW, height(categories.size()));
+             float targetY = PAD_Y + selected * ROW_H;
+             categoryY = snap || categoryY < 0F ? targetY : ModernStyle.smooth(categoryY, targetY, dt, 18F);
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTargetHud.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTargetHud.java
+index 4aabbdc5..f80e37ee 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTargetHud.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTargetHud.java
+@@ -51,13 +51,14 @@ public final class ModernTargetHud {
+         }
+         Snapshot data = snapshot(mc, target, options);
+         int height = panelHeight(options.showsArmor(), editing, data.gear.size());
+-        float scale = fittingScale(options.getScale(), g.guiWidth(), g.guiHeight(), height);
++        boolean following = options.getMode() == TargetHud.Mode.FOLLOW_TARGET;
++        String layoutId = following ? "target_hud_follow" : "target_hud";
++        float scale = fittingScale(options.getScale() * ModernHudEditor.scaleOf(layoutId), g.guiWidth(), g.guiHeight(), height);
+         if (scale <= 0F) return;
+         float width = WIDTH * scale;
+         float scaledHeight = height * scale;
+         float defaultX;
+         float defaultY;
+-        boolean following = options.getMode() == TargetHud.Mode.FOLLOW_TARGET;
+         if (following) {
+             NameTagProjection.Point anchor = editing
+                     ? new NameTagProjection.Point(g.guiWidth() * 0.5F + 20F, g.guiHeight() * 0.5F)
+diff --git a/src/test/java/com/mentalfrostbyte/jello/gui/modern/HudLayoutTest.java b/src/test/java/com/mentalfrostbyte/jello/gui/modern/HudLayoutTest.java
+index 758cfdc2..137c3ae0 100644
+--- a/src/test/java/com/mentalfrostbyte/jello/gui/modern/HudLayoutTest.java
++++ b/src/test/java/com/mentalfrostbyte/jello/gui/modern/HudLayoutTest.java
+@@ -276,4 +276,56 @@ class HudLayoutTest {
+         assertEquals(128.6F, beside.x(), 0.001F);
+         assertEquals(20F, beside.y());
+     }
++
++    @Test
++    void scaleAdjustsClampsPersistsAndResetsIndependentlyOfPosition() {
++        HudLayout layout = new HudLayout();
++        assertEquals(1F, layout.scaleOf("clock"));
++        assertFalse(layout.hasScale("clock"));
++        assertTrue(layout.adjustScale("clock", HudLayout.SCALE_STEP));
++        assertEquals(1.05F, layout.scaleOf("clock"), 0.0001F);
++        assertTrue(layout.hasScale("clock"));
++        assertFalse(layout.hasPosition("clock"));
++
++        assertTrue(layout.adjustScale("clock", 10F));
++        assertEquals(HudLayout.MAX_SCALE, layout.scaleOf("clock"), 0.0001F);
++        assertFalse(layout.adjustScale("clock", HudLayout.SCALE_STEP));
++
++        assertTrue(layout.setScale("clock", 0.1F));
++        assertEquals(HudLayout.MIN_SCALE, layout.scaleOf("clock"), 0.0001F);
++
++        JsonObject config = new JsonObject();
++        layout.write(config);
++        HudLayout loaded = new HudLayout();
++        loaded.read(JsonParser.parseString(config.toString()).getAsJsonObject());
++        assertEquals(HudLayout.MIN_SCALE, loaded.scaleOf("clock"), 0.0001F);
++        assertFalse(loaded.hasPosition("clock"));
++
++        assertTrue(loaded.reset("clock"));
++        assertEquals(1F, loaded.scaleOf("clock"));
++        assertFalse(loaded.hasScale("clock"));
++        assertFalse(loaded.reset("clock"));
++
++        layout.setScale("clock", 1F);
++        assertFalse(layout.hasScale("clock"));
++    }
++
++    @Test
++    void corruptPersistedScaleIsIgnoredAndFiniteScaleOutliersAreClamped() {
++        HudLayout layout = new HudLayout();
++        layout.read(JsonParser.parseString("""
++                {"modernHudLayout": {
++                  "clamped-high": {"scale": 9.0},
++                  "clamped-low": {"mode": "absolute", "x": 0.25, "y": 0.5, "scale": 0.1},
++                  "bad-scale": {"scale": "big"},
++                  "infinite-scale": {"scale": 1e999}
++                }}
++                """).getAsJsonObject());
++        assertEquals(HudLayout.MAX_SCALE, layout.scaleOf("clamped-high"), 0.0001F);
++        assertFalse(layout.hasPosition("clamped-high"));
++        assertEquals(HudLayout.MIN_SCALE, layout.scaleOf("clamped-low"), 0.0001F);
++        assertTrue(layout.hasPosition("clamped-low"));
++        assertEquals(1F, layout.scaleOf("bad-scale"));
++        assertEquals(1F, layout.scaleOf("infinite-scale"));
++    }
+ }

@@ -46,6 +46,9 @@ public final class ModernHud {
     private static long brandFrame;
     private static GuiGraphicsExtractor brandGraphics;
     private static HudLayout.Rect brandBounds;
+    // Animated hotbar selection slot for smooth sub-pixel sliding transitions.
+    private static float hotbarSlot = -1F;
+    private static long hotbarFrame;
 
     private ModernHud() {}
 
@@ -141,12 +144,15 @@ public final class ModernHud {
         float italicX = wordX + ModernTypography.width(ModernTypography.Face.DISPLAY, Client.NAME, 1F) + 4.2F;
         int w = Math.round(italicX + ModernTypography.width(ModernTypography.Face.DISPLAY_ITALIC, "Modern", BRAND_ITALIC) + 10F);
         int radius = BRAND_H / 2;
+        float scale = ModernHudEditor.fittingScale("watermark", w, BRAND_H, g.guiWidth(), g.guiHeight());
+        if (scale <= 0F) return;
         var placement = placeBrand(g, w);
 
         g.nextStratum();
         g.pose().pushMatrix();
         try {
             g.pose().translate(placement.x(), placement.y());
+            g.pose().scale(scale, scale);
             ModernStyle.dropShadow(g, 0, 2, w, BRAND_H, radius, 0.6F);
             ModernStyle.rounded(g, 0, 0, w, BRAND_H, radius, 0x80EDFAFF);
             ModernStyle.rounded(g, 1, 1, w - 2, BRAND_H - 2, radius - 1, 0x9C000000 | (ModernCoverColors.ICE_DEEP & 0xFFFFFF));
@@ -177,8 +183,10 @@ public final class ModernHud {
     private static HudLayout.Rect placeBrand(GuiGraphicsExtractor g, int width) {
         if (brandGraphics == g) return brandBounds;
         brandGraphics = g;
+        float scale = ModernHudEditor.fittingScale("watermark", width, BRAND_H, g.guiWidth(), g.guiHeight());
+        float scaledW = width * scale, scaledH = BRAND_H * scale;
         boolean aside = debugShowing() && !ModernHudEditor.isEditing();
-        float targetX = aside ? (g.guiWidth() - width) / 2F : BRAND_X;
+        float targetX = aside ? (g.guiWidth() - scaledW) / 2F : BRAND_X;
         float targetY = aside ? Math.max(BRAND_Y, ModernIsland.bottom() + 6) : BRAND_Y;
         long now = System.nanoTime();
         float dt = Math.min(0.05F, (now - brandFrame) / 1_000_000_000F);
@@ -186,7 +194,7 @@ public final class ModernHud {
         brandFrame = now;
         brandX = snap ? targetX : ModernStyle.smooth(brandX, targetX, dt, 12F);
         brandY = snap ? targetY : ModernStyle.smooth(brandY, targetY, dt, 12F);
-        brandBounds = ModernHudEditor.place(g, "watermark", "Watermark", Math.round(brandX), Math.round(brandY), width, BRAND_H);
+        brandBounds = ModernHudEditor.place(g, "watermark", "Watermark", Math.round(brandX), Math.round(brandY), scaledW, scaledH);
         return brandBounds;
     }
 
@@ -265,10 +273,28 @@ public final class ModernHud {
         int w = 182, h = 22;
         int x = screenCenter - w / 2, y = g.guiHeight() - h;
         ModernStyle.darkGlass(g, x, y, w, h, 7, 0x611C2738);
-        int cellW = w / 9;
-        int cellX = x + selectedSlot * cellW + 1, cellY = y + 1, cellW2 = cellW - 2, cellH2 = h - 2;
-        ModernStyle.halo(g, cellX, cellY, cellW2, cellH2, 4, ModernStyle.GLOW, 0.35F);
-        ModernStyle.rounded(g, cellX, cellY, cellW2, cellH2, 4, 0x5CB6E9FF);
+        long now = System.nanoTime();
+        float dt = Math.min(0.05F, (now - hotbarFrame) / 1_000_000_000F);
+        boolean snap = hotbarSlot < 0F || now - hotbarFrame > 250_000_000L;
+        hotbarFrame = now;
+        hotbarSlot = snap ? selectedSlot : ModernStyle.smooth(hotbarSlot, selectedSlot, dt, 22F);
+        if (Math.abs(hotbarSlot - selectedSlot) < 0.002F) hotbarSlot = selectedSlot;
+
+        int cellW = w / 9, cellW2 = cellW - 2, cellH2 = h - 2;
+        float travel = Math.min(1F, Math.abs(selectedSlot - hotbarSlot));
+        int stretch = Math.round(Math.min(3.5F, travel * 2.2F));
+        int pillW = cellW2 + stretch;
+        float pillX = Math.clamp(x + hotbarSlot * cellW + 1F - stretch * 0.5F, x + 1F, x + w - 1F - pillW);
+
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(pillX, y + 1F);
+            ModernStyle.halo(g, 0, 0, pillW, cellH2, 4, ModernStyle.GLOW, 0.35F + travel * 0.22F);
+            ModernStyle.rounded(g, 0, 0, pillW, cellH2, 4, 0x5CB6E9FF);
+            ModernStyle.rounded(g, 5, cellH2 - 2, Math.max(4, pillW - 10), 2, 1, 0xCC9FE2FF);
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
     /**
@@ -282,7 +308,7 @@ public final class ModernHud {
         int width = size * 3 + gap * 2;
         int mouseHeight = keyboard.showsCps() ? 27 : size;
         int height = size * 2 + gap + (keyboard.showsMouseButtons() ? gap + mouseHeight : 0);
-        float scale = Math.min(keyboard.getScale(), Math.min(Math.max(0, g.guiWidth() - 8) / (float)width,
+        float scale = Math.min(keyboard.getScale() * ModernHudEditor.scaleOf("keystrokes"), Math.min(Math.max(0, g.guiWidth() - 8) / (float)width,
                 Math.max(0, g.guiHeight() - 8) / (float)height));
         if (scale <= 0F) return;
         int y = leftStack();

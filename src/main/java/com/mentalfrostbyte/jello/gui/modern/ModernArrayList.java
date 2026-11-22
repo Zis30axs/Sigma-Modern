@@ -134,11 +134,17 @@ final class ModernArrayList {
         float accent = list.hasAccentBar() ? BAR_W + 1 : 0;
         float left = corner.isRight() ? g.guiWidth() - MARGIN - widest - PAD_X : MARGIN - PAD_X - accent;
         float y = corner.isBottom() ? g.guiHeight() - MARGIN - reach : top;
+        float boxW = (float)Math.ceil(widest) + PAD_X * 2 + accent + 1;
+        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, reach, g.guiWidth(), g.guiHeight());
+        if (hudScale <= 0F) return;
+        float scaledW = boxW * hudScale, scaledH = reach * hudScale;
+        float defaultX = corner.isRight() ? left + boxW - scaledW : left;
+        float defaultY = corner.isBottom() ? y + reach - scaledH : y;
         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Module list", "模块列表"),
-                left, y, (float)Math.ceil(widest) + PAD_X * 2 + accent + 1, reach);
+                defaultX, defaultY, scaledW, scaledH);
         // A manually placed list no longer reserves either automatic right-side stack.
         if (!custom && !ROWS.isEmpty() && corner == Corner.BOTTOM_RIGHT) bottomRightTop = Math.round(bounds.y());
-        if (!custom && !ROWS.isEmpty() && corner == Corner.TOP_RIGHT) topRightBottom = Math.round(bounds.y() + reach);
+        if (!custom && !ROWS.isEmpty() && corner == Corner.TOP_RIGHT) topRightBottom = Math.round(bounds.y() + scaledH);
         List<Line> lines = new ArrayList<>(leaving.size() + listed.size() + (preview != null ? 1 : 0));
         for (Map.Entry<Module, Row> entry : leaving) lines.add(line(g, list, entry.getKey(), entry.getValue(), scale, rowH, top));
         for (Module module : listed) lines.add(line(g, list, module, ROWS.get(module), scale, rowH, top));
@@ -148,7 +154,9 @@ final class ModernArrayList {
         }
         g.pose().pushMatrix();
         try {
-            g.pose().translate(bounds.dx(), bounds.dy());
+            g.pose().translate(bounds.x(), bounds.y());
+            g.pose().scale(hudScale, hudScale);
+            g.pose().translate(-left, -y);
             // Finish every halo before any glass or text: neighbouring rows must not glow over each other's ink.
             if (list.hasBloom() && list.getBloomStrength() > 0F) {
                 for (Line line : lines) drawGlow(g, list, line, rowH);

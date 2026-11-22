@@ -43,7 +43,7 @@ public final class ModernClock {
         Display display = TIME.update(now, ZoneId.systemDefault(), options.isTwentyFourHour(),
                 options.showsSeconds(), options.showsDate());
         Size size = size(options.getStyle(), options.showsDate());
-        float scale = fittingScale(options.getScale(), size, g.guiWidth(), g.guiHeight());
+        float scale = fittingScale(options.getScale() * ModernHudEditor.scaleOf("clock"), size, g.guiWidth(), g.guiHeight());
         if (scale <= 0F) return;
         float width = size.width * scale, height = size.height * scale;
         float chatHeight = ChatComponent.getHeight(mc.options.chatHeightUnfocused().get())

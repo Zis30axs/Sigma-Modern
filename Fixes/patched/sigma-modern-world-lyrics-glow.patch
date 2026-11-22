@@ -1,0 +1,545 @@
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernFontRenderer.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernFontRenderer.java
+index f26f9b0d..ee63831b 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernFontRenderer.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernFontRenderer.java
+@@ -133,6 +133,12 @@ final class ModernFontRenderer implements AutoCloseable {
+         return text.isEmpty() ? 0F : layout(text).getWidth();
+     }
+ 
++    /** Paints a shaped line directly onto an offscreen Skia canvas, reusing this face's layout cache. */
++    void paint(io.github.humbleui.skija.Canvas canvas, String text, float x, float y, Paint paint) {
++        if (text.isEmpty()) return;
++        canvas.drawTextLine(layout(text), x, y + this.baseline, paint);
++    }
++
+     /**
+      * True when the bundled face itself has {@code codepoint}; false when a system font stands in. A run that
+      * mixes the two can shape the characters at the seam (a space after Chinese, say) in the other font than
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTypography.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTypography.java
+index ed8927fe..dc1464e8 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTypography.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernTypography.java
+@@ -73,6 +73,20 @@ public final class ModernTypography {
+         return renderer(face).width(text) * scale;
+     }
+ 
++    static float measure(Face face, String text, float scale) {
++        return renderer(face).measure(text) * scale;
++    }
++
++    static void paint(Face face, io.github.humbleui.skija.Canvas canvas, String text, float x, float y,
++                      float scale, io.github.humbleui.skija.Paint paint) {
++        if (text.isEmpty()) return;
++        canvas.save();
++        canvas.translate(x, y);
++        if (scale != 1F) canvas.scale(scale, scale);
++        renderer(face).paint(canvas, text, 0F, 0F, paint);
++        canvas.restore();
++    }
++
+     public static String fit(String text, int width) {
+         return TEXT.fit(text, width);
+     }
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/WorldLyrics.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/WorldLyrics.java
+index dbc0f93c..3f53a84d 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/WorldLyrics.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/WorldLyrics.java
+@@ -5,57 +5,86 @@ import com.mentalfrostbyte.jello.music.Track;
+ import com.mentalfrostbyte.jello.music.lyrics.Lyrics;
+ import com.mentalfrostbyte.jello.music.lyrics.LyricsService;
+ import com.mojang.blaze3d.vertex.PoseStack;
+-import java.util.ArrayList;
++import io.github.humbleui.skija.Canvas;
++import io.github.humbleui.skija.FilterBlurMode;
++import io.github.humbleui.skija.MaskFilter;
++import io.github.humbleui.skija.Paint;
++import io.github.humbleui.skija.PaintMode;
++import io.github.humbleui.skija.PaintStrokeCap;
++import io.github.humbleui.skija.Shader;
++import io.github.humbleui.types.Rect;
+ import java.util.List;
+ import java.util.Objects;
+ import net.minecraft.client.Minecraft;
+-import net.minecraft.client.gui.Font;
+ import net.minecraft.client.multiplayer.ClientLevel;
+ import net.minecraft.client.renderer.SubmitNodeCollector;
++import net.minecraft.client.renderer.rendertype.RenderTypes;
+ import net.minecraft.client.renderer.state.level.CameraRenderState;
+-import net.minecraft.network.chat.Component;
+-import net.minecraft.util.FormattedCharSequence;
++import net.minecraft.client.renderer.texture.OverlayTexture;
++import net.minecraft.resources.Identifier;
+ import net.minecraft.util.LightCoordsUtil;
+ import net.minecraft.world.level.ClipContext;
+ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+ import org.jspecify.annotations.Nullable;
+ 
+-/** Each sung line gets a place in the local world. Only immutable text and poses cross into submission. */
++/**
++ * Each sung line floats in the local world as a high-DPI Skia billboard: feathered ambient shadow,
++ * album-cover-tinted bloom, smooth linear vocal sweep, minimalist progress light-thread, and depth exit.
++ */
+ public final class WorldLyrics {
+-    private static final int FADE_IN_MS = 230, FADE_OUT_MS = 360;
+-    private static final float SCALE = 0.014F;
++    private static final int FADE_IN_MS = 280, FADE_OUT_MS = 440;
++    private static final float SCALE = 0.0115F;
++    private static final float DENSITY = 3.0F;
++    private static final float MAIN_SCALE = 1.15F, EXTRA_SCALE = 0.80F;
++    private static final float MAIN_LINE_H = 15.5F, EXTRA_LINE_H = 11.5F;
++    private static final float MAX_MAIN_W = 240F, MAX_EXTRA_W = 230F;
++    private static final float PAD_X = 34F, PAD_Y = 22F;
++    private static final float SWEEP_FEATHER = 14F;
++    private static final int SWEEP_BUCKETS = 48;
++
++    private static final Identifier SLOT_A = Identifier.withDefaultNamespace("sigma/world_lyrics/slot_a");
++    private static final Identifier SLOT_B = Identifier.withDefaultNamespace("sigma/world_lyrics/slot_b");
++
++    private Identifier activeTexture = SLOT_A, retiringTexture = SLOT_B;
++    private boolean activeUploaded, retiringUploaded;
+     private @Nullable ClientLevel level;
+     private @Nullable Track track;
+-    private long lastPosition, entered, retired;
++    private long lastPosition, entered, retired, lastFrameNanos;
+     private int index = -1;
++    private float time, bass;
+     private Vec3 origin = Vec3.ZERO, anchor = Vec3.ZERO;
+     private @Nullable Caption current, previous;
+     private Lyrics.@Nullable Line cachedLine;
+     private @Nullable String cachedExtra;
+-    private int cachedLit;
+-    private List<Row> rows = List.of();
++    private int cachedSweepBucket = -1, cachedAccent = -1, cachedBassBucket = -1;
++    private float cachedW, cachedH;
+ 
+-    private record Row(FormattedCharSequence text, float width, float y, float scale, int color) {}
+-    private record Caption(Vec3 anchor, List<Row> rows, float opacity, float rise) {
++    private record Caption(Vec3 anchor, Identifier texture, float width, float height,
++                           float opacity, float rise, float scale, float recede) {
+         void submit(PoseStack pose, SubmitNodeCollector output, CameraRenderState camera) {
+-            double distance = camera.pos.distanceTo(anchor);
++            Vec3 pos = recede > 0F ? recedeFrom(anchor, camera.pos, recede) : anchor;
++            double distance = camera.pos.distanceTo(pos);
+             float proximity = (float)Math.clamp((distance - 0.30) / 0.65, 0.0, 1.0);
+             int alpha = Math.round(255 * opacity * proximity);
+-            if (alpha < 5) return;
++            if (alpha < 4 || width <= 0F || height <= 0F) return;
+             pose.pushPose();
+-            pose.translate(anchor.x - camera.pos.x, anchor.y - camera.pos.y + rise, anchor.z - camera.pos.z);
++            pose.translate(pos.x - camera.pos.x, pos.y - camera.pos.y + rise, pos.z - camera.pos.z);
+             pose.mulPose(camera.orientation);
+-            float size = SCALE * (float)Math.clamp(distance / 2.7, 0.45, 1.0);
++            float size = SCALE * scale * (float)Math.clamp(distance / 2.7, 0.45, 1.0);
+             pose.scale(size, -size, size);
+-            for (Row row : rows) {
+-                pose.pushPose();
+-                pose.translate(0, row.y, 0);
+-                pose.scale(row.scale, row.scale, row.scale);
+-                output.submitText(pose, -row.width / 2, 0, row.text, true, Font.DisplayMode.NORMAL,
+-                        LightCoordsUtil.FULL_BRIGHT, alpha << 24 | row.color, 0, 0);
+-                pose.popPose();
+-            }
++            float hw = width * 0.5F, hh = height * 0.5F;
++            int tint = (alpha << 24) | 0xFFFFFF;
++            output.submitCustomGeometry(pose, RenderTypes.entityTranslucentEmissive(texture, false), (entry, buffer) -> {
++                buffer.addVertex(entry, -hw, -hh, 0.0F).setColor(tint).setUv(0.0F, 0.0F)
++                        .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT).setNormal(entry, 0.0F, 0.0F, 1.0F);
++                buffer.addVertex(entry, -hw, hh, 0.0F).setColor(tint).setUv(0.0F, 1.0F)
++                        .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT).setNormal(entry, 0.0F, 0.0F, 1.0F);
++                buffer.addVertex(entry, hw, hh, 0.0F).setColor(tint).setUv(1.0F, 1.0F)
++                        .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT).setNormal(entry, 0.0F, 0.0F, 1.0F);
++                buffer.addVertex(entry, hw, -hh, 0.0F).setColor(tint).setUv(1.0F, 0.0F)
++                        .setOverlay(OverlayTexture.NO_OVERLAY).setLight(LightCoordsUtil.FULL_BRIGHT).setNormal(entry, 0.0F, 0.0F, 1.0F);
++            });
+             pose.popPose();
+         }
+     }
+@@ -76,7 +105,35 @@ public final class WorldLyrics {
+         index = -1;
+         cachedLine = null;
+         cachedExtra = null;
+-        rows = List.of();
++        cachedSweepBucket = cachedAccent = cachedBassBucket = -1;
++        cachedW = cachedH = 0F;
++        lastFrameNanos = 0L;
++        bass = 0F;
++        releaseActive();
++        releaseRetiring();
++    }
++
++    private void releaseActive() {
++        if (activeUploaded) {
++            activeUploaded = false;
++            ModernSkiaRaster.release(activeTexture);
++        }
++    }
++
++    private void releaseRetiring() {
++        if (retiringUploaded) {
++            retiringUploaded = false;
++            ModernSkiaRaster.release(retiringTexture);
++        }
++    }
++
++    private void swapSlots() {
++        Identifier tmpId = activeTexture;
++        activeTexture = retiringTexture;
++        retiringTexture = tmpId;
++        boolean tmpUp = activeUploaded;
++        activeUploaded = retiringUploaded;
++        retiringUploaded = tmpUp;
+     }
+ 
+     public @Nullable Frame extract(Minecraft mc, CameraRenderState camera, float partialTick) {
+@@ -91,6 +148,11 @@ public final class WorldLyrics {
+             if (level != null) clear();
+             return null;
+         }
++        long nowNanos = System.nanoTime();
++        float dt = lastFrameNanos == 0L ? 0.016F : Math.min(0.05F, (nowNanos - lastFrameNanos) / 1_000_000_000F);
++        lastFrameNanos = nowNanos;
++        time += dt;
++
+         long pos = player.positionMs();
+         Vec3 eye = mc.player.getEyePosition(partialTick);
+         boolean discontinuity = level != mc.level || track != player.current() || pos < lastPosition
+@@ -102,47 +164,280 @@ public final class WorldLyrics {
+             origin = eye;
+         }
+         lastPosition = pos;
++
++        ModernCoverColors.update(track, client.getMusicEffects().islandColor());
++        float[] levels = ModernMusicView.levels(player.spectrum(), 5);
++        float targetBass = levels == null ? 0F : Math.clamp((levels[0] + levels[1]) * 0.5F, 0F, 1F);
++        bass = ModernStyle.smooth(bass, targetBass, dt, 10F);
++
+         var now = ModernLyricSweep.now(player, pos);
+         int next = now == null ? -1 : now.index();
+         if (next != index) {
+-            if (current != null) {
++            if (current != null && activeUploaded) {
+                 previous = current;
+                 retired = pos;
++                swapSlots();
++            } else {
++                previous = null;
++                releaseRetiring();
+             }
+             current = null;
+             index = next;
+             entered = pos;
++            cachedLine = null;
++            cachedSweepBucket = -1;
+             if (now != null) {
+                 origin = eye;
+                 anchor = place(mc, eye, camera.yRot, index);
+             }
+         }
++
+         if (now != null) {
+             var line = now.line();
+             String text = line.text();
+             String extra = LyricsService.extra(line, client.getMusicLibrary().lyrics().language());
+-            int lit = boundary(text, now.progress());
+-            if (line != cachedLine || lit != cachedLit || !Objects.equals(extra, cachedExtra)) {
+-                rows = layout(mc.font, text, lit, extra);
++            float progress = Math.clamp(now.progress(), 0F, 1F);
++            int sweepBucket = Math.round(progress * SWEEP_BUCKETS);
++            int accent = ModernCoverColors.accent();
++            int deep = ModernCoverColors.deep();
++            int quantizedAccent = quantizeColor(accent);
++            int bassBucket = Math.min(3, Math.round(bass * 3F));
++
++            if (!activeUploaded || line != cachedLine || !Objects.equals(extra, cachedExtra)
++                    || sweepBucket != cachedSweepBucket || quantizedAccent != cachedAccent
++                    || bassBucket != cachedBassBucket) {
++                Rasterized card = rasterize(text, extra, sweepBucket / (float)SWEEP_BUCKETS, accent, deep, bassBucket / 3F);
++                ModernSkiaRaster.uploadColor(activeTexture, card.image);
++                activeUploaded = true;
+                 cachedLine = line;
+-                cachedLit = lit;
+                 cachedExtra = extra;
++                cachedSweepBucket = sweepBucket;
++                cachedAccent = quantizedAccent;
++                cachedBassBucket = bassBucket;
++                cachedW = card.logicalWidth;
++                cachedH = card.logicalHeight;
+             }
+             float shown = ease(pos - entered, FADE_IN_MS);
+-            current = new Caption(anchor, rows, shown, -0.12F * (1 - shown));
++            float bob = (float)Math.sin(time * 1.45) * 0.032F;
++            float scale = (0.93F + 0.07F * shown) * (1F + bass * 0.022F);
++            current = new Caption(anchor, activeTexture, cachedW, cachedH, shown, -0.14F * (1F - shown) + bob, scale, 0F);
+         }
++
+         Caption ghost = null;
+-        if (previous != null) {
++        if (previous != null && retiringUploaded) {
+             float out = Math.clamp((pos - retired) / (float)FADE_OUT_MS, 0F, 1F);
+-            if (out >= 1F) previous = null;
+-            else ghost = new Caption(previous.anchor, previous.rows, previous.opacity * (1 - out), previous.rise + 0.26F * out);
++            if (out >= 1F) {
++                previous = null;
++                releaseRetiring();
++            } else {
++                float fade = 1F - out;
++                ghost = new Caption(previous.anchor, previous.texture, previous.width, previous.height,
++                        previous.opacity * fade * fade, previous.rise + 0.24F * out,
++                        previous.scale * (1F - 0.10F * out), 0.34F * out);
++            }
+         }
+         return current == null && ghost == null ? null : new Frame(ghost, current);
+     }
+ 
++    private record Rasterized(ModernSkiaRaster.Image image, float logicalWidth, float logicalHeight) {}
++
++    private static Rasterized rasterize(String text, @Nullable String extra, float progress, int accent, int deep, float pulse) {
++        List<String> mainLines = ModernTypography.wrap(ModernTypography.Face.TEXT, text, MAIN_SCALE, MAX_MAIN_W, 2);
++        List<String> extraLines = extra == null || extra.isBlank()
++                ? List.of()
++                : ModernTypography.wrap(ModernTypography.Face.TEXT, extra, EXTRA_SCALE, MAX_EXTRA_W, 2);
++
++        float[] mainWidths = new float[mainLines.size()];
++        float totalMainWidth = 0F, contentW = 64F;
++        for (int i = 0; i < mainLines.size(); i++) {
++            mainWidths[i] = ModernTypography.measure(ModernTypography.Face.TEXT, mainLines.get(i), MAIN_SCALE);
++            totalMainWidth += mainWidths[i];
++            contentW = Math.max(contentW, mainWidths[i]);
++        }
++        float[] extraWidths = new float[extraLines.size()];
++        for (int i = 0; i < extraLines.size(); i++) {
++            extraWidths[i] = ModernTypography.measure(ModernTypography.Face.TEXT, extraLines.get(i), EXTRA_SCALE);
++            contentW = Math.max(contentW, extraWidths[i]);
++        }
++
++        float mainBlockH = mainLines.size() * MAIN_LINE_H;
++        float extraGap = extraLines.isEmpty() ? 0F : 3.5F;
++        float extraBlockH = extraLines.size() * EXTRA_LINE_H;
++        float threadSpace = 8.5F;
++        float contentH = mainBlockH + extraGap + extraBlockH + threadSpace;
++
++        float logicalW = contentW + PAD_X * 2F;
++        float logicalH = contentH + PAD_Y * 2F;
++        int pxW = Math.clamp((int)Math.ceil(logicalW * DENSITY), 16, 1536);
++        int pxH = Math.clamp((int)Math.ceil(logicalH * DENSITY), 16, 768);
++        float sx = pxW / logicalW, sy = pxH / logicalH;
++
++        int litColor = ModernStyle.mix(0xFFFFFFFF, accent, 0.16F);
++        int peakColor = ModernStyle.mix(accent, 0xFFFFFFFF, 0.50F);
++        int dimColor = (0x8C << 24) | (ModernStyle.mix(0xFFD6E4F0, accent, 0.18F) & 0xFFFFFF);
++        int extraColor = (0xDF << 24) | (ModernStyle.mix(0xFFE0ECF6, accent, 0.12F) & 0xFFFFFF);
++        int scrimRgb = ModernStyle.mix(0xFF060C16, deep, 0.38F) & 0xFFFFFF;
++        int accentRgb = accent & 0xFFFFFF;
++        float totalWidth = Math.max(1F, totalMainWidth);
++
++        // Locate the active singing hotspot across wrapped main lines so the ambient glow tracks the vocal sweep.
++        float targetAdvance = totalWidth * progress;
++        float haloX = logicalW * 0.5F, haloY = PAD_Y + MAIN_LINE_H * 0.5F;
++        float walked = 0F;
++        for (int i = 0; i < mainLines.size(); i++) {
++            float lw = mainWidths[i];
++            float lineX = (logicalW - lw) * 0.5F;
++            if (targetAdvance <= walked + lw || i == mainLines.size() - 1) {
++                haloX = lineX + Math.clamp(targetAdvance - walked, 0F, lw);
++                haloY = PAD_Y + i * MAIN_LINE_H + MAIN_LINE_H * 0.45F;
++                break;
++            }
++            walked += lw;
++        }
++
++        final float glowX = haloX, glowY = haloY;
++        ModernSkiaRaster.Image image = ModernSkiaRaster.render(pxW, pxH, canvas -> {
++            canvas.scale(sx, sy);
++            drawScrim(canvas, logicalW * 0.5F, logicalH * 0.5F, contentW * 0.56F + 26F, contentH * 0.58F + 18F, scrimRgb);
++            drawVocalHalo(canvas, glowX, glowY, 44F + pulse * 16F, 22F + pulse * 7F, accentRgb, pulse);
++
++            // Main lyric lines: soft drop shadow, cover-tinted vocal bloom on the sung portion, and smooth linear sweep.
++            float consumed = 0F;
++            for (int i = 0; i < mainLines.size(); i++) {
++                String row = mainLines.get(i);
++                float lw = mainWidths[i];
++                float lx = (logicalW - lw) * 0.5F;
++                float ly = PAD_Y + i * MAIN_LINE_H;
++                float lineProgress = lineProgress(progress, consumed, lw, totalWidth);
++                consumed += lw;
++                float sweepX = lx + lw * lineProgress;
++
++                try (MaskFilter shadowBlur = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 1.8F);
++                     Paint shadow = new Paint().setAntiAlias(true).setColor(0x88040A14).setMaskFilter(shadowBlur)) {
++                    ModernTypography.paint(ModernTypography.Face.TEXT, canvas, row, lx, ly + 0.9F, MAIN_SCALE, shadow);
++                }
++
++                if (lineProgress > 0.005F) {
++                    int bloomAlpha = Math.round(0x64 + pulse * 0x36);
++                    int bloomColor = (bloomAlpha << 24) | (ModernStyle.mix(accent, 0xFFFFFFFF, 0.42F) & 0xFFFFFF);
++                    canvas.save();
++                    canvas.clipRect(Rect.makeXYWH(0F, 0F, sweepX + 5F, logicalH));
++                    try (MaskFilter bloomBlur = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 4.2F);
++                         Paint bloom = new Paint().setAntiAlias(true).setColor(bloomColor).setMaskFilter(bloomBlur)) {
++                        ModernTypography.paint(ModernTypography.Face.TEXT, canvas, row, lx, ly, MAIN_SCALE, bloom);
++                    }
++                    canvas.restore();
++                }
++
++                try (Shader sweep = Shader.makeLinearGradient(sweepX - SWEEP_FEATHER, 0F, sweepX + SWEEP_FEATHER, 0F,
++                             new int[]{litColor, peakColor, dimColor});
++                     Paint ink = new Paint().setAntiAlias(true).setShader(sweep)) {
++                    ModernTypography.paint(ModernTypography.Face.TEXT, canvas, row, lx, ly, MAIN_SCALE, ink);
++                }
++            }
++
++            // Translation / romanization lines: crisp and legible over foliage and bright skies.
++            float extraTop = PAD_Y + mainBlockH + extraGap;
++            for (int i = 0; i < extraLines.size(); i++) {
++                String row = extraLines.get(i);
++                float lx = (logicalW - extraWidths[i]) * 0.5F;
++                float ly = extraTop + i * EXTRA_LINE_H;
++                try (MaskFilter shadowBlur = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 1.4F);
++                     Paint shadow = new Paint().setAntiAlias(true).setColor(0x7E040A14).setMaskFilter(shadowBlur);
++                     Paint ink = new Paint().setAntiAlias(true).setColor(extraColor)) {
++                    ModernTypography.paint(ModernTypography.Face.TEXT, canvas, row, lx, ly + 0.7F, EXTRA_SCALE, shadow);
++                    ModernTypography.paint(ModernTypography.Face.TEXT, canvas, row, lx, ly, EXTRA_SCALE, ink);
++                }
++            }
++
++            // Minimalist tapered accent light-thread under the lyric.
++            float threadW = Math.min(contentW * 0.68F, 132F);
++            float threadX0 = (logicalW - threadW) * 0.5F;
++            float threadY = PAD_Y + contentH - 3.5F;
++            drawLightThread(canvas, threadX0, threadX0 + threadW, threadY, progress, accentRgb, peakColor, pulse);
++        });
++        return new Rasterized(image, logicalW, logicalH);
++    }
++
++    private static void drawScrim(Canvas canvas, float cx, float cy, float rx, float ry, int rgb) {
++        canvas.save();
++        canvas.translate(cx, cy);
++        canvas.scale(rx, ry);
++        try (Shader shader = Shader.makeRadialGradient(0F, 0F, 1F,
++                     new int[]{0x64000000 | rgb, 0x3C000000 | rgb, 0x12000000 | rgb, rgb});
++             Paint paint = new Paint().setAntiAlias(true).setShader(shader)) {
++            canvas.drawCircle(0F, 0F, 1F, paint);
++        }
++        canvas.restore();
++    }
++
++    private static void drawVocalHalo(Canvas canvas, float cx, float cy, float rx, float ry, int accentRgb, float pulse) {
++        int coreAlpha = Math.round(0x28 + pulse * 0x24);
++        int midAlpha = Math.round(0x12 + pulse * 0x10);
++        canvas.save();
++        canvas.translate(cx, cy);
++        canvas.scale(rx, ry);
++        try (Shader shader = Shader.makeRadialGradient(0F, 0F, 1F,
++                     new int[]{(coreAlpha << 24) | accentRgb, (midAlpha << 24) | accentRgb, accentRgb});
++             Paint paint = new Paint().setAntiAlias(true).setShader(shader)) {
++            canvas.drawCircle(0F, 0F, 1F, paint);
++        }
++        canvas.restore();
++    }
++
++    private static void drawLightThread(Canvas canvas, float x0, float x1, float y, float progress,
++                                        int accentRgb, int peakColor, float pulse) {
++        try (Shader base = Shader.makeLinearGradient(x0, y, x1, y,
++                     new int[]{0x00FFFFFF, 0x34DCEEFF, 0x00FFFFFF});
++             Paint track = new Paint().setAntiAlias(true).setMode(PaintMode.STROKE)
++                     .setStrokeCap(PaintStrokeCap.ROUND).setStrokeWidth(1.0F).setShader(base)) {
++            canvas.drawLine(x0, y, x1, y, track);
++        }
++        float tip = x0 + (x1 - x0) * progress;
++        if (tip - x0 > 1F) {
++            int haloAlpha = Math.round(0x70 + pulse * 0x40);
++            try (Shader active = Shader.makeLinearGradient(x0, y, tip, y,
++                         new int[]{accentRgb, (haloAlpha << 24) | accentRgb, peakColor});
++                 MaskFilter blur = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 2.4F);
++                 Paint glow = new Paint().setAntiAlias(true).setMode(PaintMode.STROKE)
++                         .setStrokeCap(PaintStrokeCap.ROUND).setStrokeWidth(2.4F + pulse * 0.8F)
++                         .setMaskFilter(blur).setShader(active);
++                 Paint core = new Paint().setAntiAlias(true).setMode(PaintMode.STROKE)
++                         .setStrokeCap(PaintStrokeCap.ROUND).setStrokeWidth(1.15F).setShader(active)) {
++                canvas.drawLine(x0, y, tip, y, glow);
++                canvas.drawLine(x0, y, tip, y, core);
++            }
++            try (MaskFilter sparkBlur = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 2.2F);
++                 Paint sparkGlow = new Paint().setAntiAlias(true).setColor((0xB8 << 24) | accentRgb).setMaskFilter(sparkBlur);
++                 Paint sparkCore = new Paint().setAntiAlias(true).setColor(0xFFFFFFFF)) {
++                canvas.drawCircle(tip, y, 1.8F + pulse * 0.9F, sparkGlow);
++                canvas.drawCircle(tip, y, 0.95F, sparkCore);
++            }
++        }
++    }
++
++    static float lineProgress(float overallProgress, float priorWidth, float lineWidth, float totalWidth) {
++        if (lineWidth <= 0F || totalWidth <= 0F) return overallProgress >= 1F ? 1F : 0F;
++        return Math.clamp((overallProgress * totalWidth - priorWidth) / lineWidth, 0F, 1F);
++    }
++
++    static Vec3 recedeFrom(Vec3 anchor, Vec3 cameraPos, float amount) {
++        Vec3 away = anchor.subtract(cameraPos);
++        double len = away.length();
++        return len < 1e-5 ? anchor : anchor.add(away.scale(amount / len));
++    }
++
++    private static int quantizeColor(int argb) {
++        int r = (argb >> 16) & 0xF8;
++        int g = (argb >> 8) & 0xF8;
++        int b = argb & 0xF8;
++        return (r << 16) | (g << 8) | b;
++    }
++
+     static float ease(long elapsed, int duration) {
+         float t = Math.clamp(elapsed / (float)duration, 0F, 1F);
+-        return t * (2 - t);
++        float inv = 1F - t;
++        return 1F - inv * inv * inv;
+     }
+ 
+     // The lyric service measures progress in UTF-16 units. Never split a supplementary glyph in half.
+@@ -171,23 +466,4 @@ public final class WorldLyrics {
+         Vec3 delta = surface.subtract(eye);
+         return eye.add(delta.normalize().scale(Math.max(0, delta.length() - 0.18)));
+     }
+-
+-    private static List<Row> layout(Font font, String text, int lit, @Nullable String extra) {
+-        var main = Component.empty().append(Component.literal(text.substring(0, lit)).withColor(0xE2FAFF))
+-                .append(Component.literal(text.substring(lit)).withColor(0x8395A7));
+-        List<Row> result = new ArrayList<>();
+-        float y = 0F;
+-        for (var row : font.split(main, 158)) {
+-            result.add(new Row(row, font.width(row), y, 1F, 0xFFFFFF));
+-            y += 11F;
+-        }
+-        if (extra != null && !extra.isBlank()) {
+-            y += 2F;
+-            for (var row : font.split(Component.literal(extra), 206)) {
+-                result.add(new Row(row, font.width(row), y, 0.76F, 0xABC5D6));
+-                y += 8.5F;
+-            }
+-        }
+-        return List.copyOf(result);
+-    }
+ }
+diff --git a/src/test/java/com/mentalfrostbyte/jello/gui/modern/WorldLyricsTest.java b/src/test/java/com/mentalfrostbyte/jello/gui/modern/WorldLyricsTest.java
+index fb81ede2..0360b242 100644
+--- a/src/test/java/com/mentalfrostbyte/jello/gui/modern/WorldLyricsTest.java
++++ b/src/test/java/com/mentalfrostbyte/jello/gui/modern/WorldLyricsTest.java
+@@ -23,4 +23,19 @@ class WorldLyricsTest {
+         assertEquals(3, WorldLyrics.boundary(text, .75F));
+         assertEquals(4, WorldLyrics.boundary(text, 1F));
+     }
++
++    @Test void wrappedLineProgressSweepsSequentiallyAcrossLines() {
++        assertEquals(0.5F, WorldLyrics.lineProgress(0.25F, 0F, 100F, 200F), 1e-5F);
++        assertEquals(0F, WorldLyrics.lineProgress(0.25F, 100F, 100F, 200F), 1e-5F);
++        assertEquals(1F, WorldLyrics.lineProgress(0.75F, 0F, 100F, 200F), 1e-5F);
++        assertEquals(0.5F, WorldLyrics.lineProgress(0.75F, 100F, 100F, 200F), 1e-5F);
++    }
++
++    @Test void retiringCaptionRecedesAwayFromCamera() {
++        var cam = new Vec3(0, 64, 0);
++        var anchor = new Vec3(0, 64, 3);
++        Vec3 moved = WorldLyrics.recedeFrom(anchor, cam, 0.34F);
++        assertEquals(3.34, moved.z, 1e-5);
++        assertEquals(anchor, WorldLyrics.recedeFrom(cam, cam, 0.34F));
++    }
+ }

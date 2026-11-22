@@ -44,6 +44,7 @@ import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
 import com.mentalfrostbyte.jello.module.impl.movement.Speed;
+import com.mentalfrostbyte.jello.module.impl.movement.Sprint;
 import com.mentalfrostbyte.jello.module.impl.movement.NoJumpDelay;
 import com.mentalfrostbyte.jello.module.impl.movement.Stuck;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
@@ -153,6 +154,7 @@ public final class ModuleManager {
         this.register(new Snake());
         this.register(new MovementCorrector());
         this.register(new Speed());
+        this.register(new Sprint());
         this.register(new Stuck());
         this.register(new Spotlight());
         this.register(new SuperKnockback());

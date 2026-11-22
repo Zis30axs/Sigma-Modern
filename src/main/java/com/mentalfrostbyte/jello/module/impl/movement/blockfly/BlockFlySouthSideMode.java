@@ -110,6 +110,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
     private int onGroundTicks, offGroundTicks, rotateCount, placeCount, ups, eagleTicks, jumpDelay;
     private int startHotbarCount = 1;
     private double posY, pitchDifference, lastPlacePitchDifference;
+    private float lastPlacedDeltaYaw = Float.NaN;
     private boolean canPlace, waitingForEagle, cancelMove;
 
     // Game-thread only. Keep connection/control packets flowing; only ordered gameplay is held.
@@ -196,6 +197,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         this.slot = null;
         this.onGroundTicks = this.offGroundTicks = this.rotateCount = this.placeCount = this.ups = this.eagleTicks = this.jumpDelay = 0;
         this.pitchDifference = this.lastPlacePitchDifference = 0;
+        this.lastPlacedDeltaYaw = Float.NaN;
         this.canPlace = true;
         this.waitingForEagle = this.cancelMove = false;
         release(false, true);
@@ -260,7 +262,9 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         }
         if (mc.player.onGround() || mc.options.keyJump.isDown()) this.posY = Mth.floor(mc.player.getY()) - 1;
         Vec3 eyes = mc.player.getEyePosition();
-        Target found = findTarget(BlockPos.containing(mc.player.getX(), this.posY, mc.player.getZ()), eyes);
+        Target found = mc.level.getBlockState(mc.player.blockPosition()).canBeReplaced()
+                ? findTarget(BlockPos.containing(mc.player.getX(), this.posY, mc.player.getZ()), eyes)
+                : null;
         if (found != null) this.target = found;
         this.lastFound = found;
         this.canPlace = switch (this.mode.get()) {
@@ -305,11 +309,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
             this.rotateCount = 0;
         }
         Rotation rotation = chooseRotation(eyes, force);
-        if (this.duplicateRotPlace.get()) {
-            rotation = new Rotation(rotation.yaw() - random(0.0001F, 0.0003F),
-                    Mth.clamp(rotation.pitch() - random(0.001F, 0.003F), -90, 90));
-        }
-        if (this.fixRotation.get()) rotation = Rotations.quantize(this.sentRotation, rotation, Rotations.mouseStep(mc.options.sensitivity().get()));
+        rotation = finalizeRotation(eyes, this.target, rotation);
         if (BlockFlyPlacement.valid(mc.player, eyes, this.target, rotation)) {
             this.cancelMove = false;
             this.rotateCount = 0;
@@ -386,8 +386,33 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
 
     @Override
     public void motion(final EventMotion event) {
-        if (!event.isPost() || event.isCancelled() || !sameSession() || this.target == null || this.slot == null || !this.canPlace
-                || mc.gui.screen() != null) return;
+        if (event.isCancelled() || !sameSession() || this.slot == null || mc.gui.screen() != null) return;
+        if (event.isPre()) {
+            if (!this.canPlace) return;
+            Vec3 postEyes = new Vec3(event.getX(), event.getY() + mc.player.getEyeHeight(), event.getZ());
+            BlockPos base = BlockPos.containing(event.getX(), this.posY, event.getZ());
+            if (mc.level.getBlockState(BlockPos.containing(event.getX(), event.getY(), event.getZ())).canBeReplaced()) {
+                Target refreshed = findTarget(base, postEyes);
+                if (refreshed != null) {
+                    this.target = refreshed;
+                }
+            }
+            if (this.target == null) return;
+            Rotation current = new Rotation(event.getYaw(), event.getPitch());
+            if (!BlockFlyPlacement.valid(mc.player, postEyes, this.target, current)) {
+                Target reaim = BlockFlyPlacement.find(mc.player, postEyes, this.target.placedPos(), this.sentRotation);
+                if (reaim != null && isAnchor(reaim.hit().getBlockPos())) {
+                    this.target = reaim;
+                    Rotation adjusted = finalizeRotation(postEyes, reaim, Rotations.continuous(this.sentRotation, reaim.rotation()));
+                    if (BlockFlyPlacement.valid(mc.player, postEyes, reaim, adjusted)) {
+                        this.lastRotation = adjusted;
+                        this.parent.aim(event, adjusted, true, MovementCorrection.SILENT);
+                    }
+                }
+            }
+            return;
+        }
+        if (!event.isPost() || this.target == null || !this.canPlace) return;
         Vec3 eyes = new Vec3(event.getX(), event.getY() + mc.player.getEyeHeight(), event.getZ());
         Rotation reported = new Rotation(event.getYaw(), event.getPitch());
         if (!BlockFlyPlacement.valid(mc.player, eyes, this.target, reported)) return;
@@ -415,6 +440,8 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
                 this.placeCount++;
                 this.lastPlaced = this.target.placedPos();
                 if (this.pitchDifference > 0) this.lastPlacePitchDifference = this.pitchDifference;
+                float yawDiff = Math.abs(reported.yaw() - this.previousSentRotation.yaw());
+                if (yawDiff > 0.0F) this.lastPlacedDeltaYaw = yawDiff;
                 if (this.noSwing.get()) mc.player.connection.send(new ServerboundSwingPacket(this.slot.hand()));
                 else mc.player.swing(this.slot.hand());
             }
@@ -435,13 +462,106 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         }
     }
 
+    /**
+     * Restored from original SigmaClient/OpenSSNGScaffoldAndClutch getBlockData -> getPos / getBlockPos + getPlaceSide:
+     * only targets {@code base} itself when directly supported, returning null when {@code base} is already solid
+     * (preventing cross-shaped filling around the player's feet), and falling back to the closest lower solid anchor's
+     * nearest open side only when suspended over air.
+     */
     private @Nullable Target findTarget(final BlockPos base, final Vec3 eyes) {
-        for (BlockPos pos : BlockFlyPlacement.positionsAround(base, 3)) {
-            if (pos.getY() >= Mth.floor(mc.player.getY())) continue;
-            Target candidate = BlockFlyPlacement.find(mc.player, eyes, pos, this.sentRotation);
-            if (candidate != null && isAnchor(candidate.hit().getBlockPos())) return candidate;
+        if (mc.level == null || mc.player == null) return null;
+        // Step 1 (getPos): check the 5 direct supporting neighbors of base.
+        BlockPos directAnchor = directSupportAnchor(base);
+        if (directAnchor != null) {
+            if (!mc.level.getBlockState(base).canBeReplaced()) return null;
+            Target direct = BlockFlyPlacement.find(mc.player, eyes, base, this.sentRotation);
+            return direct != null && isAnchor(direct.hit().getBlockPos()) ? direct : null;
+        }
+
+        // Step 2 (getBlockPos + getPlaceSide): only when base has no direct support, find the nearest solid anchor below feet.
+        if (!mc.level.getBlockState(base).canBeReplaced()) return null;
+        BlockPos nearestAnchor = findNearestLowerAnchor();
+        if (nearestAnchor == null) return null;
+        Direction side = bestPlaceSide(nearestAnchor);
+        if (side == null) return null;
+        BlockPos placedPos = nearestAnchor.relative(side);
+        if (!mc.level.getBlockState(placedPos).canBeReplaced()) return null;
+        Target fallback = BlockFlyPlacement.find(mc.player, eyes, placedPos, this.sentRotation);
+        return fallback != null && isAnchor(fallback.hit().getBlockPos()) ? fallback : null;
+    }
+
+    private @Nullable BlockPos directSupportAnchor(final BlockPos pos) {
+        BlockPos[] neighbors = {
+                pos.west(), pos.east(), pos.south(), pos.north(), pos.below()
+        };
+        for (BlockPos anchor : neighbors) {
+            if (isSolidAnchor(anchor)) return anchor;
         }
         return null;
+    }
+
+    private @Nullable BlockPos findNearestLowerAnchor() {
+        BlockPos playerPos = mc.player.blockPosition();
+        BlockPos best = null;
+        double bestDistSq = Double.POSITIVE_INFINITY;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -4; dx <= 5; dx++) {
+            for (int dy = -4; dy < 0; dy++) {
+                for (int dz = -4; dz <= 5; dz++) {
+                    cursor.set(playerPos.getX() + dx, playerPos.getY() + dy, playerPos.getZ() + dz);
+                    if (!isSolidAnchor(cursor)) continue;
+                    double d = cursor.distSqr(playerPos);
+                    if (d < bestDistSq) {
+                        bestDistSq = d;
+                        best = cursor.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private @Nullable Direction bestPlaceSide(final BlockPos anchor) {
+        BlockPos playerPos = mc.player.blockPosition();
+        Direction best = null;
+        double bestDistSq = Double.POSITIVE_INFINITY;
+        Direction[] horizontals = {Direction.EAST, Direction.NORTH, Direction.SOUTH, Direction.WEST};
+        for (Direction dir : horizontals) {
+            BlockPos sidePos = anchor.relative(dir);
+            if (sidePos.equals(playerPos) || !mc.level.getBlockState(sidePos).canBeReplaced()) continue;
+            double d = sidePos.distSqr(playerPos);
+            if (d < bestDistSq) {
+                bestDistSq = d;
+                best = dir;
+            }
+        }
+        return best;
+    }
+
+    private boolean isSolidAnchor(final BlockPos pos) {
+        return !mc.level.getBlockState(pos).canBeReplaced() && isAnchor(pos);
+    }
+
+    /** Applies mouse-step GCD quantization first, then nudges by whole GCD steps if DuplicateRotPlace would trigger. */
+    private Rotation finalizeRotation(final Vec3 eyes, final Target target, final Rotation raw) {
+        double mouseStep = Rotations.mouseStep(mc.options.sensitivity().get());
+        Rotation result = this.fixRotation.get() ? Rotations.quantize(this.sentRotation, raw, mouseStep) : raw;
+        if (!this.duplicateRotPlace.get() || Float.isNaN(this.lastPlacedDeltaYaw)) {
+            return result;
+        }
+        float deltaYaw = Math.abs(result.yaw() - this.sentRotation.yaw());
+        if (deltaYaw > 2.0F && Math.abs(deltaYaw - this.lastPlacedDeltaYaw) < 0.002F) {
+            int[] steps = {1, -1, 2, -2};
+            for (int s : steps) {
+                Rotation nudged = new Rotation((float) (result.yaw() + s * mouseStep), result.pitch());
+                float nudgedDelta = Math.abs(nudged.yaw() - this.sentRotation.yaw());
+                if (Math.abs(nudgedDelta - this.lastPlacedDeltaYaw) >= 0.002F
+                        && BlockFlyPlacement.valid(mc.player, eyes, target, nudged)) {
+                    return nudged;
+                }
+            }
+        }
+        return result;
     }
 
     private boolean isAnchor(final BlockPos pos) {

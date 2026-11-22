@@ -144,17 +144,19 @@ public final class ModernIsland {
         int barColor = ModernStyle.mix(0xFFC4ECFF, ModernStyle.mix(accent, 0xFFFFFFFF, 0.35F), tint);
 
         int w = Math.round(width), h = Math.round(height);
+        float hudScale = ModernHudEditor.fittingScale("music_island", w, h, g.guiWidth(), g.guiHeight());
+        if (hudScale <= 0F) return;
+        float sw = w * hudScale, sh = h * hudScale;
         int x = (g.guiWidth() - w) / 2, y = 8;
-        var placement = ModernHudEditor.place(g, "music_island", "Music", x, y, w, h);
+        var placement = ModernHudEditor.place(g, "music_island", "Music", (g.guiWidth() - sw) / 2F, y, sw, sh);
         lastBottom = ModernHudEditor.hasPosition("music_island") ? 0 : Math.round(placement.y() + placement.height());
         int radius = Math.min(15, h / 2);
         float scale = 0.93F + 0.07F * appear;
         g.pose().pushMatrix();
         try (var fade = ModernStyle.alphaScope(appear)) {
-            g.pose().translate(placement.dx(), placement.dy());
-            g.pose().translate(g.guiWidth() / 2F, y - (1F - appear) * 10F);
-            g.pose().scale(scale, scale);
-            g.pose().translate(-g.guiWidth() / 2F, -y);
+            g.pose().translate(placement.x() + sw / 2F, placement.y() - (1F - appear) * 10F * hudScale);
+            g.pose().scale(scale * hudScale, scale * hudScale);
+            g.pose().translate(-(x + w / 2F), -y);
 
             // Light glass over the world: a bright rim, a translucent navy body, a sheen from the top-left.
             ModernStyle.dropShadow(g, x, y + 3, w, h, radius, 0.8F);

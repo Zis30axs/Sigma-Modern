@@ -25,7 +25,7 @@ public final class ModernRwr {
         boolean editing = ModernHudEditor.isEditing();
         if (options == null || mc.player == null || mc.level == null || !ModernHud.isActive()
                 || !ModernHudEditor.allowsHud() || mc.gui.hud.isHidden() && !editing) return;
-        float scale = RadarScopeDrawing.scale(options.getScale(), WIDTH, HEIGHT, g);
+        float scale = RadarScopeDrawing.scale(options.getScale() * ModernHudEditor.scaleOf("rwr"), WIDTH, HEIGHT, g);
         if (scale <= 0F) return;
         var bounds = ModernHudEditor.place(g, "rwr", "RWR", 10, g.guiHeight() - HEIGHT * scale - 34,
                 WIDTH * scale, HEIGHT * scale);
@@ -46,8 +46,12 @@ public final class ModernRwr {
         try {
             g.pose().translate(bounds.x(), bounds.y());
             g.pose().scale(scale, scale);
-            RadarScopeDrawing.panel(g, WIDTH, HEIGHT, wt, options.getBackground());
-            draw(g, wt, threats, plots, preview, mc.level.getGameTime() + partial, options.getRange());
+            if (wt) {
+                drawWt(g, threats, plots, preview, mc.level.getGameTime() + partial, options.getBackground());
+            } else {
+                RadarScopeDrawing.panel(g, WIDTH, HEIGHT, false, options.getBackground());
+                draw(g, false, threats, plots, preview, mc.level.getGameTime() + partial, options.getRange());
+            }
         } finally {
             g.pose().popMatrix();
         }
@@ -155,5 +159,84 @@ public final class ModernRwr {
                 value -> RadarScopeDrawing.width(wt, value));
         RadarScopeDrawing.text(g, wt, RadarScopeDrawing.fit(wt, footer.left, (int) footer.leftBudget), 11, 200, dim);
         RadarScopeDrawing.right(g, wt, footer.right, WIDTH - 11, 200, incoming && !preview ? warning : dim);
+    }
+
+    /** Authentic War Thunder RWR skin: clean circular ring, 12 inward ticks, center crosshair, top warning box, lock rings. */
+    private static void drawWt(GuiGraphicsExtractor g, List<RwrThreats.Threat> threats, List<Plot> plots,
+                               boolean preview, double tick, float background) {
+        int green = RadarScopeDrawing.WT_GREEN;
+        boolean incoming = threats.stream().anyMatch(ModernRwr::inbound);
+        boolean aimed = threats.stream().anyMatch(t -> t.type() == RwrThreats.Type.AIM);
+        boolean flash = (int) (tick / 5) % 2 == 0;
+
+        // Top warning box directly above 12 o'clock (matches WT's "敌跟踪" / "TRACK" / "LAUNCH" indicator).
+        if (incoming || aimed) {
+            String alert = incoming ? ModernText.t("LAUNCH", "导弹来袭") : ModernText.t("TRACK", "敌跟踪");
+            int alertColor = incoming ? (flash ? RadarScopeDrawing.RED : green) : green;
+            float textW = ModernTypography.width(ModernTypography.Face.TEXT, alert, 0.92F);
+            float boxW = Math.max(46F, textW + 14F);
+            float boxH = 17F;
+            float boxX = CX - boxW * 0.5F;
+            float boxY = CY - 61F - boxH - 5F;
+            if (background > 0F) {
+                ModernStyle.fill(g, Math.round(boxX), Math.round(boxY), Math.round(boxX + boxW), Math.round(boxY + boxH),
+                        (Math.round(background * 115F) << 24) | 0x041208);
+            }
+            RadarScopeDrawing.box(g, boxX, boxY, boxW, boxH, 1.35F, alertColor);
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, alert, CX - textW * 0.5F, boxY + 3.5F, 0.92F, alertColor);
+        }
+
+        RadarScopeDrawing.wtRwrFace(g, CX - 64, CY - 64, 128, green, background);
+
+        for (Plot plot : plots) {
+            RwrThreats.Threat threat = plot.threat;
+            boolean launch = inbound(threat);
+            boolean tracked = threat.type() == RwrThreats.Type.AIM;
+            int color = launch ? (flash ? RadarScopeDrawing.RED : green) : green;
+            String code = switch (threat.type()) {
+                case CONTACT -> "P";
+                case AIM -> "AIM";
+                case ARROW -> "ARR";
+                case TRIDENT -> "TRI";
+            };
+            if (plot.vertical != Vertical.NONE) {
+                code = (plot.vertical == Vertical.UP ? "UP " : "DN ") + code;
+                float labelW = ModernTypography.width(ModernTypography.Face.TEXT, code, 0.80F);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, code, plot.x - labelW * 0.5F, plot.y - 4.5F, 0.80F, color);
+                continue;
+            }
+            if (tracked || launch) {
+                float ringRadius = 11.5F;
+                float dx = plot.x - CX, dy = plot.y - CY;
+                float dist = (float) Math.hypot(dx, dy);
+                if (dist > 9.5F + ringRadius + 1F) {
+                    float ux = dx / dist, uy = dy / dist;
+                    float sx = CX + ux * 9.5F, sy = CY + uy * 9.5F;
+                    float ex = plot.x - ux * ringRadius, ey = plot.y - uy * ringRadius;
+                    if (launch) {
+                        // Flashing dashed launch line from center ring to emitter circle.
+                        if (flash) RadarScopeDrawing.line(g, sx, sy, ex, ey, 1.25F, color);
+                    } else {
+                        // Crisp solid track line from center ring to emitter circle.
+                        RadarScopeDrawing.line(g, sx, sy, ex, ey, 1.15F, color);
+                    }
+                }
+                RadarScopeDrawing.ring(g, plot.x, plot.y, ringRadius, color);
+            }
+            float labelW = ModernTypography.width(ModernTypography.Face.TEXT, code, 0.82F);
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, code, plot.x - labelW * 0.5F, plot.y - 4.5F, 0.82F, color);
+        }
+
+        // Only show compact ETA below the scope when a projectile is actively inbound.
+        if (incoming && !preview) {
+            double eta = threats.stream().filter(ModernRwr::inbound).mapToDouble(RwrThreats.Threat::etaSeconds)
+                    .min().orElse(Double.POSITIVE_INFINITY);
+            if (Double.isFinite(eta)) {
+                String text = String.format(Locale.ROOT, "%.1fs", eta);
+                float textW = ModernTypography.width(ModernTypography.Face.TEXT, text, 0.82F);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, text, CX - textW * 0.5F, CY + 66F, 0.82F,
+                        flash ? RadarScopeDrawing.RED : green);
+            }
+        }
     }
 }

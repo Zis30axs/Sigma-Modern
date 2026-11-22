@@ -75,11 +75,15 @@ final class ModernTabGui {
 
         // Only the default placement reserves space in the automatic left-hand stack.
         int x = MARGIN, y = ModernHud.leftStack();
-        if (!ModernHudEditor.hasPosition(LAYOUT_ID)) ModernHud.stack(height(categories.size()));
-        var bounds = ModernHudEditor.place(g, LAYOUT_ID, "TabGUI", x, y, width, height);
+        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, width, height, g.guiWidth(), g.guiHeight());
+        if (hudScale <= 0F) return;
+        if (!ModernHudEditor.hasPosition(LAYOUT_ID)) ModernHud.stack((int)Math.ceil(height(categories.size()) * hudScale));
+        var bounds = ModernHudEditor.place(g, LAYOUT_ID, "TabGUI", x, y, width * hudScale, height * hudScale);
         g.pose().pushMatrix();
         try {
-            g.pose().translate(bounds.dx(), bounds.dy());
+            g.pose().translate(bounds.x(), bounds.y());
+            g.pose().scale(hudScale, hudScale);
+            g.pose().translate(-x, -y);
             panel(g, tab, x, y, catW, height(categories.size()));
             float targetY = PAD_Y + selected * ROW_H;
             categoryY = snap || categoryY < 0F ? targetY : ModernStyle.smooth(categoryY, targetY, dt, 18F);

@@ -276,4 +276,56 @@ class HudLayoutTest {
         assertEquals(128.6F, beside.x(), 0.001F);
         assertEquals(20F, beside.y());
     }
+
+    @Test
+    void scaleAdjustsClampsPersistsAndResetsIndependentlyOfPosition() {
+        HudLayout layout = new HudLayout();
+        assertEquals(1F, layout.scaleOf("clock"));
+        assertFalse(layout.hasScale("clock"));
+        assertTrue(layout.adjustScale("clock", HudLayout.SCALE_STEP));
+        assertEquals(1.05F, layout.scaleOf("clock"), 0.0001F);
+        assertTrue(layout.hasScale("clock"));
+        assertFalse(layout.hasPosition("clock"));
+
+        assertTrue(layout.adjustScale("clock", 10F));
+        assertEquals(HudLayout.MAX_SCALE, layout.scaleOf("clock"), 0.0001F);
+        assertFalse(layout.adjustScale("clock", HudLayout.SCALE_STEP));
+
+        assertTrue(layout.setScale("clock", 0.1F));
+        assertEquals(HudLayout.MIN_SCALE, layout.scaleOf("clock"), 0.0001F);
+
+        JsonObject config = new JsonObject();
+        layout.write(config);
+        HudLayout loaded = new HudLayout();
+        loaded.read(JsonParser.parseString(config.toString()).getAsJsonObject());
+        assertEquals(HudLayout.MIN_SCALE, loaded.scaleOf("clock"), 0.0001F);
+        assertFalse(loaded.hasPosition("clock"));
+
+        assertTrue(loaded.reset("clock"));
+        assertEquals(1F, loaded.scaleOf("clock"));
+        assertFalse(loaded.hasScale("clock"));
+        assertFalse(loaded.reset("clock"));
+
+        layout.setScale("clock", 1F);
+        assertFalse(layout.hasScale("clock"));
+    }
+
+    @Test
+    void corruptPersistedScaleIsIgnoredAndFiniteScaleOutliersAreClamped() {
+        HudLayout layout = new HudLayout();
+        layout.read(JsonParser.parseString("""
+                {"modernHudLayout": {
+                  "clamped-high": {"scale": 9.0},
+                  "clamped-low": {"mode": "absolute", "x": 0.25, "y": 0.5, "scale": 0.1},
+                  "bad-scale": {"scale": "big"},
+                  "infinite-scale": {"scale": 1e999}
+                }}
+                """).getAsJsonObject());
+        assertEquals(HudLayout.MAX_SCALE, layout.scaleOf("clamped-high"), 0.0001F);
+        assertFalse(layout.hasPosition("clamped-high"));
+        assertEquals(HudLayout.MIN_SCALE, layout.scaleOf("clamped-low"), 0.0001F);
+        assertTrue(layout.hasPosition("clamped-low"));
+        assertEquals(1F, layout.scaleOf("bad-scale"));
+        assertEquals(1F, layout.scaleOf("infinite-scale"));
+    }
 }

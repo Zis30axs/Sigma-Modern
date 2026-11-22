@@ -3,7 +3,9 @@ package com.mentalfrostbyte.jello.gui.modern;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import java.util.TreeSet;
 
@@ -11,7 +13,12 @@ import java.util.TreeSet;
 public final class HudLayout {
     private static final String CONFIG_KEY = "modernHudLayout";
     private static final int MAX_POSITIONS = 128;
+    public static final float MIN_SCALE = 0.5F;
+    public static final float MAX_SCALE = 2.5F;
+    public static final float SCALE_STEP = 0.05F;
+    private static final float SCALE_EPSILON = 0.001F;
     private final Map<String, Position> positions = new LinkedHashMap<>();
+    private final Map<String, Float> scales = new LinkedHashMap<>();
 
     private record Position(boolean following, float x, float y) {}
 
@@ -171,7 +178,28 @@ public final class HudLayout {
     }
 
     public boolean hasPosition(String id) { return positions.containsKey(id); }
-    public boolean reset(String id) { return positions.remove(id) != null; }
+    public boolean hasScale(String id) { return scales.containsKey(id); }
+    public float scaleOf(String id) { return scales.getOrDefault(id, 1F); }
+
+    public boolean setScale(String id, float scale) {
+        if (!validId(id)) throw new IllegalArgumentException("Invalid HUD id: " + id);
+        if (!Float.isFinite(scale)) throw new IllegalArgumentException("Non-finite HUD scale");
+        float snapped = snapScale(scale);
+        if (Math.abs(snapped - 1F) < SCALE_EPSILON) return scales.remove(id) != null;
+        Float previous = scales.put(id, snapped);
+        return previous == null || Math.abs(previous - snapped) >= SCALE_EPSILON;
+    }
+
+    public boolean adjustScale(String id, float delta) {
+        if (!Float.isFinite(delta)) throw new IllegalArgumentException("Non-finite HUD scale delta");
+        return setScale(id, scaleOf(id) + delta);
+    }
+
+    public boolean reset(String id) {
+        boolean removedPosition = positions.remove(id) != null;
+        boolean removedScale = scales.remove(id) != null;
+        return removedPosition || removedScale;
+    }
 
     public Rect resolve(String id, float defaultX, float defaultY, float width, float height,
                         float viewportWidth, float viewportHeight, boolean following) {
@@ -205,44 +233,76 @@ public final class HudLayout {
 
     public void read(JsonObject config) {
         positions.clear();
+        scales.clear();
         JsonElement element = config.get(CONFIG_KEY);
         if (element == null || !element.isJsonObject()) return;
+        int loaded = 0;
         for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
-            if (positions.size() >= MAX_POSITIONS) break;
+            if (loaded >= MAX_POSITIONS) break;
             if (!validId(entry.getKey()) || !entry.getValue().isJsonObject()) continue;
             JsonObject value = entry.getValue().getAsJsonObject();
+            boolean stored = false;
+            if (number(value.get("scale"))) {
+                try {
+                    float scale = value.get("scale").getAsFloat();
+                    if (Float.isFinite(scale)) {
+                        float snapped = snapScale(scale);
+                        if (Math.abs(snapped - 1F) >= SCALE_EPSILON) {
+                            scales.put(entry.getKey(), snapped);
+                            stored = true;
+                        }
+                    }
+                } catch (NumberFormatException ignored) {
+                    // Malformed persisted scale leaves this widget at 100%.
+                }
+            }
             try {
-                if (!value.has("mode") || !value.get("mode").isJsonPrimitive()
-                        || !value.getAsJsonPrimitive("mode").isString()) continue;
-                String mode = value.get("mode").getAsString();
-                if (!mode.equals("absolute") && !mode.equals("follow")) continue;
-                if (!number(value.get("x")) || !number(value.get("y"))) continue;
-                float x = value.get("x").getAsFloat(), y = value.get("y").getAsFloat();
-                if (!Float.isFinite(x) || !Float.isFinite(y)) continue;
-                boolean following = mode.equals("follow");
-                positions.put(entry.getKey(), new Position(following,
-                        clamp(x, following ? -1 : 0, 1), clamp(y, following ? -1 : 0, 1)));
+                if (value.has("mode") && value.get("mode").isJsonPrimitive()
+                        && value.getAsJsonPrimitive("mode").isString()) {
+                    String mode = value.get("mode").getAsString();
+                    if ((mode.equals("absolute") || mode.equals("follow"))
+                            && number(value.get("x")) && number(value.get("y"))) {
+                        float x = value.get("x").getAsFloat(), y = value.get("y").getAsFloat();
+                        if (Float.isFinite(x) && Float.isFinite(y)) {
+                            boolean following = mode.equals("follow");
+                            positions.put(entry.getKey(), new Position(following,
+                                    clamp(x, following ? -1 : 0, 1), clamp(y, following ? -1 : 0, 1)));
+                            stored = true;
+                        }
+                    }
+                }
             } catch (NumberFormatException ignored) {
                 // Malformed persisted coordinates leave this widget at its default.
             }
+            if (stored) loaded++;
         }
     }
 
     public void write(JsonObject config) {
         JsonObject saved = new JsonObject();
-        positions.forEach((id, position) -> {
+        Set<String> ids = new LinkedHashSet<>(positions.keySet());
+        ids.addAll(scales.keySet());
+        for (String id : ids) {
             JsonObject value = new JsonObject();
-            value.addProperty("mode", position.following ? "follow" : "absolute");
-            value.addProperty("x", position.x);
-            value.addProperty("y", position.y);
+            Position position = positions.get(id);
+            if (position != null) {
+                value.addProperty("mode", position.following ? "follow" : "absolute");
+                value.addProperty("x", position.x);
+                value.addProperty("y", position.y);
+            }
+            Float scale = scales.get(id);
+            if (scale != null) value.addProperty("scale", scale);
             saved.add(id, value);
-        });
+        }
         config.add(CONFIG_KEY, saved);
     }
 
     private static boolean validId(String id) { return id != null && id.matches("[a-z0-9_.-]{1,80}"); }
     private static boolean number(JsonElement value) {
         return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber();
+    }
+    private static float snapScale(float value) {
+        return Math.round(clamp(value, MIN_SCALE, MAX_SCALE) * 100F) / 100F;
     }
     private static float clamp(float value, float min, float max) { return Math.max(min, Math.min(max, value)); }
     private static void requireGeometry(float x, float y, float w, float h, float sw, float sh) {

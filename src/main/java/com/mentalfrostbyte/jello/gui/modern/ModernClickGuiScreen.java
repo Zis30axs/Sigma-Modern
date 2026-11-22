@@ -67,6 +67,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     // The choice whose dropdown grid is open, over the detail view; null when none is.
     private EnumSetting<?> popover;
     private String search = "";
+    private boolean searchFocused;
     private int scroll;
     private int contentHeight;
     private float panelHeight;
@@ -100,27 +101,32 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     // Leaves room under the card for the global key hints line.
     private int maxPanelHeight() { return Math.max(160, this.height - panelY() - 26); }
 
-    private Hit headerHit() {
-        int w = panelWidth();
-        return new Hit(panelX() + w - 36, panelY() + 5, 34, 34, "search", null, null);
+    /** The globe at the right edge of the header, which opens (and, on the page, closes) the Language page. */
+    private Hit languageHit() {
+        return new Hit(panelX() + panelWidth() - PAD - 34, panelY() + 5, 34, 34, "language", null, null);
     }
 
-    /** The globe beside the search button, which opens (and, on the page, closes) the Language page. */
-    private Hit languageHit() {
-        Hit search = headerHit();
-        return new Hit(search.x() - 38, search.y(), search.w(), search.h(), "language", null, null);
+    /** Inline search bar embedded directly in the top header beside the language button. */
+    private Hit searchBarHit() {
+        Hit language = languageHit();
+        int barW = Math.min(220, Math.max(116, panelWidth() - 210));
+        return new Hit(language.x() - barW - 10, panelY() + 8, barW, 28, "search-bar", null, null);
+    }
+
+    private Hit searchClearHit() {
+        Hit bar = searchBarHit();
+        return new Hit(bar.x() + bar.w() - 24, bar.y() + 2, 22, bar.h() - 4, "search-clear", null, null);
     }
 
     private static Translations translations() {
         return Client.getInstance().getTranslations();
     }
 
-    /** Extra header space below the title row, before the row list: the section heading, or the search field. */
+    /** Extra header space below the title row, before the row list: the section heading. */
     private int subheaderHeight() {
         return switch (this.view) {
             case CATEGORY, LANGUAGE -> SECTION_H;
-            case SEARCH -> SEARCH_FIELD_H;
-            case DETAIL -> 0;
+            case SEARCH, DETAIL -> 0;
         };
     }
 
@@ -295,8 +301,18 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             try (var contentFade = ModernStyle.alphaScope(content)) {
                 g.pose().translate(0F, (1F - content) * 7F);
                 if (this.view == View.CATEGORY) drawSectionHeading(g);
-                else if (this.view == View.SEARCH) drawSearchField(g);
                 else if (this.view == View.LANGUAGE) drawLanguageHeading(g);
+            } finally {
+                g.pose().popMatrix();
+            }
+            g.disableScissor();
+
+            // Clip scrollable rows/tiles below the fixed section heading or search bar so scrolling never overlaps it.
+            int contentTop = visibleContentTop();
+            g.enableScissor(panelX + 4, contentTop, panelX + panelW - 4, Math.max(contentTop, contentBottom));
+            g.pose().pushMatrix();
+            try (var contentFade = ModernStyle.alphaScope(content)) {
+                g.pose().translate(0F, (1F - content) * 7F);
                 if (this.view == View.DETAIL) drawDetail(g, hits, mx, my);
                 else if (this.view == View.LANGUAGE) drawLanguages(g, hits, mx, my);
                 else drawRows(g, hits, mx, my);
@@ -388,11 +404,39 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             ModernStyle.fill(g, x + PAD, y + 14, x + PAD + 3, y + 26, ModernStyle.GLOW);
             ModernTypography.draw(g, ModernStyle.spaced(label), x + PAD + 11, y + 16, ModernStyle.INK_MUTED, false);
         }
-        Hit search = headerHit();
-        float hover = animate(search.key(), ModernStyle.inside(mx, my, search.x(), search.y(), search.w(), search.h()) ? 1 : 0);
-        if (this.view != View.SEARCH) {
-            ModernStyle.rounded(g, search.x(), search.y(), search.w(), search.h(), 8, (Math.round(16 + hover * 20) << 24) | 0x1C394A);
-            ModernTypography.draw(g, "/", search.x() + 13, search.y() + 11, ModernStyle.INK_MUTED, false);
+        Hit bar = searchBarHit();
+        boolean barActive = this.searchFocused || !this.search.isEmpty();
+        float hover = animate(bar.key(), ModernStyle.inside(mx, my, bar.x(), bar.y(), bar.w(), bar.h()) ? 1 : 0);
+        float focus = animate("search-focus", this.searchFocused ? 1 : 0);
+        if (focus > 0.02F) ModernStyle.halo(g, bar.x(), bar.y(), bar.w(), bar.h(), 8, ModernStyle.GLOW, 0.32F * focus);
+        int bgAlpha = Math.round(24 + hover * 14 + focus * 18);
+        ModernStyle.rounded(g, bar.x(), bar.y(), bar.w(), bar.h(), 8, (bgAlpha << 24) | 0x1C394A);
+        if (barActive) {
+            ModernStyle.rounded(g, bar.x(), bar.y(), bar.w(), 1, 1, ModernTypography.fade(ModernStyle.GLOW, 0.45F + 0.35F * focus));
+            ModernStyle.rounded(g, bar.x(), bar.y() + bar.h() - 1, bar.w(), 1, 1, ModernTypography.fade(ModernStyle.GLOW, 0.35F + 0.35F * focus));
+        }
+        ModernIcons.draw(g, ModernIcons.Icon.SEARCH, bar.x() + 8, bar.y() + 7, 14, barActive ? ModernStyle.BLUE : ModernStyle.INK_MUTED);
+        int textX = bar.x() + 26;
+        int rightReserve = !this.search.isEmpty() ? 26 : 24;
+        int textBudget = Math.max(24, bar.w() - 26 - rightReserve);
+        if (this.search.isEmpty()) {
+            String placeholder = ModernTypography.fit(ModernText.tr("clickgui.search.placeholder"), textBudget);
+            ModernTypography.draw(g, placeholder, textX, bar.y() + 9, ModernStyle.INK_MUTED, false);
+            if (!this.searchFocused) {
+                ModernStyle.rounded(g, bar.x() + bar.w() - 21, bar.y() + 6, 15, 16, 4, 0x221C394A);
+                ModernTypography.draw(g, "/", bar.x() + bar.w() - 16, bar.y() + 9, ModernStyle.INK_MUTED, false);
+            }
+        } else {
+            String shown = ModernTypography.fit(this.search, textBudget);
+            ModernTypography.draw(g, shown, textX, bar.y() + 9, ModernStyle.INK, false);
+            Hit clear = searchClearHit();
+            boolean overClear = ModernStyle.inside(mx, my, clear.x(), clear.y(), clear.w(), clear.h());
+            ModernIcons.draw(g, ModernIcons.Icon.CLOSE, clear.x() + 5, clear.y() + 6, 12,
+                overClear ? ModernStyle.INK : ModernStyle.INK_MUTED);
+        }
+        if (this.searchFocused && ((int)(this.time * 2F) & 1) == 0) {
+            int caretX = textX + (this.search.isEmpty() ? 0 : ModernTypography.width(ModernTypography.fit(this.search, textBudget))) + 1;
+            ModernStyle.fill(g, caretX, bar.y() + 7, caretX + 1, bar.y() + bar.h() - 7, ModernStyle.BLUE);
         }
         Hit language = languageHit();
         boolean onLanguage = this.view == View.LANGUAGE;
@@ -429,23 +473,23 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void drawSectionHeading(GuiGraphicsExtractor g) {
-        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
+        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 4;
         ModernTypography.draw(g, ModernStyle.spaced(ModernText.category(this.activeCategory).toUpperCase(Locale.ROOT)),
             x, y, ModernStyle.INK_MUTED, false);
         int enabledInCat = (int)this.modules.byCategory(this.activeCategory).stream().filter(Module::isEnabled).count();
         int totalInCat = this.modules.byCategory(this.activeCategory).size();
         String count = ModernText.tr("clickgui.section.enabled", enabledInCat, totalInCat);
         ModernTypography.draw(g, count, x + w - ModernTypography.width(count), y, ModernStyle.INK_MUTED, false);
-        ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
+        ModernStyle.fill(g, x, y + 16, x + w, y + 17, 0x1EBFEEFF);
     }
 
     private void drawLanguageHeading(GuiGraphicsExtractor g) {
-        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 6;
+        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 4;
         String heading = ModernStyle.spaced(ModernText.tr("clickgui.language.heading"));
         ModernTypography.draw(g, heading, x, y, ModernStyle.INK_MUTED, false);
         String note = ModernTypography.fit(ModernText.tr("clickgui.language.note"), w - ModernTypography.width(heading) - 16);
         ModernTypography.draw(g, note, x + w - ModernTypography.width(note), y, ModernStyle.INK_MUTED, false);
-        ModernStyle.fill(g, x, y + 18, x + w, y + 19, 0x1EBFEEFF);
+        ModernStyle.fill(g, x, y + 16, x + w, y + 17, 0x1EBFEEFF);
     }
 
     /**
@@ -478,14 +522,6 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             }
             if (current) ModernIcons.draw(g, ModernIcons.Icon.CHECK, h.x() + h.w() - 32, h.y() + h.h() / 2F - 9, 16, ModernStyle.BLUE);
         }
-    }
-
-    private void drawSearchField(GuiGraphicsExtractor g) {
-        int x = rowContentX(), y = panelY() + HEADER_H + 6, w = rowContentW(), h = 28;
-        ModernStyle.rounded(g, x, y, w, h, 8, 0x30243746);
-        String shown = this.search.isEmpty() ? ModernText.tr("clickgui.search.placeholder") : this.search;
-        int color = this.search.isEmpty() ? ModernStyle.INK_MUTED : ModernStyle.INK;
-        ModernTypography.draw(g, ModernTypography.fit(shown, w - 24), x + 12, y + 9, color, false);
     }
 
     // --- module tiles ---------------------------------------------------------------------------------------
@@ -925,11 +961,20 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         placeMusic();
         if (this.music.mouseClicked(e.x(), e.y(), e.button())) return true;
         if (this.popover != null) return handlePopoverClick(e);
-        Hit search = headerHit();
-        if (this.view != View.SEARCH && ModernStyle.inside(e.x(), e.y(), search.x(), search.y(), search.w(), search.h())) {
-            openSearch();
+        Hit bar = searchBarHit();
+        if (ModernStyle.inside(e.x(), e.y(), bar.x(), bar.y(), bar.w(), bar.h())) {
+            this.music.blur();
+            if (!this.search.isEmpty()) {
+                Hit clear = searchClearHit();
+                if (ModernStyle.inside(e.x(), e.y(), clear.x(), clear.y(), clear.w(), clear.h())) {
+                    clearSearch();
+                    return true;
+                }
+            }
+            focusSearch();
             return true;
         }
+        this.searchFocused = false;
         Hit language = languageHit();
         if (ModernStyle.inside(e.x(), e.y(), language.x(), language.y(), language.w(), language.h())) {
             if (this.view == View.LANGUAGE) closeSearchOrDetail();
@@ -1044,6 +1089,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void openDetail(Module module) {
+        this.searchFocused = false;
         this.detailModule = module;
         this.view = View.DETAIL;
         this.scroll = 0;
@@ -1051,19 +1097,42 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void openLanguage() {
+        this.searchFocused = false;
         this.view = View.LANGUAGE;
         this.scroll = 0;
         markContentChanged();
     }
 
+    private void focusSearch() {
+        this.searchFocused = true;
+        if (this.view != View.SEARCH && (!this.search.isEmpty() || this.view == View.LANGUAGE || this.view == View.DETAIL)) {
+            this.view = View.SEARCH;
+            this.scroll = 0;
+            markContentChanged();
+        }
+    }
+
+    private void clearSearch() {
+        this.search = "";
+        this.searchFocused = false;
+        if (this.view == View.SEARCH) {
+            this.view = View.CATEGORY;
+            this.scroll = 0;
+            markContentChanged();
+        }
+    }
+
     private void openSearch() {
         this.view = View.SEARCH;
         this.search = "";
+        this.searchFocused = true;
         this.scroll = 0;
         markContentChanged();
     }
 
     private void closeSearchOrDetail() {
+        this.search = "";
+        this.searchFocused = false;
         this.view = View.CATEGORY;
         this.scroll = 0;
         markContentChanged();
@@ -1099,8 +1168,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     @Override public boolean charTyped(CharacterEvent e) {
         if (this.music.charTyped(e)) return true;
         if (this.interactions.charTyped(e)) return true;
-        if (this.view == View.SEARCH && e.isAllowedChatCharacter()) {
+        if (this.searchFocused && e.isAllowedChatCharacter()) {
             this.search = this.search + e.codepointAsString();
+            if (this.view != View.SEARCH) {
+                this.view = View.SEARCH;
+                markContentChanged();
+            }
             this.scroll = 0;
             return true;
         }
@@ -1111,22 +1184,39 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         // The music window's search field, while focused, owns every key (Right Shift types a capital, not closes).
         if (this.music.isTyping() && this.music.keyPressed(e)) return true;
         if (this.interactions.keyPressed(e)) return true;
-        if (e.key() == GLFW.GLFW_KEY_RIGHT_SHIFT) { onClose(); return true; }
-        if (this.view != View.SEARCH && this.music.keyPressed(e)) return true;
-        if (this.view == View.SEARCH && e.key() == GLFW.GLFW_KEY_BACKSPACE) {
-            if (!this.search.isEmpty()) this.search = this.search.substring(0, this.search.length() - 1);
-            this.scroll = 0;
+        if (!this.searchFocused && e.key() == GLFW.GLFW_KEY_RIGHT_SHIFT) { onClose(); return true; }
+        if (!this.searchFocused && this.music.keyPressed(e)) return true;
+        if (this.searchFocused) {
+            if (e.key() == GLFW.GLFW_KEY_BACKSPACE) {
+                if (!this.search.isEmpty()) {
+                    this.search = this.search.substring(0, this.search.length() - 1);
+                    this.scroll = 0;
+                    if (this.search.isEmpty() && this.view == View.SEARCH) {
+                        this.view = View.CATEGORY;
+                        markContentChanged();
+                    }
+                }
+                return true;
+            }
+            if (e.key() == GLFW.GLFW_KEY_ENTER || e.key() == GLFW.GLFW_KEY_KP_ENTER) {
+                this.searchFocused = false;
+                return true;
+            }
+            if (e.isEscape()) {
+                clearSearch();
+                return true;
+            }
             return true;
         }
         if (e.isEscape() && this.popover != null) { this.popover = null; return true; }
         if (e.isEscape() && this.view != View.CATEGORY) { closeSearchOrDetail(); return true; }
-        if (e.key() == GLFW.GLFW_KEY_SLASH && this.view == View.CATEGORY) { openSearch(); return true; }
+        if (e.key() == GLFW.GLFW_KEY_SLASH) { focusSearch(); return true; }
         return super.keyPressed(e);
     }
 
-    @Override public void removed() { this.interactions.mouseReleased(); this.music.blur(); Client.getInstance().saveConfig(); super.removed(); }
+    @Override public void removed() { this.searchFocused = false; this.interactions.mouseReleased(); this.music.blur(); Client.getInstance().saveConfig(); super.removed(); }
 
-    @Override public boolean isTypingText() { return this.music.isTyping() || this.interactions.isCapturingKey(); }
+    @Override public boolean isTypingText() { return this.music.isTyping() || this.searchFocused || this.interactions.isCapturingKey(); }
 
     @Override public boolean preeditUpdated(net.minecraft.client.input.@org.jspecify.annotations.Nullable PreeditEvent e) {
         return this.music.preeditUpdated(e) || super.preeditUpdated(e);

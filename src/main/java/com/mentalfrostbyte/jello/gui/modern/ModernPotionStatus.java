@@ -202,11 +202,18 @@ final class ModernPotionStatus {
         }
         if (inline && folded > 0) width = Math.max(width, (int)Math.ceil(foldedInlineWidth(look, folded)));
         int padding = inline ? INLINE_PAD : 0;
+        float rawX = g.guiWidth() - MARGIN - width - padding;
+        float boxW = width + padding * 2;
+        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, reach, g.guiWidth(), g.guiHeight());
+        if (hudScale <= 0F) return;
+        float scaledW = boxW * hudScale, scaledH = reach * hudScale;
         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
-                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, reach);
+                rawX + boxW - scaledW, top + reach - scaledH, scaledW, scaledH);
         g.pose().pushMatrix();
         try {
-            g.pose().translate(bounds.dx(), bounds.dy());
+            g.pose().translate(bounds.x(), bounds.y());
+            g.pose().scale(hudScale, hudScale);
+            g.pose().translate(-rawX, -top);
             if (inline) {
                 for (Row row : leaving) drawInline(g, status, look, row, top);
                 for (MobEffectInstance instance : listed) drawInline(g, status, look, ROWS.get(instance.getEffect()), top);
@@ -236,11 +243,18 @@ final class ModernPotionStatus {
         int height = inline ? look.rowH() : size.height();
         int padding = inline ? INLINE_PAD : 0;
         int top = floor - height;
+        float rawX = g.guiWidth() - MARGIN - width - padding;
+        float boxW = width + padding * 2;
+        float hudScale = ModernHudEditor.fittingScale(LAYOUT_ID, boxW, height, g.guiWidth(), g.guiHeight());
+        if (hudScale <= 0F) return;
+        float scaledW = boxW * hudScale, scaledH = height * hudScale;
         var bounds = ModernHudEditor.place(g, LAYOUT_ID, ModernText.t("Potion effects", "药水状态"),
-                g.guiWidth() - MARGIN - width - padding, top, width + padding * 2, height);
+                rawX + boxW - scaledW, top + height - scaledH, scaledW, scaledH);
         g.pose().pushMatrix();
         try {
-            g.pose().translate(bounds.dx(), bounds.dy());
+            g.pose().translate(bounds.x(), bounds.y());
+            g.pose().scale(hudScale, hudScale);
+            g.pose().translate(-rawX, -top);
             if (inline) drawInline(g, status, look, preview, top);
             else drawCard(g, status, size, preview, top, width);
         } finally {

@@ -1071,6 +1071,8 @@ public class LocalPlayer extends AbstractClientPlayer
             this.sprintTriggerTime = 0;
         }
 
+        // Sigma hook: use this tick's final sprint input, including Sprint and movement-module overrides.
+        boolean sprintRequested = this.input.keyPresses.sprint();
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#changeCanStartSprintingConditions
         // (@Redirect on canStartSprinting in aiStep). <= 1.21.4 started sprinting from its own condition
         // block and then reported false, so the vanilla block only runs for newer targets.
@@ -1078,14 +1080,14 @@ public class LocalPlayer extends AbstractClientPlayer
             final boolean canStartSprinting = this.canStartSprinting();
             final boolean sprintOnGround = this.isPassenger() ? this.getVehicle().onGround() : this.onGround();
             if ((sprintOnGround || this.isUnderWater()) && vfpSneakSprintState && canStartSprinting) {
-                if (this.sprintTriggerTime <= 0 && !this.minecraft.options.keySprint.isDown()) {
+                if (this.sprintTriggerTime <= 0 && !sprintRequested) {
                     this.sprintTriggerTime = this.minecraft.options.sprintWindow().get();
                 } else {
                     this.setSprinting(true);
                 }
             }
 
-            if (this.vfpCanWaterSprint() && canStartSprinting && this.minecraft.options.keySprint.isDown()) {
+            if (this.vfpCanWaterSprint() && canStartSprinting && sprintRequested) {
                 this.setSprinting(true);
             }
         } else if (this.canStartSprinting()) {
@@ -1097,7 +1099,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 }
             }
 
-            if (this.input.keyPresses.sprint()) {
+            if (sprintRequested) {
                 this.setSprinting(true);
             }
         }

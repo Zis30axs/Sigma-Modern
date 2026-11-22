@@ -15,35 +15,53 @@ import org.lwjgl.glfw.GLFW;
 /** Display policy for the local radar; it never acquires a combat target or sends packets. */
 public final class Radar extends Module {
     public enum Style {
-        WT("War Thunder"), MODERN("Modern");
+        WT("War Thunder"),
+        MODERN("Modern");
 
         private final String label;
 
-        Style(final String label) { this.label = label; }
+        Style(final String label) {
+            this.label = label;
+        }
 
         @Override
-        public String toString() { return this.label; }
+        public String toString() {
+            return this.label;
+        }
     }
 
     public enum Mode {
-        SRC("SRC (Search)"), ACQ("ACQ (Acquire)"), TWS("TWS (Track While Scan)");
+        SRC("SRC (Search)"),
+        ACQ("ACQ (Acquire)"),
+        TWS("TWS (Track While Scan)");
 
         private final String label;
 
-        Mode(final String label) { this.label = label; }
+        Mode(final String label) {
+            this.label = label;
+        }
 
         @Override
-        public String toString() { return this.label; }
+        public String toString() {
+            return this.label;
+        }
     }
 
     public enum Focus {
-        OFF("Off"), FADE_OTHERS("Fade Others"), TARGET_ONLY("Target Only");
+        OFF("Off"),
+        FADE_OTHERS("Fade Others"),
+        TARGET_ONLY("Target Only");
 
         private final String label;
 
-        Focus(String label) { this.label = label; }
+        Focus(final String label) {
+            this.label = label;
+        }
 
-        @Override public String toString() { return this.label; }
+        @Override
+        public String toString() {
+            return this.label;
+        }
     }
 
     private final EnumSetting<Style> style = this.register(new EnumSetting<>(

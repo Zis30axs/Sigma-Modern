@@ -56,7 +56,7 @@ public final class ModernScoreboard {
         }
         int width = Math.clamp(contentWidth + PAD * 2, MIN_WIDTH, MAX_WIDTH);
         int height = HEADER + entries.size() * ROW + FOOTER;
-        float scale = Math.min(module.getScale(), Math.min(Math.max(0, g.guiWidth() - MARGIN * 2) / (float)width,
+        float scale = Math.min(module.getScale() * ModernHudEditor.scaleOf(LAYOUT_ID), Math.min(Math.max(0, g.guiWidth() - MARGIN * 2) / (float)width,
                 Math.max(0, g.guiHeight() - MARGIN * 2) / (float)height));
         if (scale <= 0F) return;
         float scaledWidth = width * scale, scaledHeight = height * scale;

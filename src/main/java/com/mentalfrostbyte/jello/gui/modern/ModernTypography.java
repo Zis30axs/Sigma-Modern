@@ -73,6 +73,20 @@ public final class ModernTypography {
         return renderer(face).width(text) * scale;
     }
 
+    static float measure(Face face, String text, float scale) {
+        return renderer(face).measure(text) * scale;
+    }
+
+    static void paint(Face face, io.github.humbleui.skija.Canvas canvas, String text, float x, float y,
+                      float scale, io.github.humbleui.skija.Paint paint) {
+        if (text.isEmpty()) return;
+        canvas.save();
+        canvas.translate(x, y);
+        if (scale != 1F) canvas.scale(scale, scale);
+        renderer(face).paint(canvas, text, 0F, 0F, paint);
+        canvas.restore();
+    }
+
     public static String fit(String text, int width) {
         return TEXT.fit(text, width);
     }

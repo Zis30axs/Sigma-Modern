@@ -11,9 +11,12 @@ import net.minecraft.resources.Identifier;
 
 /** Shared scope ink and a bounded cache of immutable RWR faces. Animated marks use ordinary GUI geometry. */
 final class RadarScopeDrawing {
-    static final int AMBER = 0xFFFFD879, RED = 0xFFFF7777;
+    static final int AMBER = 0xFFFFD879, RED = 0xFFFF7777, WT_GREEN = 0xFF39F24D;
     private static final int[] SIZES = {128, 192, 256, 384, 512};
     private static final Map<Integer, Identifier> FACES = new HashMap<>();
+    private static final Map<Integer, Identifier> WT_FACES = new HashMap<>();
+    private static Identifier wtDiscTexture;
+    private static Identifier wtRingTexture;
 
     private RadarScopeDrawing() {}
 
@@ -94,6 +97,87 @@ final class RadarScopeDrawing {
         line(g, x + 7, y - 5, x + 7, y + 5, 1, color);
         line(g, x - 7, y - 5, x - 4, y - 5, 1, color);
         line(g, x + 4, y + 5, x + 7, y + 5, 1, color);
+    }
+
+    static void box(GuiGraphicsExtractor g, float x, float y, float w, float h, float thickness, int color) {
+        line(g, x, y, x + w, y, thickness, color);
+        line(g, x, y + h, x + w, y + h, thickness, color);
+        line(g, x, y, x, y + h, thickness, color);
+        line(g, x + w, y, x + w, y + h, thickness, color);
+    }
+
+    static void ring(GuiGraphicsExtractor g, float cx, float cy, float radius, int color) {
+        if (wtRingTexture == null) {
+            Identifier id = Identifier.withDefaultNamespace("sigma/rwr/wt_ring");
+            ModernSkiaRaster.upload(id, ModernSkiaRaster.render(64, 64, canvas -> {
+                try (Paint paint = new Paint().setAntiAlias(true).setMode(PaintMode.STROKE).setStrokeWidth(2.4F).setColor(0xFFFFFFFF)) {
+                    canvas.drawCircle(32F, 32F, 29.5F, paint);
+                }
+            }));
+            wtRingTexture = id;
+        }
+        float size = radius * 2F;
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(cx - radius, cy - radius);
+            g.pose().scale(size / 64F, size / 64F);
+            g.blit(RenderPipelines.GUI_TEXTURED, wtRingTexture, 0, 0, 0, 0, 64, 64, 64, 64, 64, 64, ModernStyle.a(color));
+        } finally {
+            g.pose().popMatrix();
+        }
+    }
+
+    static void wtRwrFace(GuiGraphicsExtractor g, int x, int y, int size, int color, float background) {
+        if (background > 0F) {
+            if (wtDiscTexture == null) {
+                Identifier id = Identifier.withDefaultNamespace("sigma/rwr/wt_disc");
+                ModernSkiaRaster.upload(id, ModernSkiaRaster.render(128, 128, canvas -> {
+                    try (Paint paint = new Paint().setAntiAlias(true).setColor(0xFFFFFFFF)) {
+                        canvas.drawCircle(64F, 64F, 61F, paint);
+                    }
+                }));
+                wtDiscTexture = id;
+            }
+            int bgColor = (Math.round(background * 115F) << 24) | 0x041208;
+            g.blit(RenderPipelines.GUI_TEXTURED, wtDiscTexture, x, y, 0, 0, size, size, 128, 128, 128, 128, ModernStyle.a(bgColor));
+        }
+        float transform = Math.max((float) Math.hypot(g.pose().m00(), g.pose().m01()),
+                (float) Math.hypot(g.pose().m10(), g.pose().m11()));
+        int pixels = 512;
+        float wanted = size * transform * Minecraft.getInstance().getWindow().getGuiScale();
+        for (int candidate : SIZES) if (wanted <= candidate) { pixels = candidate; break; }
+        Identifier texture = WT_FACES.computeIfAbsent(pixels, px -> {
+            Identifier id = Identifier.withDefaultNamespace("sigma/rwr/wt_face_" + px);
+            ModernSkiaRaster.upload(id, wtFaceMask(px));
+            return id;
+        });
+        g.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0, 0, size, size, pixels, pixels,
+                pixels, pixels, ModernStyle.a(color));
+    }
+
+    static ModernSkiaRaster.Image wtFaceMask(int pixels) {
+        if (pixels < 1 || pixels > 512) throw new IllegalArgumentException("RWR face must be 1-512 pixels");
+        return ModernSkiaRaster.render(pixels, pixels, canvas -> {
+            canvas.scale(pixels / 128F, pixels / 128F);
+            try (Paint paint = new Paint().setAntiAlias(true).setMode(PaintMode.STROKE).setColor(0xFFFFFFFF)) {
+                // Crisp War Thunder outer ring.
+                paint.setStrokeWidth(1.65F);
+                canvas.drawCircle(64F, 64F, 61F, paint);
+                // 12 inward clock ticks every 30 degrees.
+                paint.setStrokeWidth(1.35F);
+                for (int tick = 0; tick < 12; tick++) {
+                    double angle = tick * Math.TAU / 12.0;
+                    float sin = (float) Math.sin(angle), cos = (float) Math.cos(angle);
+                    canvas.drawLine(64F + sin * 55.5F, 64F - cos * 55.5F, 64F + sin * 61F, 64F - cos * 61F, paint);
+                }
+                // Small center ring and clean '+' crosshair.
+                paint.setStrokeWidth(1.5F);
+                canvas.drawCircle(64F, 64F, 9.5F, paint);
+                paint.setStrokeWidth(1.15F);
+                canvas.drawLine(64F, 58.2F, 64F, 69.8F, paint);
+                canvas.drawLine(58.2F, 64F, 69.8F, 64F, paint);
+            }
+        });
     }
 
     static void rwrFace(GuiGraphicsExtractor g, int x, int y, int size, int color) {
