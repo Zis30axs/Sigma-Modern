@@ -5,6 +5,7 @@ import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
 import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
 import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
@@ -92,7 +93,9 @@ public class KillAura extends Module {
         /** Turns towards the target's centre by at most {@code Turn Speed} a tick. */
         SMOOTH,
         /** Experimental: eases towards the nearest point of the target in whole mouse steps. */
-        CLAUDE1
+        CLAUDE1,
+        /** Turns the real camera to a visible point and logs manual clicks against the same target. */
+        VISIBLE_TEST
     }
 
     public enum AutoBlock {
@@ -161,7 +164,8 @@ public class KillAura extends Module {
             "Sol: longest extra pause in milliseconds.", 140.0F, 0.0F, 1000.0F, 5.0F));
 
     private final EnumSetting<RotationMode> rotationMode = this.register(new EnumSetting<>("Rotation",
-            "How it turns to the target. Claude1 is experimental.", RotationMode.SNAP));
+            "How it turns to the target. Claude1 is experimental. Visible Test turns the camera and logs manual clicks in logs/rotation-test.",
+            RotationMode.SNAP));
 
     private final NumberSetting turnSpeed = this.register(new NumberSetting("Turn Speed",
             "Smooth: the most it turns in a tick, in degrees.", 40.0F, 1.0F, 180.0F, 1.0F));
@@ -190,6 +194,7 @@ public class KillAura extends Module {
             "Color of the current target's lock-on marker.", 0xFF9DDEFF));
 
     // Game thread only.
+    private final VisibleRotationTest visibleTest = new VisibleRotationTest();
     private @Nullable LivingEntity target;
     /** The look reported this tick, or null to leave the report to vanilla. */
     private @Nullable Rotation rotation;
@@ -217,18 +222,24 @@ public class KillAura extends Module {
         this.timing.onChange(this::resetClickScheduler);
         this.minCps.onChange(this::resetClickScheduler);
         this.maxCps.onChange(this::resetClickScheduler);
-        this.minCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
-        this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
-        this.cpsMode.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+        this.rotationMode.onChange(() -> {
+            if (this.isEnabled() && (this.testingVisibility() || this.visibleTest.started())) this.releaseCombat();
+        });
+        this.timing.visibleWhen(() -> !this.testingVisibility());
+        this.minCps.visibleWhen(this::showsCps);
+        this.maxCps.visibleWhen(this::showsCps);
+        this.cpsMode.visibleWhen(this::showsCps);
         this.randomMs.visibleWhen(this::solSettingsVisible);
         this.jitterMs.visibleWhen(this::solSettingsVisible);
         this.pauseChance.visibleWhen(this::solSettingsVisible);
         this.pauseMin.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
         this.pauseMax.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
         this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH));
-        this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
-        this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
-        this.throughWalls.visibleWhen(this.rayTrace::get);
+        this.silent.visibleWhen(() -> !this.testingVisibility() && !this.rotationMode.is(RotationMode.NONE));
+        this.movementCorrector.visibleWhen(() -> this.silent.isVisible() && this.silent.get());
+        this.rayTrace.visibleWhen(() -> !this.testingVisibility());
+        this.throughWalls.visibleWhen(() -> !this.testingVisibility() && this.rayTrace.get());
+        this.autoBlock.visibleWhen(() -> !this.testingVisibility());
         this.indicatorColor.visibleWhen(this.targetIndicator::get);
     }
 
@@ -250,6 +261,7 @@ public class KillAura extends Module {
     }
 
     private void releaseCombat() {
+        this.visibleTest.close();
         this.clearActivity();
         LocalPlayer player = mc.player;
         if (player != null && this.blockingByAura && mc.gameMode != null) {
@@ -287,7 +299,7 @@ public class KillAura extends Module {
         return this.isEnabled() && mc.player != null && mc.level != null && mc.player.isAlive()
                 && !mc.player.isSpectator() && this.activityPlayer == mc.player && this.activityLevel == mc.level
                 && (this.actedThisTick || this.rotation != null || this.pendingAttack
-                    || this.blockingByAura || this.attackCycle.isBusy());
+                    || this.blockingByAura || this.attackCycle.isBusy() || this.visibleTest.tracking());
     }
 
     private void clearActivity() {
@@ -311,6 +323,10 @@ public class KillAura extends Module {
 
     @EventTarget
     public void onLoadWorld(final EventLoadWorld event) {
+        if (this.testingVisibility()) {
+            this.visibleTest.close();
+            this.target = null;
+        }
         this.clearActivity();
         this.astraClicks.reset();
         this.resetClickScheduler();
@@ -330,11 +346,23 @@ public class KillAura extends Module {
             return;
         }
         if (player == null || level == null || gameMode == null || !player.isAlive()) {
+            if (this.visibleTest.started()) {
+                this.visibleTest.close();
+                this.target = null;
+            }
             this.resetClickScheduler();
             return;
         }
         this.activityPlayer = player;
         this.activityLevel = level;
+        if (this.testingVisibility()) {
+            boolean gameplay = mc.gui.screen() == null && mc.gui.overlay() == null && !mc.isPaused() && mc.isWindowActive()
+                    && mc.mouseHandler.isMouseGrabbed() && mc.getCameraEntity() == player && !player.isSpectator();
+            if (this.target != null && this.target.level() != level) this.target = null;
+            this.target = gameplay ? this.pickTarget(player, level, player.getEyePosition()) : null;
+            this.visibleTest.tick(mc, player, level, this.target, this.range.get(), gameplay);
+            return;
+        }
         // If another listener cancelled the previous tick's report, finish its hit before choosing a
         // new target or handing the look back to the camera. The normal path has nothing left to send.
         this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
@@ -362,6 +390,24 @@ public class KillAura extends Module {
         Optional<Vec3> hit = this.reach(player, level, eye, look, this.target);
         boolean due = this.tickClick(player);
         this.fight(player, gameMode, this.target, hit, due);
+    }
+
+    private boolean testingVisibility() {
+        return this.rotationMode.is(RotationMode.VISIBLE_TEST);
+    }
+
+    /** Brackets only an original attack-key invocation, including a click on a block or a miss. */
+    public boolean beginVisibleTestClick(@Nullable HitResult crosshair) {
+        return this.testingVisibility() && mc.player != null && this.visibleTest.beginClick(mc.player, crosshair);
+    }
+
+    public void endVisibleTestClick() {
+        this.visibleTest.endClick();
+    }
+
+    @EventTarget(EventPriority.LOWEST)
+    public void onTestAttack(final EventAttack event) {
+        this.visibleTest.attackEvent(event.getTarget(), event.isCancelled());
     }
 
     /**
@@ -454,7 +500,7 @@ public class KillAura extends Module {
     /** This tick's look, stepping from what the server was last told; null when this mode does not turn. */
     private @Nullable Rotation step(final Rotation from, final Rotation wanted) {
         return switch (this.rotationMode.get()) {
-            case NONE -> null;
+            case NONE, VISIBLE_TEST -> null;
             case WRAPPED -> wanted;
             case SNAP -> Rotations.continuous(from, wanted);
             case SMOOTH -> Rotations.limit(from, Rotations.continuous(from, wanted), this.turnSpeed.get(), this.turnSpeed.get());
@@ -568,8 +614,12 @@ public class KillAura extends Module {
         this.cps = low + ThreadLocalRandom.current().nextFloat() * (high - low);
     }
 
+    private boolean showsCps() {
+        return !this.testingVisibility() && !this.timing.is(Timing.COOLDOWN);
+    }
+
     private boolean solSettingsVisible() {
-        return !this.timing.is(Timing.COOLDOWN) && this.cpsMode.is(CpsMode.SOL);
+        return this.showsCps() && this.cpsMode.is(CpsMode.SOL);
     }
 
     /** Sol replaces the tick budget with its own millisecond schedule, whatever the connection is. */

@@ -1807,7 +1807,14 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     private boolean startAttack() {
-        return this.startAttack(false);
+        // Sigma hook: the rotation test compares the pick actually consumed by the attack key with its tick sample.
+        var aura = com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.combat.KillAura.class);
+        if (aura == null || !aura.beginVisibleTestClick(this.hitResult)) return this.startAttack(false);
+        try {
+            return this.startAttack(false);
+        } finally {
+            aura.endVisibleTestClick();
+        }
     }
 
     private boolean startAttack(final boolean generatedClick) {
