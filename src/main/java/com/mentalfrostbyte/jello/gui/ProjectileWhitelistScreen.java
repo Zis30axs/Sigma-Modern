@@ -50,10 +50,13 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
     }
 
     @Override protected void init() {
-        // Only IDs from the code-owned catalogue can reach the item registry or resource renderer.
+        // Only IDs from the code-owned catalogue can reach the item/block registry or resource renderer.
         this.all = this.setting.getAllowedIds().stream().map(id -> {
             var stack = InventoryItemIcons.get(id);
-            return new Entry(id, stack, stack.isEmpty() ? id : stack.getHoverName().getString());
+            String name = !stack.isEmpty() ? stack.getHoverName().getString()
+                    : net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(net.minecraft.resources.Identifier.parse(id))
+                            .map(holder -> holder.value().getName().getString()).orElse(id);
+            return new Entry(id, stack, name);
         }).toList();
         this.shownSelection = null;
         Layout l = layout(this.width, this.height);

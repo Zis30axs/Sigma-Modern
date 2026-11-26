@@ -55,6 +55,7 @@ import com.mentalfrostbyte.jello.module.impl.player.NoFall;
 import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
+import com.mentalfrostbyte.jello.module.impl.render.BlockEsp;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.Esp;
@@ -119,6 +120,7 @@ public final class ModuleManager {
         this.register(new FakePlayer());
         this.register(new Fullbright());
         this.register(new Esp());
+        this.register(new BlockEsp());
         this.register(new HudClock());
         this.register(new InfoHud());
         this.register(new Keyboard());

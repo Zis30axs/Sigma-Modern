@@ -9,37 +9,74 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 
-/** An immutable selection from a fixed, trusted catalogue of item identifiers. */
+/** An immutable selection from a fixed, trusted catalogue of item or block identifiers. */
 public final class ItemListSetting extends Setting<Set<String>> {
-    // A null fixed catalogue denotes the full registry, resolved only after Minecraft bootstraps.
+    private enum Source { ITEMS, BLOCKS, FIXED }
+
+    private final Source source;
+    // Non-null only for Source.FIXED; registry sources resolve lazily after Minecraft bootstraps.
     private final List<String> allowedIds;
 
     public ItemListSetting(final String name, final String description) {
+        this(name, description, Source.ITEMS);
+    }
+
+    private ItemListSetting(final String name, final String description, final Source source) {
         super(name, description, Set.of());
+        this.source = source;
         this.allowedIds = null;
     }
 
+    public static ItemListSetting blocks(final String name, final String description) {
+        return new ItemListSetting(name, description, Source.BLOCKS);
+    }
+
     private static final class RegistryCatalogue {
-        static final List<String> IDS = net.minecraft.core.registries.BuiltInRegistries.ITEM.keySet().stream()
+        static final List<String> IDS = BuiltInRegistries.ITEM.keySet().stream()
                 .map(Identifier::toString).filter(id -> !id.equals("minecraft:air")).sorted().toList();
+        static final Set<String> LOOKUP = Set.copyOf(IDS);
+    }
+
+    private static final class BlockRegistryCatalogue {
+        private static final Set<String> AIR_IDS = Set.of(
+                "minecraft:air", "minecraft:cave_air", "minecraft:void_air");
+        static final List<String> IDS = BuiltInRegistries.BLOCK.keySet().stream()
+                .map(Identifier::toString).filter(id -> !AIR_IDS.contains(id)).sorted().toList();
         static final Set<String> LOOKUP = Set.copyOf(IDS);
     }
 
     public static List<String> registeredItems() { return RegistryCatalogue.IDS; }
     public static boolean registeredItem(String id) { return RegistryCatalogue.LOOKUP.contains(id); }
 
+    public static List<String> registeredBlocks() { return BlockRegistryCatalogue.IDS; }
+    public static boolean registeredBlock(String id) { return BlockRegistryCatalogue.LOOKUP.contains(id); }
+
     public ItemListSetting(final String name, final String description, final Collection<String> defaultIds,
                            final Collection<String> allowedIds) {
         super(name, description, checkedSelection(defaultIds, checkedCatalogue(allowedIds)));
+        this.source = Source.FIXED;
         this.allowedIds = checkedCatalogue(allowedIds);
     }
 
-    public List<String> getAllowedIds() { return this.allowedIds == null ? registeredItems() : this.allowedIds; }
-    private boolean isAllowed(String id) {
-        return this.allowedIds == null ? registeredItem(id) : this.allowedIds.contains(id);
+    public List<String> getAllowedIds() {
+        return switch (this.source) {
+            case ITEMS -> registeredItems();
+            case BLOCKS -> registeredBlocks();
+            case FIXED -> this.allowedIds;
+        };
     }
+
+    private boolean isAllowed(String id) {
+        return switch (this.source) {
+            case ITEMS -> registeredItem(id);
+            case BLOCKS -> registeredBlock(id);
+            case FIXED -> this.allowedIds.contains(id);
+        };
+    }
+
     public boolean contains(final String id) { return this.get().contains(id); }
     public String displayLabel() { return this.get().size() + " selected"; }
 

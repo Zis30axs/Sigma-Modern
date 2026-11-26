@@ -159,6 +159,7 @@ public class Gui {
         if (shouldRenderLevel) {
             profiler.push("hud");
             // Sigma hook: world ESP and player labels sit behind the ordinary HUD chrome.
+            com.mentalfrostbyte.jello.gui.BlockEspRenderer.render(graphics);
             com.mentalfrostbyte.jello.gui.ProjectileTrajectoryRenderer.render(graphics,
                     deltaTracker.getGameTimeDeltaPartialTick(false));
             com.mentalfrostbyte.jello.gui.modern.ModernEsp.render(graphics);
