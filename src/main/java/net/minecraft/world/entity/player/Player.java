@@ -1243,6 +1243,9 @@ public abstract class Player extends Avatar implements ContainerUser {
             }
 
             this.setDeltaMovement(this.getDeltaMovement().multiply(0.6, 1.0, 0.6));
+            if (this.isSprinting() && this instanceof net.minecraft.client.player.LocalPlayer localPlayer) {
+                localPlayer.markAttackStoppedSprintThisTick();
+            }
             this.setSprinting(false);
         }
 

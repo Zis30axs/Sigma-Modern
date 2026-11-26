@@ -9,8 +9,11 @@ import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.combat.crystalaura.CrystalDamage;
+import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
 import com.mentalfrostbyte.jello.module.impl.movement.blockfly.BlockFlyPlacement;
+import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
@@ -123,6 +126,7 @@ public final class CrystalAura extends Module {
         NONE
     }
 
+    static final int CORRECTOR_PRIORITY = 5;
     private static final int MAX_CANDIDATE_DAMAGE_EVALUATIONS_PER_TICK = 48;
     private static final long PENDING_ACTION_TIMEOUT_MS = 500L;
     private static final double CRYSTAL_HEIGHT = 2.0;
@@ -140,6 +144,11 @@ public final class CrystalAura extends Module {
             "Normal turns to the crystal; None acts without turning.", RotationMode.NORMAL));
     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
             "Turns only what the server is told; your camera stays where you point it.", true));
+    private final EnumSetting<KillAura.MovementCorrectorMode> movementCorrector = this.register(
+            new EnumSetting<>("Movement Corrector",
+                    "Silent look: how the walking is kept to the facing the server is told. MovCor follows the "
+                            + "MovementCorrector module's Mode; Strict, Silent, Claude3 and Off keep their own mode.",
+                    KillAura.MovementCorrectorMode.MOVCOR));
 
     private final NumberSetting placeDelay = this.register(new NumberSetting("Place Delay",
             "Minimum milliseconds between places.", 0.0F, 0.0F, 1000.0F, 1.0F));
@@ -306,6 +315,8 @@ public final class CrystalAura extends Module {
     public CrystalAura() {
         super(ModuleCategory.COMBAT, "CrystalAura",
                 "Places and breaks end crystals for maximum damage to the nearest enemy.");
+        this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
+        this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
         this.logic.visibleWhen(() -> this.calcMode.is(CrystalDamage.CalcMode.BOTH));
         this.idPredictOffset.visibleWhen(this.idPredict::get);
         this.idPredictSwingAlways.visibleWhen(this.idPredict::get);
@@ -346,11 +357,13 @@ public final class CrystalAura extends Module {
         this.pendingHit = null;
         this.pendingCrystal = null;
         MovementCorrector corrector = MovementCorrector.current();
+        MovementCorrection drainMode = this.silent.get() && corrector != null
+                ? this.movementCorrector.get().resolve(corrector) : null;
         if (corrector != null) {
             corrector.release(this);
         }
         if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
-            this.attackCycle.drainOnBus(this.silent.get() ? MovementCorrection.STRICT : null);
+            this.attackCycle.drainOnBus(drainMode);
         } else {
             this.attackCycle.reset(null);
         }
@@ -374,7 +387,7 @@ public final class CrystalAura extends Module {
 
     /** The silent look other modules must preserve, or null to use the player's own look. */
     public @Nullable Rotation getSilentRotation() {
-        return this.silent.get() ? this.rotation : null;
+        return this.silent.get() && !AutoPearl.isRescuing() ? this.rotation : null;
     }
 
     @EventTarget
@@ -393,7 +406,17 @@ public final class CrystalAura extends Module {
         if (!event.isPre()) {
             return;
         }
+        if (AutoPearl.isRescuing()) {
+            this.releaseCombat();
+            return;
+        }
         if (player == null || level == null || gameMode == null || !player.isAlive()) {
+            return;
+        }
+        if (!this.rotationMode.is(RotationMode.NONE) && higherPriorityRotationActive()) {
+            this.rotation = null;
+            this.pendingAction = PendingAction.NONE;
+            this.pendingRotation = null;
             return;
         }
         Rotation pendingAttackLook = this.attackCycle.unreportedAttack();
@@ -402,12 +425,8 @@ public final class CrystalAura extends Module {
             if (!this.silent.get()) {
                 player.setYRot(pendingAttackLook.yaw());
                 player.setXRot(pendingAttackLook.pitch());
-            } else {
-                MovementCorrector corrector = MovementCorrector.current();
-                if (corrector != null) {
-                    corrector.request(this, pendingAttackLook, MovementCorrection.STRICT);
-                }
             }
+            this.correctMovement();
             return;
         }
         this.maintainSetDead();
@@ -436,6 +455,13 @@ public final class CrystalAura extends Module {
                     || this.pendingRotation.equals(this.attackCycle.lastSent())
                     || System.nanoTime() / 1_000_000L - this.pendingSinceMs > PENDING_ACTION_TIMEOUT_MS) {
                 this.executePending(player, level, gameMode, eye);
+            } else {
+                this.rotation = this.pendingRotation;
+                if (!this.silent.get()) {
+                    player.setYRot(this.pendingRotation.yaw());
+                    player.setXRot(this.pendingRotation.pitch());
+                }
+                this.correctMovement();
             }
             return;
         }
@@ -460,9 +486,8 @@ public final class CrystalAura extends Module {
                 this.pendingCrystal = crystal;
                 this.pendingBase = null;
                 this.pendingHit = null;
-                this.pendingRotation = look;
                 this.pendingSinceMs = System.nanoTime() / 1_000_000L;
-                this.applyRotation(player, look);
+                this.pendingRotation = this.applyRotation(player, look);
                 if (this.rotationMode.is(RotationMode.NONE)) {
                     this.executePending(player, level, gameMode, eye);
                 }
@@ -477,9 +502,8 @@ public final class CrystalAura extends Module {
                 this.pendingBase = choice.base();
                 this.pendingHit = choice.hit();
                 this.pendingCrystal = null;
-                this.pendingRotation = choice.rotation();
                 this.pendingSinceMs = System.nanoTime() / 1_000_000L;
-                this.applyRotation(player, choice.rotation());
+                this.pendingRotation = this.applyRotation(player, choice.rotation());
                 if (this.rotationMode.is(RotationMode.NONE)) {
                     this.executePending(player, level, gameMode, eye);
                 }
@@ -490,7 +514,20 @@ public final class CrystalAura extends Module {
         this.rotation = null;
     }
 
-    private void applyRotation(final LocalPlayer player, final Rotation look) {
+    private static boolean higherPriorityRotationActive() {
+        BlockFly scaffold = Modules.enabled(BlockFly.class);
+        if (scaffold != null && scaffold.isActivelyWorking()) {
+            return true;
+        }
+        KillAura aura = Modules.enabled(KillAura.class);
+        return aura != null && aura.getSilentRotation() != null;
+    }
+
+    private Rotation applyRotation(final LocalPlayer player, final Rotation look) {
+        if (this.rotationMode.is(RotationMode.NONE)) {
+            this.rotation = null;
+            return look;
+        }
         Rotation from = this.attackCycle.lastSent() != null
                 ? this.attackCycle.lastSent() : new Rotation(player.getYRot(), player.getXRot());
         this.rotation = Rotations.continuous(from, look);
@@ -498,14 +535,26 @@ public final class CrystalAura extends Module {
             player.setYRot(this.rotation.yaw());
             player.setXRot(this.rotation.pitch());
         }
+        this.correctMovement();
+        return this.rotation;
+    }
+
+    private void correctMovement() {
         MovementCorrector corrector = MovementCorrector.current();
-        if (corrector != null && this.silent.get()) {
-            corrector.request(this, this.rotation, MovementCorrection.STRICT);
+        if (corrector != null && this.rotation != null && this.silent.get()) {
+            corrector.request(this, this.rotation, this.movementCorrector.get().resolve(corrector), CORRECTOR_PRIORITY);
         }
     }
 
     @EventTarget
     public void onMotion(final EventMotion event) {
+        if (AutoPearl.isRescuing()) {
+            return;
+        }
+        MovementCorrector corrector = MovementCorrector.current();
+        if (corrector != null && corrector.active() != null && corrector.active().priority() > CORRECTOR_PRIORITY) {
+            return;
+        }
         this.attackCycle.motion(event, this.rotation, this.silent.get());
     }
 
@@ -904,11 +953,8 @@ public final class CrystalAura extends Module {
         this.pendingAction = PendingAction.NONE;
         this.pendingRotation = null;
         this.rotation = rotated ? look : null;
-        if (rotated && this.silent.get()) {
-            MovementCorrector corrector = MovementCorrector.current();
-            if (corrector != null) {
-                corrector.request(this, look, MovementCorrection.STRICT);
-            }
+        if (rotated) {
+            this.correctMovement();
         }
         switch (action) {
             case BREAK -> this.executeBreak(player, gameMode, look, rotated);

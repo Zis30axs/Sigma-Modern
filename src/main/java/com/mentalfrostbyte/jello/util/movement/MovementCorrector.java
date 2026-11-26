@@ -13,6 +13,7 @@ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import java.util.Objects;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
@@ -234,6 +235,51 @@ public final class MovementCorrector extends Module {
             this.statTicks = this.statRequested = this.statMoving = this.statTurned = 0;
             this.statYawDifference = 0.0;
         }
+    }
+
+    /** True when the active request this tick remaps the WASD direction keys ({@code Silent} or {@code Claude3}). */
+    public boolean turnsKeys() {
+        Request request = this.correcting();
+        return request != null && request.mode().turnsKeys();
+    }
+
+    /**
+     * Scales {@code correctedVector} (the natural move vector of the turned keys) by any scalar speed factor an
+     * {@code EventMovementInput} listener applied to {@code beforeVector} relative to {@code beforeKeys}'s natural
+     * vector, without collapsing pre-1.21.5 unnormalized diagonals ({@code length = sqrt(2)}) down to unit length.
+     */
+    public static Vec2 scaleTurnedMoveVector(
+            final Input beforeKeys,
+            final Vec2 beforeVector,
+            final Vec2 correctedVector,
+            final boolean normalizeDiagonals
+    ) {
+        float naturalBeforeLen = naturalMoveVectorLength(beforeKeys, normalizeDiagonals);
+        if (naturalBeforeLen <= 1.0E-6F) {
+            return correctedVector;
+        }
+        float scale = beforeVector.length() / naturalBeforeLen;
+        return Math.abs(scale - 1.0F) > 1.0E-5F ? correctedVector.scale(scale) : correctedVector;
+    }
+
+    static float naturalMoveVectorLength(final Input keys, final boolean normalizeDiagonals) {
+        float forward = keys.forward() == keys.backward() ? 0.0F : (keys.forward() ? 1.0F : -1.0F);
+        float left = keys.left() == keys.right() ? 0.0F : (keys.left() ? 1.0F : -1.0F);
+        if (forward == 0.0F && left == 0.0F) {
+            return 0.0F;
+        }
+        return normalizeDiagonals ? 1.0F : Mth.sqrt(left * left + forward * forward);
+    }
+
+    /**
+     * Clears a sprint flag that was synthesized by an auto-sprint module (rather than held on the physical sprint key)
+     * when key turning leaves the final reported input no longer moving forward without sneaking.
+     */
+    public static Input reconcileTurnedSprint(final Input keys, final boolean rawSprintKeyHeld) {
+        if (!rawSprintKeyHeld && keys.sprint() && (!keys.forward() || keys.backward() || keys.shift())) {
+            return new Input(keys.forward(), keys.backward(), keys.left(), keys.right(), keys.jump(), keys.shift(), false);
+        }
+        return keys;
     }
 
     /** The look the elytra and the swimmer are pushed along, or null to leave it to the entity's own. */

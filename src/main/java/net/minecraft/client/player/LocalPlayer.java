@@ -179,6 +179,7 @@ public class LocalPlayer extends AbstractClientPlayer
     private boolean lastHorizontalCollision;
     private boolean crouching;
     private boolean wasSprinting;
+    private boolean attackStoppedSprintThisTick;
     private int positionReminder;
     private boolean flashOnSetHealth;
     public ClientInput input = new ClientInput();
@@ -293,6 +294,7 @@ public class LocalPlayer extends AbstractClientPlayer
         if (this.connection.hasClientLoaded()) {
             // Sigma hook: the player's tick. Cancelling PRE skips it whole, movement packets included.
             if (EventBus.call(new EventUpdate(EventState.PRE)).isCancelled()) {
+                this.attackStoppedSprintThisTick = false;
                 this.minecraft.leavePreMovementTick();
                 return;
             }
@@ -497,6 +499,14 @@ public class LocalPlayer extends AbstractClientPlayer
 
     public void setWasSprinting(final boolean wasSprinting) {
         this.wasSprinting = wasSprinting;
+    }
+
+    public void markAttackStoppedSprintThisTick() {
+        this.attackStoppedSprintThisTick = true;
+    }
+
+    public boolean didAttackStopSprintThisTick() {
+        return this.attackStoppedSprintThisTick;
     }
 
     public boolean drop(final boolean all) {
@@ -1022,6 +1032,7 @@ public class LocalPlayer extends AbstractClientPlayer
         }
 
         this.input.tick();
+        boolean rawSprintKey = this.input.keyPresses.sprint();
         // Sigma hook: the keys held this tick, before anything reads them; a module may press jump or sneak.
         EventMovementInput movementInput = EventBus.call(new EventMovementInput(this.input.keyPresses, this.input.moveVector));
         this.input.keyPresses = movementInput.getInput();
@@ -1032,11 +1043,25 @@ public class LocalPlayer extends AbstractClientPlayer
         // own facing, from these same keys, and turned keys would send it off sideways.
         com.mentalfrostbyte.jello.util.movement.MovementCorrector corrector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.current();
         if (corrector != null && !this.isPassenger()) {
-            Input corrected = corrector.correct(this.input.keyPresses, this.getYRot());
-            if (!corrected.equals(this.input.keyPresses)) {
-                float inputMagnitude = this.input.moveVector.length();
+            Input beforeKeys = this.input.keyPresses;
+            Vec2 beforeVector = this.input.moveVector;
+            Input corrected = com.mentalfrostbyte.jello.util.movement.MovementCorrector.reconcileTurnedSprint(
+                corrector.correct(beforeKeys, this.getYRot()),
+                rawSprintKey
+            );
+            if (!corrected.equals(beforeKeys)) {
+                boolean normalizeDiagonals = ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_21_4);
                 this.input.replaceKeyPresses(corrected);
-                this.input.moveVector = this.input.moveVector.normalized().scale(inputMagnitude);
+                this.input.moveVector = com.mentalfrostbyte.jello.util.movement.MovementCorrector.scaleTurnedMoveVector(
+                    beforeKeys, beforeVector, this.input.moveVector, normalizeDiagonals
+                );
+            }
+        } else if (!rawSprintKey) {
+            Input reconciled = com.mentalfrostbyte.jello.util.movement.MovementCorrector.reconcileTurnedSprint(
+                this.input.keyPresses, false
+            );
+            if (!reconciled.equals(this.input.keyPresses)) {
+                this.input.keyPresses = reconciled;
             }
         }
         this.minecraft.getTutorial().onInput(this.input);
@@ -1234,6 +1259,7 @@ public class LocalPlayer extends AbstractClientPlayer
             this.onUpdateAbilities();
         }
 
+        this.attackStoppedSprintThisTick = false;
         // Sigma hook: the physics step is done and the player has moved.
         EventBus.call(new EventLivingUpdate(EventState.POST));
     }

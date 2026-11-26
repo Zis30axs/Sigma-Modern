@@ -211,10 +211,12 @@ public class KillAura extends Module {
     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
             "Turns only what the server is told; your camera stays where you point it.", true));
 
+    static final int CORRECTOR_PRIORITY = 10;
+
     private final EnumSetting<MovementCorrectorMode> movementCorrector = this.register(new EnumSetting<>("Movement Corrector",
             "Silent look: how the walking is kept to the facing the server is told. MovCor follows the MovementCorrector "
                     + "module's Mode; Strict, Silent, Claude3 and Off keep their old per-aura behaviour.",
-            MovementCorrectorMode.STRICT));
+            MovementCorrectorMode.MOVCOR));
 
     private final BooleanSetting rayTrace = this.register(new BooleanSetting("Ray Trace",
             "Only hits when the look direction actually meets the target.", true));
@@ -391,7 +393,7 @@ public class KillAura extends Module {
         this.resetClickScheduler();
     }
 
-    @EventTarget
+    @EventTarget(EventPriority.HIGH)
     public void onTick(final EventTick event) {
         LocalPlayer player = mc.player;
         ClientLevel level = mc.level;
@@ -484,13 +486,17 @@ public class KillAura extends Module {
     private void correctMovement() {
         MovementCorrector corrector = MovementCorrector.current();
         if (corrector != null && this.rotation != null && this.silent.get()) {
-            corrector.request(this, this.rotation, this.movementCorrector.get().resolve(corrector));
+            corrector.request(this, this.rotation, this.movementCorrector.get().resolve(corrector), CORRECTOR_PRIORITY);
         }
     }
 
     @EventTarget
     public void onMotion(final EventMotion event) {
         if (AutoPearl.isRescuing()) return;
+        MovementCorrector corrector = MovementCorrector.current();
+        if (corrector != null && corrector.active() != null && corrector.active().priority() > CORRECTOR_PRIORITY) {
+            return;
+        }
         this.attackCycle.motion(event, this.rotation, this.silent.get());
     }
 

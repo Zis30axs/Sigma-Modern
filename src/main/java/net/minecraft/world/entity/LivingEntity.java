@@ -1648,9 +1648,23 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
 
     protected float getKnockback(final Entity target, final DamageSource damageSource) {
         float knockback = (float)this.getAttributeValue(Attributes.ATTACK_KNOCKBACK);
-        return this.level() instanceof ServerLevel level
-            ? EnchantmentHelper.modifyKnockback(level, this.getWeaponItem(), target, damageSource, knockback) / 2.0F
-            : knockback / 2.0F;
+        if (this.level() instanceof ServerLevel level) {
+            return EnchantmentHelper.modifyKnockback(level, this.getWeaponItem(), target, damageSource, knockback) / 2.0F;
+        }
+        // MODIFIED for porting: < 1.21 clients added EnchantmentHelper#getKnockbackBonus on the client too,
+        // which causes Player#causeExtraKnockback to apply the 0.6x attack slow and stop sprinting.
+        if (ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_21)) {
+            int knockbackLevel = this.registryAccess()
+                .lookup(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                .flatMap(registry -> registry.get(net.minecraft.world.item.enchantment.Enchantments.KNOCKBACK))
+                .map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, this.getWeaponItem()))
+                .orElse(0);
+            if (!ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_8)) {
+                knockbackLevel = Math.max(knockbackLevel, 0);
+            }
+            knockback += knockbackLevel;
+        }
+        return knockback / 2.0F;
     }
 
     protected void dropFromLootTable(final ServerLevel level, final DamageSource source, final boolean playerKilled) {

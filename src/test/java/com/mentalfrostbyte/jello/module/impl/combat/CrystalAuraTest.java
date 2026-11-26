@@ -100,4 +100,22 @@ class CrystalAuraTest {
         assertFalse(CrystalDamage.willBeBlocked(crystal, new AABB(5.0, 65.0, 5.0, 6.0, 67.0, 6.0)));
         assertFalse(CrystalDamage.willBeBlocked(crystal, null));
     }
+
+    @Test
+    void crystalAuraAndKillAuraFollowMovementCorrectorByDefaultAndSprintStopsOnHitByDefault() {
+        CrystalAura crystalAura = new CrystalAura();
+        KillAura killAura = new KillAura();
+        com.mentalfrostbyte.jello.module.impl.movement.Sprint sprint = new com.mentalfrostbyte.jello.module.impl.movement.Sprint();
+
+        assertEquals("MOVCOR", crystalAura.setting("Movement Corrector").orElseThrow().toJson().getAsString());
+        assertEquals("MOVCOR", killAura.setting("Movement Corrector").orElseThrow().toJson().getAsString());
+        assertTrue(crystalAura.setting("Movement Corrector").orElseThrow().isVisible());
+        assertTrue(sprint.setting("Stop On Hit").orElseThrow().toJson().getAsBoolean());
+
+        @SuppressWarnings("unchecked")
+        var rotation = (com.mentalfrostbyte.jello.setting.EnumSetting<CrystalAura.RotationMode>) crystalAura.setting("Rotation").orElseThrow();
+        rotation.set(CrystalAura.RotationMode.NONE);
+        assertFalse(crystalAura.setting("Silent").orElseThrow().isVisible());
+        assertFalse(crystalAura.setting("Movement Corrector").orElseThrow().isVisible());
+    }
 }

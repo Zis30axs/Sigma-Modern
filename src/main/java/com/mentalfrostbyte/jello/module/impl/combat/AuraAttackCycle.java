@@ -165,6 +165,8 @@ final class AuraAttackCycle {
         }
     }
 
+    private static final int DRAIN_PRIORITY = -50;
+
     private void syncDrainCorrection() {
         MovementCorrector corrector = lookupCorrector();
         if (corrector == null) {
@@ -172,7 +174,7 @@ final class AuraAttackCycle {
         }
         Rotation pending = this.unreportedAttack;
         if (pending != null && this.ownsSilentLook && this.drainCorrection != null) {
-            corrector.request(this.drainListener, pending, this.drainCorrection);
+            corrector.request(this.drainListener, pending, this.drainCorrection, DRAIN_PRIORITY);
         } else {
             corrector.release(this.drainListener);
         }
@@ -217,11 +219,18 @@ final class AuraAttackCycle {
             AuraAttackCycle.this.syncDrainCorrection();
         }
 
-        @EventTarget
+        @EventTarget(EventPriority.HIGHEST)
         public void onMotion(final EventMotion event) {
             if (!AuraAttackCycle.this.isBusy()) {
                 AuraAttackCycle.this.stopBusDrain();
                 return;
+            }
+            MovementCorrector corrector = lookupCorrector();
+            if (corrector != null) {
+                MovementCorrector.Request active = corrector.active();
+                if (active != null && active.owner() != this) {
+                    return;
+                }
             }
             AuraAttackCycle.this.motion(event, null, false);
             if (!AuraAttackCycle.this.isBusy()) {
