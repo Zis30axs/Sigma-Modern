@@ -29,6 +29,7 @@ import net.minecraft.client.Minecraft;
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
 import com.mentalfrostbyte.jello.module.impl.render.NoRender;
+import com.mentalfrostbyte.jello.module.impl.render.SmoothBobbing;
 import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.render.EventRender3D;
 import net.minecraft.client.Options;
@@ -194,7 +195,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
 
     @Override
     public void invokeBobView(final CameraRenderState state, final PoseStack target) {
-        this.bobView(state, target);
+        // Sigma hook: vanilla and Iris hands share the same bobbing policy and cached frame motion.
+        SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
+        if (smoothBobbing != null ? smoothBobbing.affectsHand() : this.gameRenderState.optionsRenderState.bobView) {
+            this.bobView(state, target);
+        }
     }
 
     @Override
@@ -430,6 +435,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
 
     private void bobView(final CameraRenderState cameraState, final PoseStack poseStack) {
         if (cameraState.entityRenderState.isPlayer) {
+            SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
+            if (smoothBobbing != null && this.minecraft.player != null) {
+                smoothBobbing.apply(cameraState, this.minecraft.player, poseStack);
+                return;
+            }
             float backwardsInterpolatedWalkDistance = cameraState.entityRenderState.backwardsInterpolatedWalkDistance;
             float bob = cameraState.entityRenderState.bob;
             poseStack.translate(
@@ -446,7 +456,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
     private Matrix4f sigma$worldCameraEffects(final CameraRenderState cameraState, final float worldPartialTicks) {
         PoseStack bobStack = new PoseStack();
         this.bobHurt(cameraState, bobStack);
-        if (this.gameRenderState.optionsRenderState.bobView) {
+        if (this.gameRenderState.optionsRenderState.bobView || Modules.enabled(SmoothBobbing.class) != null) {
             this.bobView(cameraState, bobStack);
         }
 
@@ -501,9 +511,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
                 Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
                 modelViewStack.pushMatrix().mul(modelViewMatrix);
                 this.bobHurt(cameraState, poseStack);
-                if (this.gameRenderState.optionsRenderState.bobView) {
-                    this.bobView(cameraState, poseStack);
-                }
+                this.invokeBobView(cameraState, poseStack);
 
                 // MODIFIED for porting: was iris's MixinGameRenderer#iris$disableVanillaHandRendering (@Redirect on
                 // ItemInHandRenderer#submitHandsWithItems) - with a pack loaded iris draws the hands itself, in its own
@@ -558,6 +566,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
             this.extractCamera(deltaTracker, worldPartialTicks, cameraEntityPartialTicks);
             // Sigma hook: capture names and their projection during the same extraction pass as the entities and HUD.
             CameraRenderState cameraState = this.gameRenderState.levelRenderState.cameraRenderState;
+            SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
+            if (smoothBobbing != null) {
+                smoothBobbing.beginFrame(cameraState,
+                        this.minecraft.getCameraEntity() == this.minecraft.player ? this.minecraft.player : null);
+            }
             if (this.sigma$usesPaniniProjection(cameraState)) {
                 com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(null, null);
                 com.mentalfrostbyte.jello.gui.modern.ModernNameTags.beginFrame(null, null);

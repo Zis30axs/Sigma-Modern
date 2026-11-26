@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module.impl.combat;
 
+import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.EventPriority;
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
@@ -7,7 +8,6 @@ import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
 import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
-import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
@@ -25,13 +25,13 @@ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import net.minecraft.util.Util;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
+import net.minecraft.util.Util;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
@@ -44,7 +44,7 @@ import net.minecraft.world.item.component.ChargedProjectiles;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
-/** Hotbar-only throwing, using the same rotation report and item-use path as normal client actions. */
+/** Hotbar-only throwing, using the same pre-movement item-use and rotation report order as vanilla ticks. */
 public final class AutoProjectile extends Module {
     private static final List<String> CATALOG = List.of("minecraft:snowball", "minecraft:egg", "minecraft:blue_egg", "minecraft:brown_egg",
             "minecraft:ender_pearl", "minecraft:experience_bottle", "minecraft:splash_potion",
@@ -64,11 +64,13 @@ public final class AutoProjectile extends Module {
             List.of("minecraft:snowball", "minecraft:egg"), CATALOG));
 
     private final ProjectileCadence cadence = new ProjectileCadence();
+    private final AuraAttackCycle lookCycle = new AuraAttackCycle();
+    private final DeferredCancelSlot deferredCancel = new DeferredCancelSlot();
     private @Nullable LocalPlayer owner;
     private @Nullable LivingEntity target;
     private @Nullable Plan plan;
     private @Nullable EventMotion reportedMotion;
-    private @Nullable EventSendPacket reportedPacket;
+    private @Nullable Rotation reportedAim;
     private @Nullable EventSendPacket usedPacket;
     private @Nullable Rotation useRotation;
     private boolean useAccepted;
@@ -76,7 +78,7 @@ public final class AutoProjectile extends Module {
     private int savedSlot = -1;
     private @Nullable Item heldItem;
     private boolean charging;
-    private boolean ownsLook;
+    private boolean crossbowReadyToFire;
     private int chargeStarted;
     private int spentCrossbowSlots;
 
@@ -87,11 +89,19 @@ public final class AutoProjectile extends Module {
                 "Predicts moving targets and silently throws whitelisted hotbar projectiles. Yields to active Aura and Scaffold.");
     }
 
+    @Override
+    protected void onEnable() {
+        deferredCancel.cancel();
+        LocalPlayer player = mc.player;
+        lookCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
+    }
+
     @EventTarget(EventPriority.LOW)
     public void onTick(EventTick event) {
         if (!event.isPre()) return;
         reportedMotion = null;
-        reportedPacket = null;
+        Rotation previousReportedAim = reportedAim;
+        reportedAim = null;
         plan = null;
         LocalPlayer player = mc.player;
         if (owner != player) {
@@ -102,6 +112,12 @@ public final class AutoProjectile extends Module {
             for (int slot = 0; slot < 9; slot++) {
                 if (!CrossbowItem.isCharged(player.getInventory().getItem(slot))) spentCrossbowSlots &= ~(1 << slot);
             }
+        }
+        // Finish reporting an already-sent use rotation if last tick's EventMotion was cancelled.
+        Rotation pendingUseLook = lookCycle.unreportedAttack();
+        if (pendingUseLook != null) {
+            requestCorrection(pendingUseLook);
+            return;
         }
         if (!available(player) || busy() || manualInput()
                 || (heldSlot < 0 && player.isUsingItem())) {
@@ -155,94 +171,121 @@ public final class AutoProjectile extends Module {
             releaseLook();
             return;
         }
-        requestCorrection(plan.aim());
+
+        // Execute strictly inside EventTick PRE (before sneak/sprint, sendPosition and CLIENT_TICK_END)
+        // once the previous tick's movement report confirmed an unobstructed aim on wire.
+        if (previousReportedAim != null) {
+            Plan locked = aim(player, target, plan.slot(), previousReportedAim);
+            if (locked != null && ProjectileAimValidator.clear(player, target, locked.aim())) {
+                if (executeInTick(player, locked)) {
+                    return;
+                }
+            }
+        }
+
+        requestCorrection(new Rotation(plan.aim().yaw(), plan.aim().pitch()));
     }
 
-    /** Runs before BlockFly's LOWEST motion listener; a later placement can still take the look. */
-    @EventTarget(EventPriority.LOW)
-    public void onMotion(EventMotion event) {
-        if (event.isPost()) return;
-        LocalPlayer player = mc.player;
-        if (plan == null || !available(player) || busy() || !validTarget(player, target)) return;
-        // Keep the look used by this tick's movement correction. Rebuild its path from the new position;
-        // if that fixed look no longer reaches the target, keep aiming but do not fire this tick.
-        Plan previous = plan;
-        event.setYaw(previous.aim().yaw());
-        event.setPitch(previous.aim().pitch());
-        event.forceRotation();
-        Plan fresh = aim(player, target, previous.slot(), previous.aim());
-        if (fresh == null) {
-            plan = null;
-            ownsLook = true;
-            return;
-        }
-        plan = fresh;
-        reportedMotion = event;
-    }
-
-    /** All scaffold PRE/POST placement work has finished before this stage. */
-    @EventTarget(EventPriority.LOW)
-    public void onUpdate(EventUpdate event) {
-        if (!event.isPost() || plan == null) return;
-        if (reportedMotion == null) {
-            pause();
-            return;
-        }
-        LocalPlayer player = mc.player;
-        Plan action = plan;
-        EventMotion motion = reportedMotion;
-        EventSendPacket sent = reportedPacket;
-        reportedMotion = null;
-        if (!available(player) || busy() || manualInput() || motion.isCancelled()
-                || sent == null || sent.isCancelled()
-                || !(sent.getPacket() instanceof ServerboundMovePlayerPacket move) || !move.hasRotation()
-                || !sameLook(move.getYRot(0), move.getXRot(0), action.aim())
-                || !sameLook(motion.getYaw(), motion.getPitch(), action.aim())
-                || !validTarget(player, target) || !ProjectileAimValidator.clear(player, target, action.aim())) {
-            pause();
-            return;
-        }
-        ownsLook = true;
+    private boolean executeInTick(LocalPlayer player, Plan action) {
+        Rotation committed = new Rotation(action.aim().yaw(), action.aim().pitch());
         if (heldSlot < 0) {
             ItemStack stack = player.getInventory().getItem(action.slot());
             if (stack.getItem() != action.item() || !usable(player, stack)) {
                 pause();
-                return;
+                return true;
             }
             savedSlot = player.getInventory().getSelectedSlot();
             heldSlot = action.slot();
             heldItem = stack.getItem();
             chargeStarted = player.tickCount;
+            crossbowReadyToFire = false;
             player.getInventory().setSelectedSlot(heldSlot);
             mc.gameMode.syncCarriedItem();
             boolean charge = needsCharge(stack);
             InteractionResult result = use(player, action.aim());
             charging = charge && player.isUsingItem();
-            if (charging && useAccepted) {
-                return;
+            if (useAccepted) {
+                // BadPacketsJ (1.21+ / 26.2) requires this tick's MovePlayerPacket to match USE_ITEM's rotation.
+                lookCycle.attacked(committed, true);
+                requestCorrection(committed);
             }
-            if (!charge && useAccepted && result.consumesAction()) shot();
-            else pause();
-            return;
+            if (charging && useAccepted) {
+                plan = action;
+                return true;
+            }
+            if (!charge && useAccepted && result.consumesAction()) {
+                shot();
+            } else {
+                pause();
+            }
+            return true;
         }
-        if (player.getInventory().getSelectedSlot() != heldSlot || player.getMainHandItem().getItem() != heldItem) {
-            pause();
-            return;
-        }
+
         ItemStack stack = player.getMainHandItem();
         if (stack.getItem() instanceof CrossbowItem) {
-            // Loading runs on the server. A local charge timer alone can release too early at low TPS.
+            // PacketOrderI forbids sending USE_ITEM in the same tick as RELEASE_USE_ITEM: release on tick N, fire on tick N+1.
             if (charging && CrossbowItem.isCharged(stack)) {
-                mc.gameMode.releaseUsingItem(player); // crossbow release stops use, never fires
+                mc.gameMode.releaseUsingItem(player);
                 charging = false;
-                if (use(player, action.aim()).consumesAction() && useAccepted) shot();
-                else pause();
+                crossbowReadyToFire = true;
+                plan = action;
+                lookCycle.attacked(committed, true);
+                requestCorrection(committed);
+                return true;
+            }
+            if (!charging && crossbowReadyToFire && CrossbowItem.isCharged(stack)) {
+                crossbowReadyToFire = false;
+                if (use(player, action.aim()).consumesAction() && useAccepted) {
+                    lookCycle.attacked(committed, true);
+                    requestCorrection(committed);
+                    shot();
+                } else {
+                    pause();
+                }
+                return true;
             }
         } else if (charging && player.getTicksUsingItem() >= (stack.getItem() instanceof BowItem ? 20 : 10)) {
             mc.gameMode.releaseUsingItem(player);
             charging = false;
+            lookCycle.attacked(committed, true);
+            requestCorrection(committed);
             shot();
+            return true;
         }
+        return false;
+    }
+
+    /** Runs before BlockFly's LOWEST motion listener; a later placement can still take the look. */
+    @EventTarget(EventPriority.LOW)
+    public void onMotion(EventMotion event) {
+        LocalPlayer player = mc.player;
+        if (event.isPost()) {
+            Rotation desired = plan != null && available(player) && !busy() && validTarget(player, target)
+                    ? new Rotation(plan.aim().yaw(), plan.aim().pitch()) : null;
+            lookCycle.motion(event, desired, desired != null);
+            return;
+        }
+        if (lookCycle.hasUnreportedAttack()) {
+            // Keep this tick's MovePlayerPacket locked to the exact USE_ITEM / RELEASE_USE_ITEM rotation.
+            lookCycle.motion(event, null, false);
+            return;
+        }
+        if (plan == null || !available(player) || busy() || !validTarget(player, target)) {
+            lookCycle.motion(event, null, false);
+            return;
+        }
+        // Keep the look used by this tick's movement correction. Rebuild its path from the new position;
+        // if that fixed look no longer reaches the target, keep aiming for next tick without arming a shot.
+        Plan previous = plan;
+        Rotation desired = new Rotation(previous.aim().yaw(), previous.aim().pitch());
+        lookCycle.motion(event, desired, true);
+        Plan fresh = aim(player, target, previous.slot(), desired);
+        if (fresh == null) {
+            plan = null;
+            return;
+        }
+        plan = fresh;
+        reportedMotion = event;
     }
 
     @EventTarget
@@ -262,9 +305,13 @@ public final class AutoProjectile extends Module {
     @EventTarget(EventPriority.LOWEST)
     public void onSend(EventSendPacket event) {
         if (!mc.isSameThread()) return;
-        if (useRotation == null && reportedMotion != null && event.getPacket() instanceof ServerboundMovePlayerPacket) {
-            // Retain the event itself: later listeners may still replace/cancel its packet.
-            reportedPacket = event;
+        if (!event.isCancelled() && useRotation == null && event.getPacket() instanceof ServerboundMovePlayerPacket move) {
+            lookCycle.reported(move);
+            if (reportedMotion != null && !reportedMotion.isCancelled() && plan != null && move.hasRotation()
+                    && sameLook(move.getYRot(0), move.getXRot(0), plan.aim())
+                    && sameLook(reportedMotion.getYaw(), reportedMotion.getPitch(), plan.aim())) {
+                reportedAim = new Rotation(plan.aim().yaw(), plan.aim().pitch());
+            }
         }
         Rotation look = useRotation;
         if (look == null || event.isCancelled()) return;
@@ -318,7 +365,7 @@ public final class AutoProjectile extends Module {
         return aim(player, candidate, slot, null);
     }
 
-    private @Nullable Plan aim(LocalPlayer player, LivingEntity candidate, int slot, ProjectileAim.@Nullable Aim fixedLook) {
+    private @Nullable Plan aim(LocalPlayer player, LivingEntity candidate, int slot, @Nullable Rotation fixedLook) {
         if (awaitingCrossbow(slot)) return null;
         ItemStack stack = player.getInventory().getItem(slot);
         if (!usable(player, stack)) return null;
@@ -379,7 +426,7 @@ public final class AutoProjectile extends Module {
     /** Visible aim helpers yield while an automated throw owns the look or a charged item. */
     public boolean isActivelyWorking() {
         return isEnabled() && owner == mc.player && available(mc.player)
-                && (plan != null || heldSlot >= 0 || charging || reportedMotion != null);
+                && (plan != null || heldSlot >= 0 || charging || reportedMotion != null || lookCycle.isBusy());
     }
 
     private static boolean busy() {
@@ -389,9 +436,9 @@ public final class AutoProjectile extends Module {
         return (aura != null && aura.isActivelyWorking()) || (scaffold != null && scaffold.isActivelyWorking());
     }
 
-    private void requestCorrection(ProjectileAim.Aim aim) {
+    private void requestCorrection(Rotation aim) {
         MovementCorrector corrector = MovementCorrector.current();
-        if (corrector != null) corrector.request(this, new Rotation(aim.yaw(), aim.pitch()), corrector.mode(), -100);
+        if (corrector != null) corrector.request(this, aim, corrector.mode(), -100);
     }
 
     private static boolean sameLook(float yaw, float pitch, ProjectileAim.Aim aim) {
@@ -405,6 +452,7 @@ public final class AutoProjectile extends Module {
         if (heldItem instanceof CrossbowItem) spentCrossbowSlots |= 1 << heldSlot;
         releaseHeld(false);
         plan = null;
+        reportedAim = null;
         releaseLook();
     }
 
@@ -415,35 +463,59 @@ public final class AutoProjectile extends Module {
     private void releaseHeld(boolean cancel) {
         LocalPlayer player = owner;
         if (heldSlot >= 0 && player != null && player == mc.player && mc.gameMode != null) {
+            boolean inTick = mc.isInPreMovementTick();
             boolean stillSelected = player.getInventory().getSelectedSlot() == heldSlot;
             if (cancel && charging && player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
                 // A slot change cancels use server-side. RELEASE_USE_ITEM here would accidentally shoot a bow/trident.
-                if (stillSelected) {
-                    int cancellationSlot = savedSlot == heldSlot ? (heldSlot + 1) % 9 : savedSlot;
-                    player.getInventory().setSelectedSlot(cancellationSlot);
+                int cancellationSlot = savedSlot >= 0 && savedSlot != heldSlot ? savedSlot : (heldSlot + 1) % 9;
+                if (inTick) {
+                    if (stillSelected) {
+                        player.getInventory().setSelectedSlot(cancellationSlot);
+                    }
+                    mc.gameMode.syncCarriedItem();
+                    player.stopUsingItem();
+                    if (stillSelected && savedSlot >= 0) {
+                        player.getInventory().setSelectedSlot(savedSlot);
+                        mc.gameMode.syncCarriedItem();
+                    }
+                } else {
+                    player.stopUsingItem();
+                    if (stillSelected && savedSlot >= 0 && savedSlot != heldSlot) {
+                        player.getInventory().setSelectedSlot(savedSlot);
+                        mc.gameMode.markCarriedItemDirty();
+                    } else if (stillSelected) {
+                        deferredCancel.arm(player, cancellationSlot, savedSlot >= 0 ? savedSlot : heldSlot);
+                    } else {
+                        mc.gameMode.markCarriedItemDirty();
+                    }
+                }
+            } else if (stillSelected && savedSlot >= 0) {
+                player.getInventory().setSelectedSlot(savedSlot);
+                if (inTick) {
                     mc.gameMode.syncCarriedItem();
                 } else {
-                    mc.gameMode.syncCarriedItem();
+                    mc.gameMode.markCarriedItemDirty();
                 }
-                player.stopUsingItem();
-            }
-            if (stillSelected && savedSlot >= 0) {
-                player.getInventory().setSelectedSlot(savedSlot);
-                mc.gameMode.syncCarriedItem();
             }
         }
         heldSlot = savedSlot = -1;
         heldItem = null;
         charging = false;
+        crossbowReadyToFire = false;
     }
 
     private void releaseLook() {
         MovementCorrector corrector = MovementCorrector.current();
-        if (corrector != null) corrector.release(this);
-        if (ownsLook && owner != null && owner == mc.player && owner.connection.getConnection().isConnected() && !busy()) {
-            owner.sendRotation(owner.getYRot(), owner.getXRot());
+        if (!lookCycle.hasUnreportedAttack() && corrector != null) {
+            corrector.release(this);
         }
-        ownsLook = false;
+        if (!isEnabled()) {
+            if (owner != null && owner == mc.player && mc.level != null && owner.connection.hasClientLoaded()) {
+                lookCycle.drainOnBus(corrector != null ? corrector.mode() : null);
+            } else {
+                lookCycle.reset(null);
+            }
+        }
     }
 
     private void clear(boolean restore) {
@@ -451,18 +523,21 @@ public final class AutoProjectile extends Module {
             releaseHeld(true);
             releaseLook();
         } else {
+            deferredCancel.cancel();
             MovementCorrector corrector = MovementCorrector.current();
             if (corrector != null) corrector.release(this);
+            lookCycle.reset(null);
             heldSlot = savedSlot = -1;
             heldItem = null;
-            charging = ownsLook = false;
+            charging = false;
+            crossbowReadyToFire = false;
             spentCrossbowSlots = 0;
         }
         target = null;
         plan = null;
         reportedMotion = null;
+        reportedAim = null;
         useRotation = null;
-        reportedPacket = null;
         usedPacket = null;
         useAccepted = false;
         cadence.reset();
@@ -479,5 +554,54 @@ public final class AutoProjectile extends Module {
     public void onLoadWorld(EventLoadWorld event) {
         clear(false);
         owner = null;
+    }
+
+    /** Cancels a mid-frame bow/trident draw at the start of the next tick when savedSlot == heldSlot. */
+    private static final class DeferredCancelSlot {
+        private @Nullable LocalPlayer targetPlayer;
+        private int bounceSlot = -1;
+        private int finalSlot = -1;
+        private boolean registered;
+
+        void arm(LocalPlayer player, int bounce, int restore) {
+            this.targetPlayer = player;
+            this.bounceSlot = bounce;
+            this.finalSlot = restore;
+            if (!this.registered) {
+                this.registered = true;
+                EventBus.register(this);
+            }
+        }
+
+        void cancel() {
+            this.targetPlayer = null;
+            this.bounceSlot = this.finalSlot = -1;
+            if (this.registered) {
+                this.registered = false;
+                EventBus.unregister(this);
+            }
+        }
+
+        @EventTarget(EventPriority.HIGHEST)
+        public void onTick(EventTick event) {
+            if (!event.isPre()) return;
+            LocalPlayer player = this.targetPlayer;
+            int bounce = this.bounceSlot;
+            int restore = this.finalSlot;
+            cancel();
+            if (player != null && player == mc.player && mc.gameMode != null && mc.getConnection() != null && bounce >= 0) {
+                player.getInventory().setSelectedSlot(bounce);
+                mc.gameMode.syncCarriedItem();
+                if (restore >= 0) {
+                    player.getInventory().setSelectedSlot(restore);
+                    mc.gameMode.syncCarriedItem();
+                }
+            }
+        }
+
+        @EventTarget
+        public void onLoadWorld(EventLoadWorld event) {
+            cancel();
+        }
     }
 }

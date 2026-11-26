@@ -10,6 +10,8 @@ import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -107,7 +109,13 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         if (mc.player == this.sessionPlayer && mc.player != null && this.previousSlot >= 0
                 && this.ownedSlot >= 0 && mc.player.getInventory().getSelectedSlot() == this.ownedSlot) {
             mc.player.getInventory().setSelectedSlot(this.previousSlot);
-            if (mc.gameMode != null && mc.getConnection() != null) mc.gameMode.syncCarriedItem();
+            if (mc.gameMode != null && mc.getConnection() != null) {
+                if (mc.isInPreMovementTick()) {
+                    mc.gameMode.syncCarriedItem();
+                } else {
+                    mc.gameMode.markCarriedItemDirty();
+                }
+            }
         }
         this.ownedSlot = -1;
     }
@@ -196,8 +204,10 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
             return;
         }
         if (!event.isPre()) {
-            // Explicit rotation mode restores the camera direction only after the queued use-on packet.
-            if (this.queued && this.grimRotation()) {
+            // Explicit 1.17 rotation mode restores the camera direction only on pre-1.21.2 protocols;
+            // 1.21.2+ forbids post-movement placements and extra rotation packets before CLIENT_TICK_END.
+            if (this.queued && this.grimRotation()
+                    && ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_21_2)) {
                 this.parent.queuePlacement(null);
                 this.parent.place(this.queuedTarget);
                 mc.player.sendRotation(mc.player.getYRot(), mc.player.getXRot());

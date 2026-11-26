@@ -105,7 +105,7 @@ public final class AdaptiveProjectileDefense extends Module {
     }
 
     private void releaseShield() {
-        if (ownsShield(mc.player) && mc.gameMode != null && !mc.options.keyUse.isDown()
+        if (mc.isInPreMovementTick() && ownsShield(mc.player) && mc.gameMode != null && !mc.options.keyUse.isDown()
                 && mc.player.connection.getConnection().isConnected()) mc.gameMode.releaseUsingItem(mc.player);
         forgetShield();
     }

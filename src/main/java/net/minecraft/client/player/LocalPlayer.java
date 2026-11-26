@@ -293,8 +293,10 @@ public class LocalPlayer extends AbstractClientPlayer
         if (this.connection.hasClientLoaded()) {
             // Sigma hook: the player's tick. Cancelling PRE skips it whole, movement packets included.
             if (EventBus.call(new EventUpdate(EventState.PRE)).isCancelled()) {
+                this.minecraft.leavePreMovementTick();
                 return;
             }
+            this.minecraft.leavePreMovementTick();
 
             this.dropSpamThrottler.tick();
             super.tick();
@@ -385,6 +387,7 @@ public class LocalPlayer extends AbstractClientPlayer
     }
 
     private void sendPosition() {
+        this.minecraft.leavePreMovementTick();
         this.sendIsSprintingIfNeeded();
         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#sendSneakingAfterSprinting
         // (@Inject after sendIsSprintingIfNeeded in sendPosition). <= 1.21 expects the sneak command right

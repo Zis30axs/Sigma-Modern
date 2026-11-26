@@ -19,6 +19,8 @@ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.mentalfrostbyte.jello.util.time.Timer;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -322,7 +324,7 @@ public final class CrystalAura extends Module {
     protected void onEnable() {
         this.clearState();
         LocalPlayer player = mc.player;
-        this.attackCycle.reset(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
+        this.attackCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
         this.placeTimer.reset();
         this.breakTimer.reset();
         this.basePlaceTimer.reset();
@@ -348,8 +350,7 @@ public final class CrystalAura extends Module {
             corrector.release(this);
         }
         if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
-            this.attackCycle.stop(new Rotation(player.getYRot(), player.getXRot()),
-                    look -> player.sendRotation(look.yaw(), look.pitch()));
+            this.attackCycle.drainOnBus(this.silent.get() ? MovementCorrection.STRICT : null);
         } else {
             this.attackCycle.reset(null);
         }
@@ -395,7 +396,20 @@ public final class CrystalAura extends Module {
         if (player == null || level == null || gameMode == null || !player.isAlive()) {
             return;
         }
-        this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
+        Rotation pendingAttackLook = this.attackCycle.unreportedAttack();
+        if (pendingAttackLook != null) {
+            this.rotation = pendingAttackLook;
+            if (!this.silent.get()) {
+                player.setYRot(pendingAttackLook.yaw());
+                player.setXRot(pendingAttackLook.pitch());
+            } else {
+                MovementCorrector corrector = MovementCorrector.current();
+                if (corrector != null) {
+                    corrector.request(this, pendingAttackLook, MovementCorrection.STRICT);
+                }
+            }
+            return;
+        }
         this.maintainSetDead();
         if (this.notWhileUsingItem.get() && player.isUsingItem()) {
             this.rotation = null;
@@ -886,11 +900,18 @@ public final class CrystalAura extends Module {
         PendingAction action = this.pendingAction;
         Rotation look = this.pendingRotation != null
                 ? this.pendingRotation : new Rotation(player.getYRot(), player.getXRot());
+        boolean rotated = !this.rotationMode.is(RotationMode.NONE) && this.pendingRotation != null;
         this.pendingAction = PendingAction.NONE;
         this.pendingRotation = null;
-        this.rotation = null;
+        this.rotation = rotated ? look : null;
+        if (rotated && this.silent.get()) {
+            MovementCorrector corrector = MovementCorrector.current();
+            if (corrector != null) {
+                corrector.request(this, look, MovementCorrection.STRICT);
+            }
+        }
         switch (action) {
-            case BREAK -> this.executeBreak(player, gameMode, look);
+            case BREAK -> this.executeBreak(player, gameMode, look, rotated);
             case PLACE_CRYSTAL -> this.executePlace(player, level, gameMode, eye, look, false);
             case PLACE_BASE -> this.executePlace(player, level, gameMode, eye, look, true);
             case NONE -> {
@@ -898,17 +919,19 @@ public final class CrystalAura extends Module {
         }
     }
 
-    private void executeBreak(final LocalPlayer player, final MultiPlayerGameMode gameMode, final Rotation look) {
+    private void executeBreak(final LocalPlayer player, final MultiPlayerGameMode gameMode,
+                              final Rotation look, final boolean rotated) {
         EndCrystal crystal = this.pendingCrystal;
         this.pendingCrystal = null;
         if (crystal == null || crystal.isRemoved() || !crystal.isAlive()) {
+            this.rotation = null;
             return;
         }
         gameMode.attack(player, crystal);
         if (this.breakSwing.get()) {
             player.swing(InteractionHand.MAIN_HAND);
         }
-        this.attackCycle.attacked(look, this.rotation != null && this.silent.get());
+        this.attackCycle.attacked(look, rotated && this.silent.get());
         this.attackedIds.add(crystal.getId());
         if (this.setDead.get()) {
             this.removeCrystalClientSide(crystal);
@@ -1073,15 +1096,19 @@ public final class CrystalAura extends Module {
                               final Rotation look) {
         AABB future = CrystalDamage.crystalBox(base);
         Vec3 eye = player.getEyePosition();
-        Rotation aim = Rotations.towards(eye, Rotations.nearestPoint(eye, future, 0.15));
-        if (Rotations.hit(eye, aim, future, Math.max(this.breakRange.get(), this.breakWallsRange.get())).isEmpty()) {
+        double reach = Math.max(this.breakRange.get(), this.breakWallsRange.get());
+        boolean strictTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
+        Rotation aim = strictTickEnd ? look : Rotations.towards(eye, Rotations.nearestPoint(eye, future, 0.15));
+        if (Rotations.hit(eye, aim, future, reach).isEmpty()) {
             return;
         }
         if (mc.getConnection() == null) {
             return;
         }
-        mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(),
-                aim.yaw(), aim.pitch(), player.onGround(), player.horizontalCollision));
+        if (!strictTickEnd) {
+            mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(),
+                    aim.yaw(), aim.pitch(), player.onGround(), player.horizontalCollision));
+        }
         boolean swung = false;
         int maxOffset = this.idPredictOffset.getInt();
         for (int offset = 1; offset <= maxOffset; offset++) {
@@ -1098,7 +1125,9 @@ public final class CrystalAura extends Module {
             this.attackedIds.add(id);
         }
         this.breakTimer.reset();
-        if (this.idPredictRotateBack.get()) {
+        if (strictTickEnd) {
+            this.attackCycle.attacked(look, !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
+        } else if (this.idPredictRotateBack.get()) {
             mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(),
                     player.getZ(), look.yaw(), look.pitch(), player.onGround(), player.horizontalCollision));
         }

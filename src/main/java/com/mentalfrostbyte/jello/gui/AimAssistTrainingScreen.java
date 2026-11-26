@@ -5,6 +5,7 @@ import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
 import com.mentalfrostbyte.jello.gui.modern.ModernStyle;
 import com.mentalfrostbyte.jello.gui.modern.ModernTypography;
 import com.mentalfrostbyte.jello.module.impl.combat.AimAssist;
+import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
 import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimStyleModel;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
@@ -51,10 +52,11 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
         }
     }
 
-    /** The Training setting is an action only for this exact registered module instance. */
+    /** Only the registered consumers' Training settings open this shared practice scene. */
     public static boolean isTrainingSetting(@Nullable Setting<?> setting) {
         return setting instanceof TextSetting && Client.getInstance().isStarted()
-            && Client.getInstance().getModuleManager().get(AimAssist.class).getTrainingSetting() == setting;
+            && (Client.getInstance().getModuleManager().get(AimAssist.class).getTrainingSetting() == setting
+                || Client.getInstance().getModuleManager().get(KillAura.class).getTrainingSetting() == setting);
     }
 
     public static String settingLabel() {

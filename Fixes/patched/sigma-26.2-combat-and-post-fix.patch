@@ -1,0 +1,2633 @@
+diff --git a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
+index dc9134df..3f4a90c3 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
++++ b/src/main/java/com/mentalfrostbyte/jello/gui/modern/ModernHudEditor.java
+@@ -142,7 +142,7 @@ public final class ModernHudEditor extends Screen {
+         KeyMapping.releaseAll();
+         if (minecraft.gameMode != null) {
+             minecraft.gameMode.stopDestroyBlock();
+-            if (minecraft.player != null && minecraft.player.isUsingItem()) minecraft.gameMode.releaseUsingItem(minecraft.player);
++            if (minecraft.isInPreMovementTick() && minecraft.player != null && minecraft.player.isUsingItem()) minecraft.gameMode.releaseUsingItem(minecraft.player);
+         }
+     }
+ 
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AdaptiveProjectileDefense.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AdaptiveProjectileDefense.java
+index b5784602..8023c4d1 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AdaptiveProjectileDefense.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AdaptiveProjectileDefense.java
+@@ -105,7 +105,7 @@ public final class AdaptiveProjectileDefense extends Module {
+     }
+ 
+     private void releaseShield() {
+-        if (ownsShield(mc.player) && mc.gameMode != null && !mc.options.keyUse.isDown()
++        if (mc.isInPreMovementTick() && ownsShield(mc.player) && mc.gameMode != null && !mc.options.keyUse.isDown()
+                 && mc.player.connection.getConnection().isConnected()) mc.gameMode.releaseUsingItem(mc.player);
+         forgetShield();
+     }
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycle.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycle.java
+index ab78bd61..472048f9 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycle.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycle.java
+@@ -1,8 +1,17 @@
+ package com.mentalfrostbyte.jello.module.impl.combat;
+ 
++import com.mentalfrostbyte.jello.event.EventBus;
++import com.mentalfrostbyte.jello.event.EventPriority;
++import com.mentalfrostbyte.jello.event.EventTarget;
++import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
++import com.mentalfrostbyte.jello.event.impl.game.EventTick;
++import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
++import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
++import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
+ import java.util.function.Consumer;
++import net.minecraft.client.Minecraft;
+ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+ import org.jspecify.annotations.Nullable;
+ 
+@@ -13,20 +22,52 @@ import org.jspecify.annotations.Nullable;
+  */
+ final class AuraAttackCycle {
+ 
++    private final DrainListener drainListener = new DrainListener();
+     private @Nullable Rotation lastSent;
+     private @Nullable Rotation unreportedAttack;
++    private @Nullable Rotation preCamera;
++    private @Nullable MovementCorrection drainCorrection;
+     private boolean ownsSilentLook;
++    private boolean drainingAttackLook;
++    private boolean drainingOnBus;
+ 
+     void reset(final @Nullable Rotation initial) {
++        this.stopBusDrain();
+         this.lastSent = initial;
+         this.unreportedAttack = null;
++        this.preCamera = null;
+         this.ownsSilentLook = false;
++        this.drainingAttackLook = false;
++    }
++
++    /**
++     * Reclaims wire tracking when the owning module is re-enabled: if a background drain is still
++     * finishing a previous hit or silent handback, keep its live wire state instead of wiping it.
++     */
++    void reclaim(final @Nullable Rotation initial) {
++        boolean wasBusy = this.isBusy();
++        this.stopBusDrain();
++        if (!wasBusy) {
++            this.reset(initial);
++        }
+     }
+ 
+     @Nullable Rotation lastSent() {
+         return this.lastSent;
+     }
+ 
++    @Nullable Rotation unreportedAttack() {
++        return this.unreportedAttack;
++    }
++
++    boolean hasUnreportedAttack() {
++        return this.unreportedAttack != null;
++    }
++
++    boolean isDrainingOnBus() {
++        return this.drainingOnBus;
++    }
++
+     /** Another item action must wait until both the attack report and silent-look handback are complete. */
+     boolean isBusy() {
+         return this.unreportedAttack != null || this.ownsSilentLook;
+@@ -43,6 +84,9 @@ final class AuraAttackCycle {
+             return;
+         }
+         if (event.isPre()) {
++            Rotation camera = new Rotation(event.getYaw(), event.getPitch());
++            this.preCamera = camera;
++            this.drainingAttackLook = false;
+             if (desired != null && silent) {
+                 this.ownsSilentLook = true;
+                 event.setYaw(desired.yaw());
+@@ -50,8 +94,15 @@ final class AuraAttackCycle {
+                 if (!desired.equals(this.lastSent)) {
+                     event.forceRotation();
+                 }
++            } else if (desired == null && this.unreportedAttack != null) {
++                // Finish reporting a queued hit or item use inside this tick's normal movement packet
++                // before handing a silent look back to the camera on the following tick.
++                this.drainingAttackLook = true;
++                this.ownsSilentLook |= !camera.equals(this.unreportedAttack);
++                event.setYaw(this.unreportedAttack.yaw());
++                event.setPitch(this.unreportedAttack.pitch());
++                event.forceRotation();
+             } else if (this.ownsSilentLook) {
+-                Rotation camera = new Rotation(event.getYaw(), event.getPitch());
+                 if (!camera.equals(this.lastSent)) {
+                     event.forceRotation();
+                 } else if (this.unreportedAttack == null) {
+@@ -63,8 +114,12 @@ final class AuraAttackCycle {
+                 event.forceRotation();
+             }
+         } else if (event.isPost()) {
++            Rotation camera = this.drainingAttackLook && this.preCamera != null
++                    ? this.preCamera : new Rotation(event.getYaw(), event.getPitch());
++            this.drainingAttackLook = false;
++            this.preCamera = null;
+             if (this.ownsSilentLook && this.unreportedAttack == null && !(desired != null && silent)
+-                    && new Rotation(event.getYaw(), event.getPitch()).equals(this.lastSent)) {
++                    && camera.equals(this.lastSent)) {
+                 this.ownsSilentLook = false;
+             }
+         }
+@@ -80,6 +135,53 @@ final class AuraAttackCycle {
+         }
+     }
+ 
++    /**
++     * Finishes draining a pending attack look and/or silent camera handback through normal per-tick
++     * {@link EventMotion} reports after the owning module disables, without sending out-of-tick
++     * or duplicate {@code MovePlayerPacket}s on 1.21.2+ / 26.2 protocols.
++     */
++    void drainOnBus(final @Nullable MovementCorrection correctionMode) {
++        if (!this.isBusy()) {
++            this.reset(null);
++            return;
++        }
++        this.drainCorrection = correctionMode;
++        this.syncDrainCorrection();
++        if (!this.drainingOnBus) {
++            this.drainingOnBus = true;
++            EventBus.register(this.drainListener);
++        }
++    }
++
++    private void stopBusDrain() {
++        this.drainCorrection = null;
++        MovementCorrector corrector = lookupCorrector();
++        if (corrector != null) {
++            corrector.release(this.drainListener);
++        }
++        if (this.drainingOnBus) {
++            this.drainingOnBus = false;
++            EventBus.unregister(this.drainListener);
++        }
++    }
++
++    private void syncDrainCorrection() {
++        MovementCorrector corrector = lookupCorrector();
++        if (corrector == null) {
++            return;
++        }
++        Rotation pending = this.unreportedAttack;
++        if (pending != null && this.ownsSilentLook && this.drainCorrection != null) {
++            corrector.request(this.drainListener, pending, this.drainCorrection);
++        } else {
++            corrector.release(this.drainListener);
++        }
++    }
++
++    private static @Nullable MovementCorrector lookupCorrector() {
++        return Minecraft.getInstance() != null ? MovementCorrector.current() : null;
++    }
++
+     /** Completes a report cancelled last tick before the next tick can select a different look. */
+     void flushAttack(final Consumer<Rotation> report) {
+         Rotation attackLook = this.unreportedAttack;
+@@ -101,4 +203,49 @@ final class AuraAttackCycle {
+             this.reset(null);
+         }
+     }
++
++    private final class DrainListener {
++        @EventTarget
++        public void onTick(final EventTick event) {
++            if (!event.isPre()) {
++                return;
++            }
++            if (!AuraAttackCycle.this.isBusy()) {
++                AuraAttackCycle.this.stopBusDrain();
++                return;
++            }
++            AuraAttackCycle.this.syncDrainCorrection();
++        }
++
++        @EventTarget
++        public void onMotion(final EventMotion event) {
++            if (!AuraAttackCycle.this.isBusy()) {
++                AuraAttackCycle.this.stopBusDrain();
++                return;
++            }
++            AuraAttackCycle.this.motion(event, null, false);
++            if (!AuraAttackCycle.this.isBusy()) {
++                AuraAttackCycle.this.stopBusDrain();
++            }
++        }
++
++        @EventTarget(EventPriority.LOWEST)
++        public void onSend(final EventSendPacket event) {
++            Minecraft mc = Minecraft.getInstance();
++            if ((mc != null && !mc.isSameThread()) || event.isCancelled()) {
++                return;
++            }
++            if (event.getPacket() instanceof ServerboundMovePlayerPacket move) {
++                AuraAttackCycle.this.reported(move);
++                if (!AuraAttackCycle.this.isBusy()) {
++                    AuraAttackCycle.this.stopBusDrain();
++                }
++            }
++        }
++
++        @EventTarget
++        public void onLoadWorld(final EventLoadWorld event) {
++            AuraAttackCycle.this.reset(null);
++        }
++    }
+ }
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AutoProjectile.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AutoProjectile.java
+index 6dc3eeea..521a06ea 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AutoProjectile.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/AutoProjectile.java
+@@ -1,5 +1,6 @@
+ package com.mentalfrostbyte.jello.module.impl.combat;
+ 
++import com.mentalfrostbyte.jello.event.EventBus;
+ import com.mentalfrostbyte.jello.event.EventPriority;
+ import com.mentalfrostbyte.jello.event.EventTarget;
+ import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
+@@ -7,7 +8,6 @@ import com.mentalfrostbyte.jello.event.impl.game.EventTick;
+ import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+ import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
+ import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
+-import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
+ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
+ import com.mentalfrostbyte.jello.module.Module;
+ import com.mentalfrostbyte.jello.module.ModuleCategory;
+@@ -25,13 +25,13 @@ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
+ import java.util.ArrayList;
+ import java.util.Comparator;
+ import java.util.List;
+-import net.minecraft.util.Util;
+ import net.minecraft.client.player.LocalPlayer;
+ import net.minecraft.core.component.DataComponents;
+ import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+ import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.Util;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.entity.LivingEntity;
+@@ -44,7 +44,7 @@ import net.minecraft.world.item.component.ChargedProjectiles;
+ import net.minecraft.world.phys.Vec3;
+ import org.jspecify.annotations.Nullable;
+ 
+-/** Hotbar-only throwing, using the same rotation report and item-use path as normal client actions. */
++/** Hotbar-only throwing, using the same pre-movement item-use and rotation report order as vanilla ticks. */
+ public final class AutoProjectile extends Module {
+     private static final List<String> CATALOG = List.of("minecraft:snowball", "minecraft:egg", "minecraft:blue_egg", "minecraft:brown_egg",
+             "minecraft:ender_pearl", "minecraft:experience_bottle", "minecraft:splash_potion",
+@@ -64,11 +64,13 @@ public final class AutoProjectile extends Module {
+             List.of("minecraft:snowball", "minecraft:egg"), CATALOG));
+ 
+     private final ProjectileCadence cadence = new ProjectileCadence();
++    private final AuraAttackCycle lookCycle = new AuraAttackCycle();
++    private final DeferredCancelSlot deferredCancel = new DeferredCancelSlot();
+     private @Nullable LocalPlayer owner;
+     private @Nullable LivingEntity target;
+     private @Nullable Plan plan;
+     private @Nullable EventMotion reportedMotion;
+-    private @Nullable EventSendPacket reportedPacket;
++    private @Nullable Rotation reportedAim;
+     private @Nullable EventSendPacket usedPacket;
+     private @Nullable Rotation useRotation;
+     private boolean useAccepted;
+@@ -76,7 +78,7 @@ public final class AutoProjectile extends Module {
+     private int savedSlot = -1;
+     private @Nullable Item heldItem;
+     private boolean charging;
+-    private boolean ownsLook;
++    private boolean crossbowReadyToFire;
+     private int chargeStarted;
+     private int spentCrossbowSlots;
+ 
+@@ -87,11 +89,19 @@ public final class AutoProjectile extends Module {
+                 "Predicts moving targets and silently throws whitelisted hotbar projectiles. Yields to active Aura and Scaffold.");
+     }
+ 
++    @Override
++    protected void onEnable() {
++        deferredCancel.cancel();
++        LocalPlayer player = mc.player;
++        lookCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
++    }
++
+     @EventTarget(EventPriority.LOW)
+     public void onTick(EventTick event) {
+         if (!event.isPre()) return;
+         reportedMotion = null;
+-        reportedPacket = null;
++        Rotation previousReportedAim = reportedAim;
++        reportedAim = null;
+         plan = null;
+         LocalPlayer player = mc.player;
+         if (owner != player) {
+@@ -103,6 +113,12 @@ public final class AutoProjectile extends Module {
+                 if (!CrossbowItem.isCharged(player.getInventory().getItem(slot))) spentCrossbowSlots &= ~(1 << slot);
+             }
+         }
++        // Finish reporting an already-sent use rotation if last tick's EventMotion was cancelled.
++        Rotation pendingUseLook = lookCycle.unreportedAttack();
++        if (pendingUseLook != null) {
++            requestCorrection(pendingUseLook);
++            return;
++        }
+         if (!available(player) || busy() || manualInput()
+                 || (heldSlot < 0 && player.isUsingItem())) {
+             pause();
+@@ -155,94 +171,121 @@ public final class AutoProjectile extends Module {
+             releaseLook();
+             return;
+         }
+-        requestCorrection(plan.aim());
+-    }
+ 
+-    /** Runs before BlockFly's LOWEST motion listener; a later placement can still take the look. */
+-    @EventTarget(EventPriority.LOW)
+-    public void onMotion(EventMotion event) {
+-        if (event.isPost()) return;
+-        LocalPlayer player = mc.player;
+-        if (plan == null || !available(player) || busy() || !validTarget(player, target)) return;
+-        // Keep the look used by this tick's movement correction. Rebuild its path from the new position;
+-        // if that fixed look no longer reaches the target, keep aiming but do not fire this tick.
+-        Plan previous = plan;
+-        event.setYaw(previous.aim().yaw());
+-        event.setPitch(previous.aim().pitch());
+-        event.forceRotation();
+-        Plan fresh = aim(player, target, previous.slot(), previous.aim());
+-        if (fresh == null) {
+-            plan = null;
+-            ownsLook = true;
+-            return;
++        // Execute strictly inside EventTick PRE (before sneak/sprint, sendPosition and CLIENT_TICK_END)
++        // once the previous tick's movement report confirmed an unobstructed aim on wire.
++        if (previousReportedAim != null) {
++            Plan locked = aim(player, target, plan.slot(), previousReportedAim);
++            if (locked != null && ProjectileAimValidator.clear(player, target, locked.aim())) {
++                if (executeInTick(player, locked)) {
++                    return;
++                }
++            }
+         }
+-        plan = fresh;
+-        reportedMotion = event;
++
++        requestCorrection(new Rotation(plan.aim().yaw(), plan.aim().pitch()));
+     }
+ 
+-    /** All scaffold PRE/POST placement work has finished before this stage. */
+-    @EventTarget(EventPriority.LOW)
+-    public void onUpdate(EventUpdate event) {
+-        if (!event.isPost() || plan == null) return;
+-        if (reportedMotion == null) {
+-            pause();
+-            return;
+-        }
+-        LocalPlayer player = mc.player;
+-        Plan action = plan;
+-        EventMotion motion = reportedMotion;
+-        EventSendPacket sent = reportedPacket;
+-        reportedMotion = null;
+-        if (!available(player) || busy() || manualInput() || motion.isCancelled()
+-                || sent == null || sent.isCancelled()
+-                || !(sent.getPacket() instanceof ServerboundMovePlayerPacket move) || !move.hasRotation()
+-                || !sameLook(move.getYRot(0), move.getXRot(0), action.aim())
+-                || !sameLook(motion.getYaw(), motion.getPitch(), action.aim())
+-                || !validTarget(player, target) || !ProjectileAimValidator.clear(player, target, action.aim())) {
+-            pause();
+-            return;
+-        }
+-        ownsLook = true;
++    private boolean executeInTick(LocalPlayer player, Plan action) {
++        Rotation committed = new Rotation(action.aim().yaw(), action.aim().pitch());
+         if (heldSlot < 0) {
+             ItemStack stack = player.getInventory().getItem(action.slot());
+             if (stack.getItem() != action.item() || !usable(player, stack)) {
+                 pause();
+-                return;
++                return true;
+             }
+             savedSlot = player.getInventory().getSelectedSlot();
+             heldSlot = action.slot();
+             heldItem = stack.getItem();
+             chargeStarted = player.tickCount;
++            crossbowReadyToFire = false;
+             player.getInventory().setSelectedSlot(heldSlot);
+             mc.gameMode.syncCarriedItem();
+             boolean charge = needsCharge(stack);
+             InteractionResult result = use(player, action.aim());
+             charging = charge && player.isUsingItem();
++            if (useAccepted) {
++                // BadPacketsJ (1.21+ / 26.2) requires this tick's MovePlayerPacket to match USE_ITEM's rotation.
++                lookCycle.attacked(committed, true);
++                requestCorrection(committed);
++            }
+             if (charging && useAccepted) {
+-                return;
++                plan = action;
++                return true;
+             }
+-            if (!charge && useAccepted && result.consumesAction()) shot();
+-            else pause();
+-            return;
+-        }
+-        if (player.getInventory().getSelectedSlot() != heldSlot || player.getMainHandItem().getItem() != heldItem) {
+-            pause();
+-            return;
++            if (!charge && useAccepted && result.consumesAction()) {
++                shot();
++            } else {
++                pause();
++            }
++            return true;
+         }
++
+         ItemStack stack = player.getMainHandItem();
+         if (stack.getItem() instanceof CrossbowItem) {
+-            // Loading runs on the server. A local charge timer alone can release too early at low TPS.
++            // PacketOrderI forbids sending USE_ITEM in the same tick as RELEASE_USE_ITEM: release on tick N, fire on tick N+1.
+             if (charging && CrossbowItem.isCharged(stack)) {
+-                mc.gameMode.releaseUsingItem(player); // crossbow release stops use, never fires
++                mc.gameMode.releaseUsingItem(player);
+                 charging = false;
+-                if (use(player, action.aim()).consumesAction() && useAccepted) shot();
+-                else pause();
++                crossbowReadyToFire = true;
++                plan = action;
++                lookCycle.attacked(committed, true);
++                requestCorrection(committed);
++                return true;
++            }
++            if (!charging && crossbowReadyToFire && CrossbowItem.isCharged(stack)) {
++                crossbowReadyToFire = false;
++                if (use(player, action.aim()).consumesAction() && useAccepted) {
++                    lookCycle.attacked(committed, true);
++                    requestCorrection(committed);
++                    shot();
++                } else {
++                    pause();
++                }
++                return true;
+             }
+         } else if (charging && player.getTicksUsingItem() >= (stack.getItem() instanceof BowItem ? 20 : 10)) {
+             mc.gameMode.releaseUsingItem(player);
+             charging = false;
++            lookCycle.attacked(committed, true);
++            requestCorrection(committed);
+             shot();
++            return true;
+         }
++        return false;
++    }
++
++    /** Runs before BlockFly's LOWEST motion listener; a later placement can still take the look. */
++    @EventTarget(EventPriority.LOW)
++    public void onMotion(EventMotion event) {
++        LocalPlayer player = mc.player;
++        if (event.isPost()) {
++            Rotation desired = plan != null && available(player) && !busy() && validTarget(player, target)
++                    ? new Rotation(plan.aim().yaw(), plan.aim().pitch()) : null;
++            lookCycle.motion(event, desired, desired != null);
++            return;
++        }
++        if (lookCycle.hasUnreportedAttack()) {
++            // Keep this tick's MovePlayerPacket locked to the exact USE_ITEM / RELEASE_USE_ITEM rotation.
++            lookCycle.motion(event, null, false);
++            return;
++        }
++        if (plan == null || !available(player) || busy() || !validTarget(player, target)) {
++            lookCycle.motion(event, null, false);
++            return;
++        }
++        // Keep the look used by this tick's movement correction. Rebuild its path from the new position;
++        // if that fixed look no longer reaches the target, keep aiming for next tick without arming a shot.
++        Plan previous = plan;
++        Rotation desired = new Rotation(previous.aim().yaw(), previous.aim().pitch());
++        lookCycle.motion(event, desired, true);
++        Plan fresh = aim(player, target, previous.slot(), desired);
++        if (fresh == null) {
++            plan = null;
++            return;
++        }
++        plan = fresh;
++        reportedMotion = event;
+     }
+ 
+     @EventTarget
+@@ -262,9 +305,13 @@ public final class AutoProjectile extends Module {
+     @EventTarget(EventPriority.LOWEST)
+     public void onSend(EventSendPacket event) {
+         if (!mc.isSameThread()) return;
+-        if (useRotation == null && reportedMotion != null && event.getPacket() instanceof ServerboundMovePlayerPacket) {
+-            // Retain the event itself: later listeners may still replace/cancel its packet.
+-            reportedPacket = event;
++        if (!event.isCancelled() && useRotation == null && event.getPacket() instanceof ServerboundMovePlayerPacket move) {
++            lookCycle.reported(move);
++            if (reportedMotion != null && !reportedMotion.isCancelled() && plan != null && move.hasRotation()
++                    && sameLook(move.getYRot(0), move.getXRot(0), plan.aim())
++                    && sameLook(reportedMotion.getYaw(), reportedMotion.getPitch(), plan.aim())) {
++                reportedAim = new Rotation(plan.aim().yaw(), plan.aim().pitch());
++            }
+         }
+         Rotation look = useRotation;
+         if (look == null || event.isCancelled()) return;
+@@ -318,7 +365,7 @@ public final class AutoProjectile extends Module {
+         return aim(player, candidate, slot, null);
+     }
+ 
+-    private @Nullable Plan aim(LocalPlayer player, LivingEntity candidate, int slot, ProjectileAim.@Nullable Aim fixedLook) {
++    private @Nullable Plan aim(LocalPlayer player, LivingEntity candidate, int slot, @Nullable Rotation fixedLook) {
+         if (awaitingCrossbow(slot)) return null;
+         ItemStack stack = player.getInventory().getItem(slot);
+         if (!usable(player, stack)) return null;
+@@ -379,7 +426,7 @@ public final class AutoProjectile extends Module {
+     /** Visible aim helpers yield while an automated throw owns the look or a charged item. */
+     public boolean isActivelyWorking() {
+         return isEnabled() && owner == mc.player && available(mc.player)
+-                && (plan != null || heldSlot >= 0 || charging || reportedMotion != null);
++                && (plan != null || heldSlot >= 0 || charging || reportedMotion != null || lookCycle.isBusy());
+     }
+ 
+     private static boolean busy() {
+@@ -389,9 +436,9 @@ public final class AutoProjectile extends Module {
+         return (aura != null && aura.isActivelyWorking()) || (scaffold != null && scaffold.isActivelyWorking());
+     }
+ 
+-    private void requestCorrection(ProjectileAim.Aim aim) {
++    private void requestCorrection(Rotation aim) {
+         MovementCorrector corrector = MovementCorrector.current();
+-        if (corrector != null) corrector.request(this, new Rotation(aim.yaw(), aim.pitch()), corrector.mode(), -100);
++        if (corrector != null) corrector.request(this, aim, corrector.mode(), -100);
+     }
+ 
+     private static boolean sameLook(float yaw, float pitch, ProjectileAim.Aim aim) {
+@@ -405,6 +452,7 @@ public final class AutoProjectile extends Module {
+         if (heldItem instanceof CrossbowItem) spentCrossbowSlots |= 1 << heldSlot;
+         releaseHeld(false);
+         plan = null;
++        reportedAim = null;
+         releaseLook();
+     }
+ 
+@@ -415,35 +463,59 @@ public final class AutoProjectile extends Module {
+     private void releaseHeld(boolean cancel) {
+         LocalPlayer player = owner;
+         if (heldSlot >= 0 && player != null && player == mc.player && mc.gameMode != null) {
++            boolean inTick = mc.isInPreMovementTick();
+             boolean stillSelected = player.getInventory().getSelectedSlot() == heldSlot;
+             if (cancel && charging && player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
+                 // A slot change cancels use server-side. RELEASE_USE_ITEM here would accidentally shoot a bow/trident.
+-                if (stillSelected) {
+-                    int cancellationSlot = savedSlot == heldSlot ? (heldSlot + 1) % 9 : savedSlot;
+-                    player.getInventory().setSelectedSlot(cancellationSlot);
++                int cancellationSlot = savedSlot >= 0 && savedSlot != heldSlot ? savedSlot : (heldSlot + 1) % 9;
++                if (inTick) {
++                    if (stillSelected) {
++                        player.getInventory().setSelectedSlot(cancellationSlot);
++                    }
+                     mc.gameMode.syncCarriedItem();
++                    player.stopUsingItem();
++                    if (stillSelected && savedSlot >= 0) {
++                        player.getInventory().setSelectedSlot(savedSlot);
++                        mc.gameMode.syncCarriedItem();
++                    }
+                 } else {
+-                    mc.gameMode.syncCarriedItem();
++                    player.stopUsingItem();
++                    if (stillSelected && savedSlot >= 0 && savedSlot != heldSlot) {
++                        player.getInventory().setSelectedSlot(savedSlot);
++                        mc.gameMode.markCarriedItemDirty();
++                    } else if (stillSelected) {
++                        deferredCancel.arm(player, cancellationSlot, savedSlot >= 0 ? savedSlot : heldSlot);
++                    } else {
++                        mc.gameMode.markCarriedItemDirty();
++                    }
+                 }
+-                player.stopUsingItem();
+-            }
+-            if (stillSelected && savedSlot >= 0) {
++            } else if (stillSelected && savedSlot >= 0) {
+                 player.getInventory().setSelectedSlot(savedSlot);
+-                mc.gameMode.syncCarriedItem();
++                if (inTick) {
++                    mc.gameMode.syncCarriedItem();
++                } else {
++                    mc.gameMode.markCarriedItemDirty();
++                }
+             }
+         }
+         heldSlot = savedSlot = -1;
+         heldItem = null;
+         charging = false;
++        crossbowReadyToFire = false;
+     }
+ 
+     private void releaseLook() {
+         MovementCorrector corrector = MovementCorrector.current();
+-        if (corrector != null) corrector.release(this);
+-        if (ownsLook && owner != null && owner == mc.player && owner.connection.getConnection().isConnected() && !busy()) {
+-            owner.sendRotation(owner.getYRot(), owner.getXRot());
++        if (!lookCycle.hasUnreportedAttack() && corrector != null) {
++            corrector.release(this);
++        }
++        if (!isEnabled()) {
++            if (owner != null && owner == mc.player && mc.level != null && owner.connection.hasClientLoaded()) {
++                lookCycle.drainOnBus(corrector != null ? corrector.mode() : null);
++            } else {
++                lookCycle.reset(null);
++            }
+         }
+-        ownsLook = false;
+     }
+ 
+     private void clear(boolean restore) {
+@@ -451,18 +523,21 @@ public final class AutoProjectile extends Module {
+             releaseHeld(true);
+             releaseLook();
+         } else {
++            deferredCancel.cancel();
+             MovementCorrector corrector = MovementCorrector.current();
+             if (corrector != null) corrector.release(this);
++            lookCycle.reset(null);
+             heldSlot = savedSlot = -1;
+             heldItem = null;
+-            charging = ownsLook = false;
++            charging = false;
++            crossbowReadyToFire = false;
+             spentCrossbowSlots = 0;
+         }
+         target = null;
+         plan = null;
+         reportedMotion = null;
++        reportedAim = null;
+         useRotation = null;
+-        reportedPacket = null;
+         usedPacket = null;
+         useAccepted = false;
+         cadence.reset();
+@@ -480,4 +555,53 @@ public final class AutoProjectile extends Module {
+         clear(false);
+         owner = null;
+     }
++
++    /** Cancels a mid-frame bow/trident draw at the start of the next tick when savedSlot == heldSlot. */
++    private static final class DeferredCancelSlot {
++        private @Nullable LocalPlayer targetPlayer;
++        private int bounceSlot = -1;
++        private int finalSlot = -1;
++        private boolean registered;
++
++        void arm(LocalPlayer player, int bounce, int restore) {
++            this.targetPlayer = player;
++            this.bounceSlot = bounce;
++            this.finalSlot = restore;
++            if (!this.registered) {
++                this.registered = true;
++                EventBus.register(this);
++            }
++        }
++
++        void cancel() {
++            this.targetPlayer = null;
++            this.bounceSlot = this.finalSlot = -1;
++            if (this.registered) {
++                this.registered = false;
++                EventBus.unregister(this);
++            }
++        }
++
++        @EventTarget(EventPriority.HIGHEST)
++        public void onTick(EventTick event) {
++            if (!event.isPre()) return;
++            LocalPlayer player = this.targetPlayer;
++            int bounce = this.bounceSlot;
++            int restore = this.finalSlot;
++            cancel();
++            if (player != null && player == mc.player && mc.gameMode != null && mc.getConnection() != null && bounce >= 0) {
++                player.getInventory().setSelectedSlot(bounce);
++                mc.gameMode.syncCarriedItem();
++                if (restore >= 0) {
++                    player.getInventory().setSelectedSlot(restore);
++                    mc.gameMode.syncCarriedItem();
++                }
++            }
++        }
++
++        @EventTarget
++        public void onLoadWorld(EventLoadWorld event) {
++            cancel();
++        }
++    }
+ }
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/CrystalAura.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/CrystalAura.java
+index 7c45c286..16936618 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/CrystalAura.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/CrystalAura.java
+@@ -19,6 +19,8 @@ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
+ import com.mentalfrostbyte.jello.util.time.Timer;
++import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
++import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+ import java.util.ArrayList;
+ import java.util.Comparator;
+ import java.util.HashMap;
+@@ -322,7 +324,7 @@ public final class CrystalAura extends Module {
+     protected void onEnable() {
+         this.clearState();
+         LocalPlayer player = mc.player;
+-        this.attackCycle.reset(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
++        this.attackCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
+         this.placeTimer.reset();
+         this.breakTimer.reset();
+         this.basePlaceTimer.reset();
+@@ -348,8 +350,7 @@ public final class CrystalAura extends Module {
+             corrector.release(this);
+         }
+         if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
+-            this.attackCycle.stop(new Rotation(player.getYRot(), player.getXRot()),
+-                    look -> player.sendRotation(look.yaw(), look.pitch()));
++            this.attackCycle.drainOnBus(this.silent.get() ? MovementCorrection.STRICT : null);
+         } else {
+             this.attackCycle.reset(null);
+         }
+@@ -395,7 +396,20 @@ public final class CrystalAura extends Module {
+         if (player == null || level == null || gameMode == null || !player.isAlive()) {
+             return;
+         }
+-        this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
++        Rotation pendingAttackLook = this.attackCycle.unreportedAttack();
++        if (pendingAttackLook != null) {
++            this.rotation = pendingAttackLook;
++            if (!this.silent.get()) {
++                player.setYRot(pendingAttackLook.yaw());
++                player.setXRot(pendingAttackLook.pitch());
++            } else {
++                MovementCorrector corrector = MovementCorrector.current();
++                if (corrector != null) {
++                    corrector.request(this, pendingAttackLook, MovementCorrection.STRICT);
++                }
++            }
++            return;
++        }
+         this.maintainSetDead();
+         if (this.notWhileUsingItem.get() && player.isUsingItem()) {
+             this.rotation = null;
+@@ -886,11 +900,18 @@ public final class CrystalAura extends Module {
+         PendingAction action = this.pendingAction;
+         Rotation look = this.pendingRotation != null
+                 ? this.pendingRotation : new Rotation(player.getYRot(), player.getXRot());
++        boolean rotated = !this.rotationMode.is(RotationMode.NONE) && this.pendingRotation != null;
+         this.pendingAction = PendingAction.NONE;
+         this.pendingRotation = null;
+-        this.rotation = null;
++        this.rotation = rotated ? look : null;
++        if (rotated && this.silent.get()) {
++            MovementCorrector corrector = MovementCorrector.current();
++            if (corrector != null) {
++                corrector.request(this, look, MovementCorrection.STRICT);
++            }
++        }
+         switch (action) {
+-            case BREAK -> this.executeBreak(player, gameMode, look);
++            case BREAK -> this.executeBreak(player, gameMode, look, rotated);
+             case PLACE_CRYSTAL -> this.executePlace(player, level, gameMode, eye, look, false);
+             case PLACE_BASE -> this.executePlace(player, level, gameMode, eye, look, true);
+             case NONE -> {
+@@ -898,17 +919,19 @@ public final class CrystalAura extends Module {
+         }
+     }
+ 
+-    private void executeBreak(final LocalPlayer player, final MultiPlayerGameMode gameMode, final Rotation look) {
++    private void executeBreak(final LocalPlayer player, final MultiPlayerGameMode gameMode,
++                              final Rotation look, final boolean rotated) {
+         EndCrystal crystal = this.pendingCrystal;
+         this.pendingCrystal = null;
+         if (crystal == null || crystal.isRemoved() || !crystal.isAlive()) {
++            this.rotation = null;
+             return;
+         }
+         gameMode.attack(player, crystal);
+         if (this.breakSwing.get()) {
+             player.swing(InteractionHand.MAIN_HAND);
+         }
+-        this.attackCycle.attacked(look, this.rotation != null && this.silent.get());
++        this.attackCycle.attacked(look, rotated && this.silent.get());
+         this.attackedIds.add(crystal.getId());
+         if (this.setDead.get()) {
+             this.removeCrystalClientSide(crystal);
+@@ -1073,15 +1096,19 @@ public final class CrystalAura extends Module {
+                               final Rotation look) {
+         AABB future = CrystalDamage.crystalBox(base);
+         Vec3 eye = player.getEyePosition();
+-        Rotation aim = Rotations.towards(eye, Rotations.nearestPoint(eye, future, 0.15));
+-        if (Rotations.hit(eye, aim, future, Math.max(this.breakRange.get(), this.breakWallsRange.get())).isEmpty()) {
++        double reach = Math.max(this.breakRange.get(), this.breakWallsRange.get());
++        boolean strictTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
++        Rotation aim = strictTickEnd ? look : Rotations.towards(eye, Rotations.nearestPoint(eye, future, 0.15));
++        if (Rotations.hit(eye, aim, future, reach).isEmpty()) {
+             return;
+         }
+         if (mc.getConnection() == null) {
+             return;
+         }
+-        mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(),
+-                aim.yaw(), aim.pitch(), player.onGround(), player.horizontalCollision));
++        if (!strictTickEnd) {
++            mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(),
++                    aim.yaw(), aim.pitch(), player.onGround(), player.horizontalCollision));
++        }
+         boolean swung = false;
+         int maxOffset = this.idPredictOffset.getInt();
+         for (int offset = 1; offset <= maxOffset; offset++) {
+@@ -1098,7 +1125,9 @@ public final class CrystalAura extends Module {
+             this.attackedIds.add(id);
+         }
+         this.breakTimer.reset();
+-        if (this.idPredictRotateBack.get()) {
++        if (strictTickEnd) {
++            this.attackCycle.attacked(look, !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
++        } else if (this.idPredictRotateBack.get()) {
+             mc.getConnection().send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(),
+                     player.getZ(), look.yaw(), look.pitch(), player.onGround(), player.horizontalCollision));
+         }
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/KillAura.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/KillAura.java
+index 2fcd691e..92972ccd 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/KillAura.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/combat/KillAura.java
+@@ -14,6 +14,8 @@ import com.mentalfrostbyte.jello.setting.BooleanSetting;
+ import com.mentalfrostbyte.jello.setting.ColorSetting;
+ import com.mentalfrostbyte.jello.setting.EnumSetting;
+ import com.mentalfrostbyte.jello.setting.NumberSetting;
++import com.mentalfrostbyte.jello.util.math.HitboxAperture;
++import com.mentalfrostbyte.jello.util.math.HitboxAperture.Selection;
+ import com.mentalfrostbyte.jello.util.math.Rotations;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+@@ -48,12 +50,13 @@ import org.jspecify.annotations.Nullable;
+  * ({@link EventMotion}) and the outgoing packets - and attacks through the same {@code MultiPlayerGameMode.attack} a click goes through, so {@code EventAttack}
+  * listeners such as Criticals and SuperKnockback work with it.</p>
+  *
+- * <p>Each tick, at its start, it picks a target, works out this tick's look direction, and - if that look meets the
+- * target within reach and an attack is due - attacks, all before the tick's movement report. That is the order a
+- * vanilla click keeps: the attack goes out first and the look it was aimed with follows in the same tick's movement
+- * packet. Which entities are eligible comes from the shared {@link Target} module. With {@code Silent} the look is only
+- * reported to the server; the camera stays with the player, and the walking is kept in step with the reported look by
+- * the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
++ * <p>Each tick, at its start, it picks a target, works out this tick's look direction through any unobstructed hitbox
++ * aperture (stairs, slabs, fences or ledges, honouring {@code Hit Position} first and falling back to open gaps when
++ * blocked), and - if that look meets the target within reach and an attack is due - attacks, all before the tick's
++ * movement report. That is the order a vanilla click keeps: the attack goes out first and the look it was aimed with
++ * follows in the same tick's movement packet. Which entities are eligible comes from the shared {@link Target} module.
++ * With {@code Silent} the look is only reported to the server; the camera stays with the player, and the walking is
++ * kept in step with the reported look by the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
+  *
+  * <p>The rotation and AutoBlock modes span both sides of the line an anticheat draws, for {@code SelfDetection} to be
+  * tested with; which of them GrimAC flags, and why, is in {@code SELFCHECK_PORTING.md}. {@code Claude1}, {@code Claude2}
+@@ -85,16 +88,33 @@ public class KillAura extends Module {
+     public enum RotationMode {
+         /** Never turns; attacks what the player happens to be looking at, or - with Ray Trace off - anything in reach. */
+         NONE,
+-        /** Faces the target's centre at once, keeping the yaw continuous. */
++        /** Faces the selected aim point at once, keeping the yaw continuous. */
+         SNAP,
+-        /** Faces the target's centre at once with atan2's yaw as it comes, wrapped to -180..180. */
++        /** Faces the selected aim point at once with atan2's yaw as it comes, wrapped to -180..180. */
+         WRAPPED,
+-        /** Turns towards the target's centre by at most {@code Turn Speed} a tick. */
++        /** Turns towards the selected aim point by at most {@code Turn Speed} a tick. */
+         SMOOTH,
+-        /** Experimental: eases towards the nearest point of the target in whole mouse steps. */
++        /** Experimental: eases towards the selected aim point in whole mouse steps. */
+         CLAUDE1
+     }
+ 
++    /** Which vertical band of the hitbox to aim at first; falls back to any exposed aperture when blocked or beyond reach. */
++    public enum HitPosition {
++        BEST,
++        HEAD,
++        BODY,
++        FEET;
++
++        HitboxAperture.Zone toZone() {
++            return switch (this) {
++                case BEST -> HitboxAperture.Zone.BEST;
++                case HEAD -> HitboxAperture.Zone.HEAD;
++                case BODY -> HitboxAperture.Zone.BODY;
++                case FEET -> HitboxAperture.Zone.FEET;
++            };
++        }
++    }
++
+     public enum AutoBlock {
+         NONE,
+         /** Keeps the block up and attacks through it. */
+@@ -166,6 +186,10 @@ public class KillAura extends Module {
+     private final NumberSetting turnSpeed = this.register(new NumberSetting("Turn Speed",
+             "Smooth: the most it turns in a tick, in degrees.", 40.0F, 1.0F, 180.0F, 1.0F));
+ 
++    private final EnumSetting<HitPosition> hitPosition = this.register(new EnumSetting<>("Hit Position",
++            "Where on the target to aim first; falls back to any open gap when that part is blocked or out of reach.",
++            HitPosition.BEST));
++
+     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
+             "Turns only what the server is told; your camera stays where you point it.", true));
+ 
+@@ -198,6 +222,10 @@ public class KillAura extends Module {
+      * includes teleport confirmations, which vanilla's own last-reported rotation record misses.
+      */
+     private final AuraAttackCycle attackCycle = new AuraAttackCycle();
++    private final HitboxAperture.Scanner aperture = new HitboxAperture.Scanner();
++    private @Nullable LivingEntity aimedTarget;
++    private @Nullable Vec3 lastAimOffset;
++    private boolean lastInPreferredZone;
+     private float clickBudget;
+     private float cps;
+     private long nextSolClickAtMs;
+@@ -217,6 +245,7 @@ public class KillAura extends Module {
+         this.timing.onChange(this::resetClickScheduler);
+         this.minCps.onChange(this::resetClickScheduler);
+         this.maxCps.onChange(this::resetClickScheduler);
++        this.hitPosition.onChange(this::clearAimMemory);
+         this.minCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+         this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+         this.cpsMode.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
+@@ -226,6 +255,7 @@ public class KillAura extends Module {
+         this.pauseMin.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
+         this.pauseMax.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
+         this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH));
++        this.hitPosition.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
+         this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
+         this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
+         this.throughWalls.visibleWhen(this.rayTrace::get);
+@@ -235,8 +265,9 @@ public class KillAura extends Module {
+     @Override
+     protected void onEnable() {
+         this.clearActivity();
++        this.clearAimMemory();
+         LocalPlayer player = mc.player;
+-        this.attackCycle.reset(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
++        this.attackCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
+         this.rotation = null;
+         this.target = null;
+         this.resetClickScheduler();
+@@ -251,29 +282,40 @@ public class KillAura extends Module {
+ 
+     private void releaseCombat() {
+         this.clearActivity();
++        this.clearAimMemory();
+         LocalPlayer player = mc.player;
+-        if (player != null && this.blockingByAura && mc.gameMode != null) {
++        if (player != null && this.blockingByAura && mc.gameMode != null && mc.isInPreMovementTick()) {
+             mc.gameMode.releaseUsingItem(player);
+         }
++        // When toggled off outside the pre-movement tick window, clearing blockingByAura lets
++        // Minecraft#handleKeybinds release the item cleanly on the next tick without flagging Post.
+         this.blockingByAura = false;
+         this.pendingAttack = false;
+         this.resetClickScheduler();
+         this.rotation = null;
+         this.target = null;
+         MovementCorrector corrector = MovementCorrector.current();
++        MovementCorrection drainMode = this.silent.get() && corrector != null
++                ? this.movementCorrector.get().resolve(corrector) : null;
+         if (corrector != null) {
+             corrector.release(this);
+         }
+         if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
+-            // A server may check queued attacks only when the next movement arrives. Drain them with the
+-            // attack's look before handing back the camera, including a toggle before this tick's report.
+-            this.attackCycle.stop(new Rotation(player.getYRot(), player.getXRot()),
+-                    look -> player.sendRotation(look.yaw(), look.pitch()));
++            // Drain any pending attack report and silent camera handback inside normal EventMotion ticks
++            // instead of emitting out-of-tick MovePlayerPacket.Rot packets before/after CLIENT_TICK_END.
++            this.attackCycle.drainOnBus(drainMode);
+         } else {
+             this.attackCycle.reset(null);
+         }
+     }
+ 
++    private void clearAimMemory() {
++        this.aimedTarget = null;
++        this.lastAimOffset = null;
++        this.lastInPreferredZone = false;
++        this.aperture.clearObstacles();
++    }
++
+     public @Nullable LivingEntity getTarget() {
+         return this.target;
+     }
+@@ -312,6 +354,8 @@ public class KillAura extends Module {
+     @EventTarget
+     public void onLoadWorld(final EventLoadWorld event) {
+         this.clearActivity();
++        this.clearAimMemory();
++        this.attackCycle.reset(null);
+         this.astraClicks.reset();
+         this.resetClickScheduler();
+     }
+@@ -330,20 +374,31 @@ public class KillAura extends Module {
+             return;
+         }
+         if (player == null || level == null || gameMode == null || !player.isAlive()) {
++            this.clearAimMemory();
+             this.resetClickScheduler();
+             return;
+         }
+         this.activityPlayer = player;
+         this.activityLevel = level;
+-        // If another listener cancelled the previous tick's report, finish its hit before choosing a
+-        // new target or handing the look back to the camera. The normal path has nothing left to send.
+-        this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
++        // If another listener cancelled the previous tick's report, hold that attack look for this
++        // tick's normal movement packet instead of firing an extra mid-tick rotation packet.
++        Rotation pendingAttackLook = this.attackCycle.unreportedAttack();
++        if (pendingAttackLook != null) {
++            this.rotation = pendingAttackLook;
++            if (!this.silent.get()) {
++                player.setYRot(pendingAttackLook.yaw());
++                player.setXRot(pendingAttackLook.pitch());
++            }
++            this.correctMovement();
++            return;
++        }
+         Rotation lastSent = this.attackCycle.lastSent();
+         Rotation from = lastSent != null ? lastSent : new Rotation(player.getYRot(), player.getXRot());
+         Vec3 eye = player.getEyePosition();
+         this.target = mc.gui.screen() == null && !player.isSpectator() ? this.pickTarget(player, level, eye) : null;
+ 
+         if (this.target == null) {
++            this.clearAimMemory();
+             this.rotation = this.returning(from, new Rotation(player.getYRot(), player.getXRot()));
+             this.correctMovement();
+             this.lowerBlock(player, gameMode);
+@@ -352,7 +407,13 @@ public class KillAura extends Module {
+             return;
+         }
+ 
+-        this.rotation = this.step(from, this.aimAt(eye, this.target));
++        if (this.target != this.aimedTarget) {
++            this.clearAimMemory();
++            this.aimedTarget = this.target;
++        }
++
++        Rotation wanted = this.aimAt(player, level, eye, from, this.target);
++        this.rotation = this.step(player, level, eye, from, wanted, this.target);
+         if (this.rotation != null && !this.silent.get()) {
+             player.setYRot(this.rotation.yaw());
+             player.setXRot(this.rotation.pitch());
+@@ -414,8 +475,11 @@ public class KillAura extends Module {
+ 
+     private @Nullable LivingEntity pickTarget(final LocalPlayer player, final ClientLevel level, final Vec3 eye) {
+         double reach = this.aimRange.get();
+-        // Stay on the current target while it is still a target; switching every tick makes the look jump about.
+-        if (this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach) {
++        double hitReach = this.range.get();
++        boolean mustSee = this.rayTrace.get() && !this.throughWalls.get();
++        // Stay on the current target while it still offers a valid aperture; drop it immediately if fully behind a wall.
++        if (this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach
++                && (!mustSee || this.aperture.hasVisibleAperture(level, player, this.target, eye, hitReach, reach))) {
+             return this.target;
+         }
+         Comparator<LivingEntity> order = switch (this.priority.get()) {
+@@ -427,6 +491,7 @@ public class KillAura extends Module {
+         LivingEntity best = null;
+         for (Entity entity : level.entitiesForRendering()) {
+             if (entity instanceof LivingEntity living && this.valid(player, living) && distance(eye, living) <= reach
++                    && (!mustSee || this.aperture.hasVisibleAperture(level, player, living, eye, hitReach, reach))
+                     && (best == null || order.compare(living, best) < 0)) {
+                 best = living;
+             }
+@@ -440,25 +505,47 @@ public class KillAura extends Module {
+     }
+ 
+     private static double distance(final Vec3 eye, final Entity entity) {
+-        return Math.sqrt(entity.getBoundingBox().distanceToSqr(eye));
++        return Math.sqrt(entity.getBoundingBox().inflate(entity.getPickRadius()).distanceToSqr(eye));
+     }
+ 
+     // ---------------------------------------------------------------------------------------------- rotations
+ 
+-    private Rotation aimAt(final Vec3 eye, final LivingEntity entity) {
+-        AABB box = entity.getBoundingBox();
+-        Vec3 point = this.rotationMode.is(RotationMode.CLAUDE1) ? Rotations.nearestPoint(eye, box, 0.15) : box.getCenter();
+-        return Rotations.towards(eye, point);
++    private Rotation aimAt(final LocalPlayer player, final ClientLevel level, final Vec3 eye,
++                           final Rotation from, final LivingEntity entity) {
++        boolean ignoreBlocks = !this.rayTrace.get() || this.throughWalls.get();
++        Selection selection = this.aperture.selectInWorld(
++                level, player, entity, eye, from,
++                this.range.get(), this.aimRange.get(),
++                this.hitPosition.get().toZone(),
++                this.lastAimOffset, this.lastInPreferredZone,
++                ignoreBlocks);
++        if (selection != null) {
++            this.lastAimOffset = selection.offsetFromCenter();
++            this.lastInPreferredZone = selection.inPreferredZone();
++            return Rotations.towards(eye, selection.point());
++        }
++        Vec3 fallback = this.hitPosition.get().toZone().preferredAnchor(eye, entity.getBoundingBox().inflate(entity.getPickRadius()));
++        return Rotations.towards(eye, fallback);
+     }
+ 
+     /** This tick's look, stepping from what the server was last told; null when this mode does not turn. */
+-    private @Nullable Rotation step(final Rotation from, final Rotation wanted) {
++    private @Nullable Rotation step(final LocalPlayer player, final ClientLevel level, final Vec3 eye,
++                                    final Rotation from, final Rotation wanted, final LivingEntity entity) {
+         return switch (this.rotationMode.get()) {
+             case NONE -> null;
+             case WRAPPED -> wanted;
+             case SNAP -> Rotations.continuous(from, wanted);
+             case SMOOTH -> Rotations.limit(from, Rotations.continuous(from, wanted), this.turnSpeed.get(), this.turnSpeed.get());
+-            case CLAUDE1 -> claude1(from, Rotations.continuous(from, wanted), Rotations.mouseStep(mc.options.sensitivity().get()));
++            case CLAUDE1 -> {
++                double mouseStep = Rotations.mouseStep(mc.options.sensitivity().get());
++                Rotation continuousWanted = Rotations.continuous(from, wanted);
++                Rotation quantized = claude1(from, continuousWanted, mouseStep);
++                if (this.rayTrace.get()) {
++                    quantized = HitboxAperture.refineQuantized(from, continuousWanted, quantized, mouseStep,
++                            candidate -> this.reach(player, level, eye, candidate, entity).isPresent());
++                }
++                yield quantized;
++            }
+         };
+     }
+ 
+@@ -512,7 +599,10 @@ public class KillAura extends Module {
+         if (hit.isEmpty() || this.throughWalls.get()) {
+             return hit;
+         }
+-        HitResult wall = level.clip(new ClipContext(eye, hit.get(), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
++        // Match LocalPlayer.pick's OUTLINE block semantics (fences 1.0m, stair/slab notches open) and stop an epsilon
++        // before the surface hit so flush floor/wall contact behind the entry face does not masquerade as an obstacle.
++        Vec3 stop = eye.lerp(hit.get(), 1.0 - HitboxAperture.EXIT_EPSILON);
++        HitResult wall = level.clip(new ClipContext(eye, stop, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+         return wall.getType() == HitResult.Type.MISS ? hit : Optional.empty();
+     }
+ 
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/BlockFly.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/BlockFly.java
+index cd7605fb..6baafa93 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/BlockFly.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/BlockFly.java
+@@ -28,6 +28,8 @@ import com.mentalfrostbyte.jello.setting.Setting;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
++import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
++import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+ import java.util.EnumMap;
+ import java.util.function.BooleanSupplier;
+ import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+@@ -78,6 +80,8 @@ public final class BlockFly extends Module {
+     private LocalPlayer sessionPlayer;
+     private Object sessionLevel;
+     private BlockFlyPlacement.Target pending;
++    private BlockFlyPlacement.Target deferredTarget;
++    private Rotation deferredSent;
+     private Rotation requestedRotation;
+     private MovementCorrection correction = MovementCorrection.OFF;
+     private boolean silentRotation = true;
+@@ -127,8 +131,8 @@ public final class BlockFly extends Module {
+     public boolean isActivelyWorking() {
+         return isEnabled() && ready() && this.active != null
+                 && this.sessionPlayer == mc.player && this.sessionLevel == mc.level
+-                && (this.requestedRotation != null || this.pending != null || this.actedThisTick
+-                    || this.internalSlotChange || this.liteSlot >= 0);
++                && (this.requestedRotation != null || this.pending != null || this.deferredTarget != null
++                    || this.actedThisTick || this.internalSlotChange || this.liteSlot >= 0);
+     }
+ 
+     @Override protected void onEnable() { restart(); }
+@@ -152,6 +156,8 @@ public final class BlockFly extends Module {
+             } finally {
+                 clearRotation();
+                 this.pending = null;
++                this.deferredTarget = null;
++                this.deferredSent = null;
+                 this.motionEvent = null;
+                 this.lastPlaceTick = Integer.MIN_VALUE;
+                 this.actedThisTick = false;
+@@ -178,6 +184,13 @@ public final class BlockFly extends Module {
+             return;
+         }
+         if (event.isPre()) {
++            if (this.deferredTarget != null && this.deferredSent != null) {
++                BlockFlyPlacement.Target deferred = this.deferredTarget;
++                Rotation sent = this.deferredSent;
++                this.deferredTarget = null;
++                this.deferredSent = null;
++                placeAt(deferred, mc.player.getEyePosition(), sent, false);
++            }
+             this.pending = null;
+         }
+         this.active.tick(event);
+@@ -327,12 +340,19 @@ public final class BlockFly extends Module {
+ 
+     public void queuePlacement(final BlockFlyPlacement.Target target) { this.pending = target; }
+ 
+-    /** Called only after the movement packet. The actual sent facing wins over the earlier plan. */
++    /** Called after the movement packet; on 1.21.2+ defers the interaction to the next tick's pre-movement window. */
+     public boolean place(final BlockFlyPlacement.Target target) {
+         if (!ready() || target == null || this.motionEvent == null || !this.motionEvent.isPost()
+                 || this.motionEvent.isCancelled() || this.lastPlaceTick == mc.player.tickCount) return false;
+         Vec3 eyes = new Vec3(this.motionEvent.getX(), this.motionEvent.getY() + mc.player.getEyeHeight(), this.motionEvent.getZ());
+         Rotation sent = new Rotation(this.motionEvent.getYaw(), this.motionEvent.getPitch());
++        boolean deferForTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
++        return placeAt(target, eyes, sent, deferForTickEnd);
++    }
++
++    private boolean placeAt(final BlockFlyPlacement.Target target, final Vec3 eyes,
++                            final Rotation sent, final boolean deferOnly) {
++        if (!ready() || target == null || this.lastPlaceTick == mc.player.tickCount) return false;
+         if (!BlockFlyPlacement.valid(mc.player, eyes, target, sent)) return false;
+         var hit = BlockFlyPlacement.raycast(mc.player, eyes, sent);
+         if (hit == null) return false;
+@@ -344,6 +364,14 @@ public final class BlockFly extends Module {
+         InteractionHand hand = slot >= 0 && BlockFlyPlacement.isPlaceable(inventory.getItem(slot))
+                 ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
+         if (hand == InteractionHand.OFF_HAND && !BlockFlyPlacement.isPlaceable(mc.player.getOffhandItem())) return false;
++        if (deferOnly) {
++            // 1.21.2+ / 26.2 forbids sending block-place or slot packets between MovePlayer and CLIENT_TICK_END;
++            // execute at the start of the very next tick before movement or mode re-selection runs.
++            this.deferredTarget = target;
++            this.deferredSent = sent;
++            this.actedThisTick = true;
++            return true;
++        }
+         this.actedThisTick = true;
+         this.internalSlotChange = true;
+         int previousLiteSlot = this.liteSlot;
+@@ -439,9 +467,9 @@ public final class BlockFly extends Module {
+     private void releaseLiteSlot() {
+         if (this.liteSlot < 0) return;
+         this.liteSlot = -1;
+-        if (mc.player != null && mc.player == this.sessionPlayer && mc.getConnection() != null) {
+-            mc.player.connection.send(new ServerboundSetCarriedItemPacket(mc.player.getInventory().getSelectedSlot()));
+-            if (mc.gameMode != null) mc.gameMode.syncCarriedItem();
++        if (mc.player != null && mc.player == this.sessionPlayer && mc.getConnection() != null && mc.gameMode != null) {
++            mc.gameMode.markCarriedItemDirty();
++            if (mc.isInPreMovementTick()) mc.gameMode.syncCarriedItem();
+         }
+     }
+ 
+@@ -451,8 +479,12 @@ public final class BlockFly extends Module {
+             try {
+                 Inventory inventory = mc.player.getInventory();
+                 if (this.originalSlot >= 0 && inventory.getSelectedSlot() == this.ownedSlot) inventory.setSelectedSlot(this.originalSlot);
+-                if (this.liteSlot >= 0) mc.player.connection.send(new ServerboundSetCarriedItemPacket(inventory.getSelectedSlot()));
+-                mc.gameMode.syncCarriedItem();
++                if (this.liteSlot >= 0) mc.gameMode.markCarriedItemDirty();
++                if (mc.isInPreMovementTick()) {
++                    mc.gameMode.syncCarriedItem();
++                } else {
++                    mc.gameMode.markCarriedItemDirty();
++                }
+             } finally { this.internalSlotChange = false; }
+         }
+         this.originalSlot = this.ownedSlot = this.liteSlot = -1;
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/blockfly/BlockFlyCustomBase.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/blockfly/BlockFlyCustomBase.java
+index ceac9542..05c29de9 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/blockfly/BlockFlyCustomBase.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/movement/blockfly/BlockFlyCustomBase.java
+@@ -10,6 +10,8 @@ import com.mentalfrostbyte.jello.setting.EnumSetting;
+ import com.mentalfrostbyte.jello.util.math.Rotations;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
++import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
++import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+ import java.util.LinkedHashSet;
+ import java.util.Set;
+ import java.util.concurrent.ThreadLocalRandom;
+@@ -107,7 +109,13 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
+         if (mc.player == this.sessionPlayer && mc.player != null && this.previousSlot >= 0
+                 && this.ownedSlot >= 0 && mc.player.getInventory().getSelectedSlot() == this.ownedSlot) {
+             mc.player.getInventory().setSelectedSlot(this.previousSlot);
+-            if (mc.gameMode != null && mc.getConnection() != null) mc.gameMode.syncCarriedItem();
++            if (mc.gameMode != null && mc.getConnection() != null) {
++                if (mc.isInPreMovementTick()) {
++                    mc.gameMode.syncCarriedItem();
++                } else {
++                    mc.gameMode.markCarriedItemDirty();
++                }
++            }
+         }
+         this.ownedSlot = -1;
+     }
+@@ -196,8 +204,10 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
+             return;
+         }
+         if (!event.isPre()) {
+-            // Explicit rotation mode restores the camera direction only after the queued use-on packet.
+-            if (this.queued && this.grimRotation()) {
++            // Explicit 1.17 rotation mode restores the camera direction only on pre-1.21.2 protocols;
++            // 1.21.2+ forbids post-movement placements and extra rotation packets before CLIENT_TICK_END.
++            if (this.queued && this.grimRotation()
++                    && ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_21_2)) {
+                 this.parent.queuePlacement(null);
+                 this.parent.place(this.queuedTarget);
+                 mc.player.sendRotation(mc.player.getYRot(), mc.player.getXRot());
+diff --git a/src/main/java/com/mentalfrostbyte/jello/util/math/HitboxAperture.java b/src/main/java/com/mentalfrostbyte/jello/util/math/HitboxAperture.java
+new file mode 100644
+index 00000000..bc599b3f
+--- /dev/null
++++ b/src/main/java/com/mentalfrostbyte/jello/util/math/HitboxAperture.java
+@@ -0,0 +1,824 @@
++package com.mentalfrostbyte.jello.util.math;
++
++import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
++import java.util.Arrays;
++import java.util.Optional;
++import java.util.function.Predicate;
++import net.minecraft.client.multiplayer.ClientLevel;
++import net.minecraft.client.player.LocalPlayer;
++import net.minecraft.core.BlockPos;
++import net.minecraft.util.Mth;
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.level.ClipContext;
++import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.phys.AABB;
++import net.minecraft.world.phys.Vec3;
++import net.minecraft.world.phys.shapes.CollisionContext;
++import net.minecraft.world.phys.shapes.Shapes;
++import net.minecraft.world.phys.shapes.VoxelShape;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * Visible-aperture solver for aiming through stairs, slabs, trapdoors, fences and elevation ledges.
++ *
++ * <p>Uses a three-tier cascade on the game thread with zero steady-state heap allocations:
++ * <ol>
++ *   <li>Corridor {@link ClipContext.Block#OUTLINE} extraction via {@link VoxelShape#forAllBoxes}: when the corridor
++ *       contains only air ({@code boxCount == 0}) or when the sticky/preferred anchor clears a 3D safety cross,
++ *       returns in {@code O(1)} without scanning a grid.</li>
++ *   <li>Sub-1/16 block ({@code 0.04m}) visible-face slab rasterization and a two-pass 2D Manhattan clearance transform
++ *       with a capped safety margin, falling back from {@code HEAD}/{@code BODY}/{@code FEET} to any open aperture on
++ *       the hitbox when the preferred band is blocked or beyond reach.</li>
++ *   <li>A {@code 2x2} integer mouse-step (GCD) neighbourhood check so discrete sensitivity rounding never clips the
++ *       lip of a narrow gap when an adjacent whole mouse step clears it.</li>
++ * </ol>
++ */
++public final class HitboxAperture {
++
++    private static final double EDGE_INSET = 0.012;
++    private static final double FAST_MARGIN = 0.12;
++    private static final double CELL_STEP = 0.04;
++    private static final int MAX_GRID_U = 33;
++    private static final int MAX_GRID_V = 49;
++    private static final int CLEARANCE_CAP = 3;
++    private static final int CLEARANCE_TIE_CAP = 8;
++    private static final double ENTRY_EPSILON = 9.9E-4;
++    public static final double EXIT_EPSILON = 1.0E-5;
++
++    /** Vertical preference band on an entity's hitbox; falls back to the full hitbox if blocked or out of reach. */
++    public enum Zone {
++        BEST(0.02, 0.98, -1.0),
++        HEAD(0.68, 0.98, 0.85),
++        BODY(0.32, 0.68, 0.50),
++        FEET(0.02, 0.32, 0.15);
++
++        private final double minFraction;
++        private final double maxFraction;
++        private final double anchorFraction;
++
++        Zone(final double minFraction, final double maxFraction, final double anchorFraction) {
++            this.minFraction = minFraction;
++            this.maxFraction = maxFraction;
++            this.anchorFraction = anchorFraction;
++        }
++
++        public boolean inBand(final double y, final AABB box) {
++            if (this == BEST) {
++                return true;
++            }
++            double low = Mth.lerp(this.minFraction, box.minY, box.maxY) - 1.0E-4;
++            double high = Mth.lerp(this.maxFraction, box.minY, box.maxY) + 1.0E-4;
++            return y >= low && y <= high;
++        }
++
++        public double preferredY(final Vec3 eye, final AABB shrunkBox, final AABB fullBox) {
++            if (this == BEST) {
++                return Mth.clamp(eye.y, shrunkBox.minY, shrunkBox.maxY);
++            }
++            double raw = Mth.lerp(this.anchorFraction, fullBox.minY, fullBox.maxY);
++            return Mth.clamp(raw, shrunkBox.minY, shrunkBox.maxY);
++        }
++
++        public Vec3 preferredAnchor(final Vec3 eye, final AABB fullBox) {
++            AABB shrunk = shrinkSafe(fullBox, EDGE_INSET);
++            double x = Mth.clamp(eye.x, shrunk.minX, shrunk.maxX);
++            double y = this.preferredY(eye, shrunk, fullBox);
++            double z = Mth.clamp(eye.z, shrunk.minZ, shrunk.maxZ);
++            if (Math.abs(x - eye.x) < 1.0E-3 && Math.abs(z - eye.z) < 1.0E-3) {
++                Vec3 center = fullBox.getCenter();
++                return new Vec3(center.x, y, center.z);
++            }
++            return new Vec3(x, y, z);
++        }
++    }
++
++    /** Chosen world aim point together with its center-relative offset for next-tick hysteresis. */
++    public record Selection(Vec3 point, Vec3 offsetFromCenter, boolean inPreferredZone) {
++    }
++
++    private HitboxAperture() {
++    }
++
++    public static AABB shrinkSafe(final AABB box, final double inset) {
++        double maxInset = Math.min(box.getXsize(), Math.min(box.getYsize(), box.getZsize())) * 0.25;
++        double safe = Math.max(0.0, Math.min(inset, maxInset));
++        return box.deflate(safe);
++    }
++
++    /**
++     * If {@code quantized} is within a single mouse step of {@code idealContinuous} yet misses the target gap because
++     * {@code Math.round} stepped onto an adjacent stair/slab edge, checks the surrounding {@code 2x2} floor/ceil
++     * whole-mouse-step lattice and picks the nearest step that passes {@code canHit}.
++     */
++    public static Rotation refineQuantized(final Rotation from, final Rotation idealContinuous, final Rotation quantized,
++                                           final double mouseStep, final Predicate<Rotation> canHit) {
++        if (mouseStep <= 0.0 || canHit.test(quantized)) {
++            return quantized;
++        }
++        double limit = mouseStep + 1.0E-4;
++        if (Math.abs(idealContinuous.yaw() - quantized.yaw()) > limit
++                || Math.abs(idealContinuous.pitch() - quantized.pitch()) > limit) {
++            return quantized;
++        }
++
++        double dyaw = idealContinuous.yaw() - from.yaw();
++        double dpitch = idealContinuous.pitch() - from.pitch();
++        double yawFloor = Math.floor(dyaw / mouseStep) * mouseStep;
++        double yawCeil = Math.ceil(dyaw / mouseStep) * mouseStep;
++        double pitchFloor = Math.floor(dpitch / mouseStep) * mouseStep;
++        double pitchCeil = Math.ceil(dpitch / mouseStep) * mouseStep;
++
++        double[] yawSteps = {yawFloor, yawCeil};
++        double[] pitchSteps = {pitchFloor, pitchCeil};
++
++        Rotation best = quantized;
++        double bestErrSq = Double.POSITIVE_INFINITY;
++        for (double yStep : yawSteps) {
++            float candidateYaw = (float) (from.yaw() + yStep);
++            for (double pStep : pitchSteps) {
++                float candidatePitch = Mth.clamp((float) (from.pitch() + pStep), -90.0F, 90.0F);
++                Rotation candidate = new Rotation(candidateYaw, candidatePitch);
++                double errYaw = candidateYaw - idealContinuous.yaw();
++                double errPitch = candidatePitch - idealContinuous.pitch();
++                double errSq = errYaw * errYaw + errPitch * errPitch;
++                if (errSq < bestErrSq && canHit.test(candidate)) {
++                    bestErrSq = errSq;
++                    best = candidate;
++                }
++            }
++        }
++        return best;
++    }
++
++    /**
++     * Reusable single-threaded workspace for world obstacle extraction and surface-aperture scanning.
++     */
++    public static final class Scanner {
++
++        private double[] boxes = new double[6 * 128];
++        private int boxCount;
++        private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
++
++        private double currentBlockX;
++        private double currentBlockY;
++        private double currentBlockZ;
++        private double corridorMinX;
++        private double corridorMinY;
++        private double corridorMinZ;
++        private double corridorMaxX;
++        private double corridorMaxY;
++        private double corridorMaxZ;
++
++        private final Shapes.DoubleLineConsumer boxConsumer = (x1, y1, z1, x2, y2, z2) -> {
++            double wx1 = this.currentBlockX + x1;
++            double wy1 = this.currentBlockY + y1;
++            double wz1 = this.currentBlockZ + z1;
++            double wx2 = this.currentBlockX + x2;
++            double wy2 = this.currentBlockY + y2;
++            double wz2 = this.currentBlockZ + z2;
++            if (wx2 >= this.corridorMinX && wx1 <= this.corridorMaxX
++                    && wy2 >= this.corridorMinY && wy1 <= this.corridorMaxY
++                    && wz2 >= this.corridorMinZ && wz1 <= this.corridorMaxZ) {
++                this.addObstacle(wx1, wy1, wz1, wx2, wy2, wz2);
++            }
++        };
++
++        private final boolean[] gridVisible = new boolean[MAX_GRID_U * MAX_GRID_V];
++        private final int[] gridClearance = new int[MAX_GRID_U * MAX_GRID_V];
++        private final double[] gridX = new double[MAX_GRID_U * MAX_GRID_V];
++        private final double[] gridY = new double[MAX_GRID_U * MAX_GRID_V];
++        private final double[] gridZ = new double[MAX_GRID_U * MAX_GRID_V];
++
++        private double bestZoneX;
++        private double bestZoneY;
++        private double bestZoneZ;
++        private double bestZoneScore;
++
++        private double bestAnyX;
++        private double bestAnyY;
++        private double bestAnyZ;
++        private double bestAnyScore;
++
++        public void clearObstacles() {
++            this.boxCount = 0;
++        }
++
++        public int obstacleCount() {
++            return this.boxCount;
++        }
++
++        public void addObstacle(final AABB box) {
++            this.addObstacle(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
++        }
++
++        public void addObstacle(final double minX, final double minY, final double minZ,
++                                final double maxX, final double maxY, final double maxZ) {
++            int offset = this.boxCount * 6;
++            if (offset + 6 > this.boxes.length) {
++                this.boxes = Arrays.copyOf(this.boxes, this.boxes.length * 2);
++            }
++            this.boxes[offset] = minX;
++            this.boxes[offset + 1] = minY;
++            this.boxes[offset + 2] = minZ;
++            this.boxes[offset + 3] = maxX;
++            this.boxes[offset + 4] = maxY;
++            this.boxes[offset + 5] = maxZ;
++            this.boxCount++;
++        }
++
++        /** Extracts {@link ClipContext.Block#OUTLINE} sub-boxes inside the corridor between {@code eye} and {@code targetBox}. */
++        public void collectWorldObstacles(final ClientLevel level, final LocalPlayer player, final Vec3 eye,
++                                          final AABB targetBox, final double maxRange) {
++            this.clearObstacles();
++            double reachBound = maxRange + 0.25;
++            this.corridorMinX = Math.max(eye.x - reachBound, Math.min(eye.x, targetBox.minX) - 1.0E-3);
++            this.corridorMinY = Math.max(eye.y - reachBound, Math.min(eye.y, targetBox.minY) - 1.0E-3);
++            this.corridorMinZ = Math.max(eye.z - reachBound, Math.min(eye.z, targetBox.minZ) - 1.0E-3);
++            this.corridorMaxX = Math.min(eye.x + reachBound, Math.max(eye.x, targetBox.maxX) + 1.0E-3);
++            this.corridorMaxY = Math.min(eye.y + reachBound, Math.max(eye.y, targetBox.maxY) + 1.0E-3);
++            this.corridorMaxZ = Math.min(eye.z + reachBound, Math.max(eye.z, targetBox.maxZ) + 1.0E-3);
++
++            int minBx = Mth.floor(this.corridorMinX);
++            int minBy = Mth.floor(this.corridorMinY);
++            int minBz = Mth.floor(this.corridorMinZ);
++            int maxBx = Mth.floor(this.corridorMaxX);
++            int maxBy = Mth.floor(this.corridorMaxY);
++            int maxBz = Mth.floor(this.corridorMaxZ);
++
++            CollisionContext context = CollisionContext.of(player);
++            for (int bx = minBx; bx <= maxBx; bx++) {
++                for (int by = minBy; by <= maxBy; by++) {
++                    for (int bz = minBz; bz <= maxBz; bz++) {
++                        this.cursor.set(bx, by, bz);
++                        if (!level.isInWorldBounds(this.cursor)) {
++                            continue;
++                        }
++                        BlockState state = level.getBlockState(this.cursor);
++                        if (state.isAir()) {
++                            continue;
++                        }
++                        VoxelShape shape = ClipContext.Block.OUTLINE.get(state, level, this.cursor, context);
++                        if (shape.isEmpty()) {
++                            continue;
++                        }
++                        this.currentBlockX = bx;
++                        this.currentBlockY = by;
++                        this.currentBlockZ = bz;
++                        shape.forAllBoxes(this.boxConsumer);
++                    }
++                }
++            }
++        }
++
++        /** True when at least one unobstructed point on {@code entity}'s hitbox lies within {@code aimRange}. */
++        public boolean hasVisibleAperture(final ClientLevel level, final LocalPlayer player, final Entity entity,
++                                          final Vec3 eye, final double range, final double aimRange) {
++            AABB targetBox = entity.getBoundingBox().inflate(entity.getPickRadius());
++            double maxReach = Math.max(range, aimRange);
++            if (targetBox.distanceToSqr(eye) > maxReach * maxReach) {
++                return false;
++            }
++            if (targetBox.contains(eye)) {
++                return true;
++            }
++            this.collectWorldObstacles(level, player, eye, targetBox, maxReach);
++            if (this.boxCount == 0) {
++                return true;
++            }
++            Vec3 quick = Zone.BEST.preferredAnchor(eye, targetBox);
++            if (this.verifiesLookRay(eye, targetBox, quick.x, quick.y, quick.z, maxReach)) {
++                return true;
++            }
++            Rotation neutral = Rotations.towards(eye, targetBox.getCenter());
++            return this.selectFromObstacles(eye, neutral, targetBox, range, maxReach, Zone.BEST, null, true, false) != null;
++        }
++
++        /**
++         * Picks the optimal aim point on {@code entity} in {@code level}, resolving open corridors in {@code O(1)} and
++         * scanning visible hitbox surfaces when obstacles are nearby.
++         */
++        public @Nullable Selection selectInWorld(final ClientLevel level, final LocalPlayer player, final Entity entity,
++                                                 final Vec3 eye, final Rotation from, final double range,
++                                                 final double aimRange, final Zone zone,
++                                                 final @Nullable Vec3 previousOffset,
++                                                 final boolean previousInPreferredZone,
++                                                 final boolean ignoreBlocks) {
++            AABB targetBox = entity.getBoundingBox().inflate(entity.getPickRadius());
++            double maxReach = Math.max(range, aimRange);
++            if (targetBox.distanceToSqr(eye) > maxReach * maxReach) {
++                return null;
++            }
++            if (!ignoreBlocks && !targetBox.contains(eye)) {
++                this.collectWorldObstacles(level, player, eye, targetBox, maxReach);
++            } else {
++                this.clearObstacles();
++            }
++            return this.selectFromObstacles(eye, from, targetBox, range, maxReach, zone,
++                    previousOffset, previousInPreferredZone, ignoreBlocks);
++        }
++
++        /** Overload defaulting {@code previousInPreferredZone} to {@code true} when {@code previousOffset} is present. */
++        public @Nullable Selection selectFromObstacles(final Vec3 eye, final Rotation from, final AABB targetBox,
++                                                       final double range, final double aimRange, final Zone zone,
++                                                       final @Nullable Vec3 previousOffset, final boolean ignoreBlocks) {
++            return this.selectFromObstacles(eye, from, targetBox, range, aimRange, zone,
++                    previousOffset, previousOffset != null, ignoreBlocks);
++        }
++
++        /**
++         * Pure-geometry solver over the obstacles currently loaded in this {@link Scanner}; directly testable without
++         * a {@link ClientLevel}.
++         */
++        public @Nullable Selection selectFromObstacles(final Vec3 eye, final Rotation from, final AABB targetBox,
++                                                       final double range, final double aimRange, final Zone zone,
++                                                       final @Nullable Vec3 previousOffset,
++                                                       final boolean previousInPreferredZone,
++                                                       final boolean ignoreBlocks) {
++            double maxReach = Math.max(range, aimRange);
++            double minDistSq = targetBox.distanceToSqr(eye);
++            if (minDistSq > maxReach * maxReach) {
++                return null;
++            }
++            Vec3 center = targetBox.getCenter();
++            if (targetBox.contains(eye)) {
++                Vec3 inside = zone.preferredAnchor(eye, targetBox);
++                return new Selection(inside, inside.subtract(center), true);
++            }
++
++            double primaryRange = minDistSq <= range * range ? range : maxReach;
++            if (ignoreBlocks || this.boxCount == 0) {
++                return selectUnobstructed(eye, targetBox, primaryRange, maxReach, zone, previousOffset, previousInPreferredZone);
++            }
++
++            // Tier 1: O(1) 3D safety-cross fast path against pre-extracted corridor boxes.
++            AABB safeBox = shrinkSafe(targetBox, Math.max(EDGE_INSET, 0.03));
++            if (previousOffset != null && previousInPreferredZone) {
++                Vec3 sticky = clampToBox(center.add(previousOffset), safeBox);
++                if (zone.inBand(sticky.y, targetBox)
++                        && this.hasClearCrossMargin(eye, targetBox, safeBox, sticky, primaryRange)) {
++                    return new Selection(sticky, sticky.subtract(center), true);
++                }
++            }
++            Vec3 anchor = zone.preferredAnchor(eye, targetBox);
++            if (this.hasClearCrossMargin(eye, targetBox, safeBox, anchor, primaryRange)) {
++                return new Selection(anchor, anchor.subtract(center), true);
++            }
++
++            // Tier 2: Try attack range first whenever any part of the hitbox could be within attack reach; else pre-aim.
++            if (minDistSq <= range * range) {
++                Selection withinAttackRange = this.scanFaces(eye, from, targetBox, range, zone, previousOffset);
++                if (withinAttackRange != null) {
++                    return withinAttackRange;
++                }
++            }
++            if (maxReach > range) {
++                return this.scanFaces(eye, from, targetBox, maxReach, zone, previousOffset);
++            }
++            return null;
++        }
++
++        private boolean hasClearCrossMargin(final Vec3 eye, final AABB targetBox, final AABB safeBox,
++                                            final Vec3 point, final double effectiveRange) {
++            if (!this.verifiesLookRay(eye, targetBox, point.x, point.y, point.z, effectiveRange)) {
++                return false;
++            }
++            double rangeSq = effectiveRange * effectiveRange;
++            double yMargin = Math.min(FAST_MARGIN, safeBox.getYsize() * 0.25);
++            if (yMargin > 1.0E-3) {
++                double yLow = Math.max(safeBox.minY, point.y - yMargin);
++                double yHigh = Math.min(safeBox.maxY, point.y + yMargin);
++                if (!this.isSlabRayClear(eye, targetBox, point.x, yLow, point.z, rangeSq)
++                        || !this.isSlabRayClear(eye, targetBox, point.x, yHigh, point.z, rangeSq)) {
++                    return false;
++                }
++            }
++            double dx = point.x - eye.x;
++            double dz = point.z - eye.z;
++            double horiz = Math.hypot(dx, dz);
++            if (horiz > 1.0E-3) {
++                double hMargin = Math.min(FAST_MARGIN, Math.min(safeBox.getXsize(), safeBox.getZsize()) * 0.35);
++                double px = -dz / horiz * hMargin;
++                double pz = dx / horiz * hMargin;
++                double lx = Mth.clamp(point.x - px, safeBox.minX, safeBox.maxX);
++                double lz = Mth.clamp(point.z - pz, safeBox.minZ, safeBox.maxZ);
++                double rx = Mth.clamp(point.x + px, safeBox.minX, safeBox.maxX);
++                double rz = Mth.clamp(point.z + pz, safeBox.minZ, safeBox.maxZ);
++                if (!this.isSlabRayClear(eye, targetBox, lx, point.y, lz, rangeSq)
++                        || !this.isSlabRayClear(eye, targetBox, rx, point.y, rz, rangeSq)) {
++                    return false;
++                }
++            }
++            return true;
++        }
++
++        private @Nullable Selection scanFaces(final Vec3 eye, final Rotation from, final AABB targetBox,
++                                              final double effectiveRange, final Zone zone,
++                                              final @Nullable Vec3 previousOffset) {
++            AABB shrunk = shrinkSafe(targetBox, EDGE_INSET);
++            double prefY = zone.preferredY(eye, shrunk, targetBox);
++            Vec3 center = targetBox.getCenter();
++            boolean hasPrev = previousOffset != null;
++            double prevX = hasPrev ? center.x + previousOffset.x : 0.0;
++            double prevY = hasPrev ? center.y + previousOffset.y : 0.0;
++            double prevZ = hasPrev ? center.z + previousOffset.z : 0.0;
++
++            this.bestZoneScore = Double.NEGATIVE_INFINITY;
++            this.bestAnyScore = Double.NEGATIVE_INFINITY;
++
++            // Scan the 1 to 3 faces of shrunkBox facing the eye.
++            if (eye.x < shrunk.minX) {
++                this.evaluateFace(0, shrunk.minX, shrunk.minZ, shrunk.maxZ, shrunk.minY, shrunk.maxY,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            } else if (eye.x > shrunk.maxX) {
++                this.evaluateFace(0, shrunk.maxX, shrunk.minZ, shrunk.maxZ, shrunk.minY, shrunk.maxY,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            }
++
++            if (eye.z < shrunk.minZ) {
++                this.evaluateFace(2, shrunk.minZ, shrunk.minX, shrunk.maxX, shrunk.minY, shrunk.maxY,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            } else if (eye.z > shrunk.maxZ) {
++                this.evaluateFace(2, shrunk.maxZ, shrunk.minX, shrunk.maxX, shrunk.minY, shrunk.maxY,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            }
++
++            if (eye.y < shrunk.minY) {
++                this.evaluateFace(1, shrunk.minY, shrunk.minX, shrunk.maxX, shrunk.minZ, shrunk.maxZ,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            } else if (eye.y > shrunk.maxY) {
++                this.evaluateFace(1, shrunk.maxY, shrunk.minX, shrunk.maxX, shrunk.minZ, shrunk.maxZ,
++                        eye, from, targetBox, effectiveRange, zone, prefY, hasPrev, prevX, prevY, prevZ);
++            }
++
++            if (this.bestZoneScore > Double.NEGATIVE_INFINITY) {
++                Vec3 chosen = new Vec3(this.bestZoneX, this.bestZoneY, this.bestZoneZ);
++                return new Selection(chosen, chosen.subtract(center), true);
++            }
++            if (this.bestAnyScore > Double.NEGATIVE_INFINITY) {
++                Vec3 chosen = new Vec3(this.bestAnyX, this.bestAnyY, this.bestAnyZ);
++                return new Selection(chosen, chosen.subtract(center), false);
++            }
++            return null;
++        }
++
++        private void evaluateFace(final int fixedAxis, final double fixedCoord,
++                                  final double minU, final double maxU,
++                                  final double minV, final double maxV,
++                                  final Vec3 eye, final Rotation from, final AABB targetBox,
++                                  final double effectiveRange, final Zone zone, final double prefY,
++                                  final boolean hasPrev, final double prevX, final double prevY, final double prevZ) {
++            int nu = Mth.clamp((int) Math.ceil((maxU - minU) / CELL_STEP) + 1, 3, MAX_GRID_U);
++            int nv = Mth.clamp((int) Math.ceil((maxV - minV) / CELL_STEP) + 1, 3, MAX_GRID_V);
++            double rangeSq = effectiveRange * effectiveRange;
++
++            int anyVisible = 0;
++            for (int iv = 0; iv < nv; iv++) {
++                double tv = nv == 1 ? 0.5 : (double) iv / (nv - 1);
++                double v = Mth.lerp(tv, minV, maxV);
++                int rowOffset = iv * nu;
++                for (int iu = 0; iu < nu; iu++) {
++                    double tu = nu == 1 ? 0.5 : (double) iu / (nu - 1);
++                    double u = Mth.lerp(tu, minU, maxU);
++                    double px;
++                    double py;
++                    double pz;
++                    if (fixedAxis == 0) {
++                        px = fixedCoord;
++                        pz = u;
++                        py = v;
++                    } else if (fixedAxis == 2) {
++                        px = u;
++                        py = v;
++                        pz = fixedCoord;
++                    } else {
++                        px = u;
++                        py = fixedCoord;
++                        pz = v;
++                    }
++
++                    int idx = rowOffset + iu;
++                    this.gridX[idx] = px;
++                    this.gridY[idx] = py;
++                    this.gridZ[idx] = pz;
++                    boolean clear = this.isSlabRayClear(eye, targetBox, px, py, pz, rangeSq);
++                    this.gridVisible[idx] = clear;
++                    if (clear) {
++                        anyVisible++;
++                    }
++                }
++            }
++
++            if (anyVisible == 0) {
++                return;
++            }
++
++            computeClearance(this.gridVisible, this.gridClearance, nu, nv);
++
++            for (int iv = 0; iv < nv; iv++) {
++                int rowOffset = iv * nu;
++                for (int iu = 0; iu < nu; iu++) {
++                    int idx = rowOffset + iu;
++                    if (!this.gridVisible[idx]) {
++                        continue;
++                    }
++                    double px = this.gridX[idx];
++                    double py = this.gridY[idx];
++                    double pz = this.gridZ[idx];
++                    int clearance = this.gridClearance[idx];
++
++                    int cappedClearance = Math.min(clearance, CLEARANCE_CAP);
++                    int tieClearance = Math.min(clearance, CLEARANCE_TIE_CAP);
++                    double heightErr = zone == Zone.BEST ? 0.0 : Math.abs(py - prefY);
++                    double turnDeg = angularDistance(eye, from, px, py, pz);
++                    double stickyDist = 0.0;
++                    if (hasPrev) {
++                        double sx = px - prevX;
++                        double sy = py - prevY;
++                        double sz = pz - prevZ;
++                        stickyDist = Math.sqrt(sx * sx + sy * sy + sz * sz);
++                    }
++
++                    double score = cappedClearance * 100.0
++                            + tieClearance * 0.5
++                            - heightErr * 25.0
++                            - turnDeg * 0.35
++                            - stickyDist * 12.0;
++
++                    if (zone.inBand(py, targetBox) && score > this.bestZoneScore
++                            && this.verifiesLookRay(eye, targetBox, px, py, pz, effectiveRange)) {
++                        this.bestZoneScore = score;
++                        this.bestZoneX = px;
++                        this.bestZoneY = py;
++                        this.bestZoneZ = pz;
++                    }
++
++                    double fallbackScore = cappedClearance * 100.0
++                            + tieClearance * 0.5
++                            - (zone == Zone.BEST ? 0.0 : heightErr * 8.0)
++                            - turnDeg * 0.35
++                            - stickyDist * 12.0;
++                    if (fallbackScore > this.bestAnyScore
++                            && this.verifiesLookRay(eye, targetBox, px, py, pz, effectiveRange)) {
++                        this.bestAnyScore = fallbackScore;
++                        this.bestAnyX = px;
++                        this.bestAnyY = py;
++                        this.bestAnyZ = pz;
++                    }
++                }
++            }
++        }
++
++        /** Checks that the float-rounded {@link Rotation} (through {@code Mth.sin/cos}) still hits cleanly. */
++        public boolean verifiesLookRay(final Vec3 eye, final AABB targetBox,
++                                       final double px, final double py, final double pz,
++                                       final double effectiveRange) {
++            Rotation rot = towardsCoords(eye, px, py, pz);
++            return this.verifiesRotation(eye, rot, targetBox, effectiveRange);
++        }
++
++        /** Checks whether {@code rotation} reaches {@code targetBox} within {@code effectiveRange} without hitting obstacles. */
++        public boolean verifiesRotation(final Vec3 eye, final Rotation rotation,
++                                        final AABB targetBox, final double effectiveRange) {
++            Optional<Vec3> hit = Rotations.hit(eye, rotation, targetBox, effectiveRange);
++            if (hit.isEmpty()) {
++                return false;
++            }
++            Vec3 loc = hit.get();
++            return !this.isSegmentBlocked(eye.x, eye.y, eye.z, loc.x - eye.x, loc.y - eye.y, loc.z - eye.z);
++        }
++
++        /** True when a ray from {@code eye} to {@code (px, py, pz)} enters {@code targetBox} in range with no prior block hit. */
++        public boolean isSlabRayClear(final Vec3 eye, final AABB targetBox,
++                                      final double px, final double py, final double pz,
++                                      final double maxRangeSq) {
++            double dx = px - eye.x;
++            double dy = py - eye.y;
++            double dz = pz - eye.z;
++            double lenSq = dx * dx + dy * dy + dz * dz;
++            if (lenSq < 1.0E-12) {
++                return true;
++            }
++            double tHit = entryParam(eye.x, eye.y, eye.z, dx, dy, dz,
++                    targetBox.minX, targetBox.minY, targetBox.minZ,
++                    targetBox.maxX, targetBox.maxY, targetBox.maxZ);
++            if (tHit < 0.0) {
++                return false;
++            }
++            if (tHit * tHit * lenSq > maxRangeSq) {
++                return false;
++            }
++            if (tHit <= 1.0E-7) {
++                return true;
++            }
++            return !this.isSegmentBlocked(eye.x, eye.y, eye.z, dx * tHit, dy * tHit, dz * tHit);
++        }
++
++        /** Tests segment {@code origin + s * delta} for {@code s in (ENTRY_EPSILON, 1 - EXIT_EPSILON)} against all obstacles. */
++        public boolean isSegmentBlocked(final double ox, final double oy, final double oz,
++                                        final double dx, final double dy, final double dz) {
++            int limit = this.boxCount * 6;
++            double[] data = this.boxes;
++            for (int i = 0; i < limit; i += 6) {
++                if (slabIntersects(ox, oy, oz, dx, dy, dz,
++                        data[i], data[i + 1], data[i + 2],
++                        data[i + 3], data[i + 4], data[i + 5])) {
++                    return true;
++                }
++            }
++            return false;
++        }
++    }
++
++    private static Selection selectUnobstructed(final Vec3 eye, final AABB targetBox,
++                                                final double primaryRange, final double maxReach,
++                                                final Zone zone, final @Nullable Vec3 previousOffset,
++                                                final boolean previousInPreferredZone) {
++        Vec3 center = targetBox.getCenter();
++        AABB shrunk = shrinkSafe(targetBox, EDGE_INSET);
++        if (previousOffset != null && previousInPreferredZone) {
++            Vec3 sticky = clampToBox(center.add(previousOffset), shrunk);
++            if (zone.inBand(sticky.y, targetBox) && hitsWithin(eye, targetBox, sticky, primaryRange)) {
++                return new Selection(sticky, sticky.subtract(center), true);
++            }
++        }
++
++        double bandMinY = zone == Zone.BEST ? shrunk.minY : Mth.clamp(Mth.lerp(zone.minFraction, targetBox.minY, targetBox.maxY), shrunk.minY, shrunk.maxY);
++        double bandMaxY = zone == Zone.BEST ? shrunk.maxY : Mth.clamp(Mth.lerp(zone.maxFraction, targetBox.minY, targetBox.maxY), shrunk.minY, shrunk.maxY);
++        Vec3 anchor = zone.preferredAnchor(eye, targetBox);
++        if (hitsWithin(eye, targetBox, anchor, primaryRange)) {
++            return new Selection(anchor, anchor.subtract(center), true);
++        }
++        Vec3 nearestInBand = new Vec3(
++                Mth.clamp(eye.x, shrunk.minX, shrunk.maxX),
++                Mth.clamp(eye.y, Math.min(bandMinY, bandMaxY), Math.max(bandMinY, bandMaxY)),
++                Mth.clamp(eye.z, shrunk.minZ, shrunk.maxZ));
++        if (Math.abs(nearestInBand.x - eye.x) < 1.0E-3 && Math.abs(nearestInBand.z - eye.z) < 1.0E-3) {
++            nearestInBand = new Vec3(center.x, nearestInBand.y, center.z);
++        }
++        if (hitsWithin(eye, targetBox, nearestInBand, primaryRange)) {
++            return new Selection(nearestInBand, nearestInBand.subtract(center), true);
++        }
++
++        // Soft fallback: elevation ledge where the preferred zone is beyond primaryRange, while nearest point reaches.
++        Vec3 nearestOverall = Rotations.nearestPoint(eye, targetBox, EDGE_INSET);
++        double allowRange = hitsWithin(eye, targetBox, nearestOverall, primaryRange) ? primaryRange : maxReach;
++        boolean inZone = zone.inBand(nearestOverall.y, targetBox);
++        if (!inZone && allowRange > primaryRange && hitsWithin(eye, targetBox, anchor, allowRange)) {
++            return new Selection(anchor, anchor.subtract(center), true);
++        }
++        return new Selection(nearestOverall, nearestOverall.subtract(center), inZone);
++    }
++
++    private static boolean hitsWithin(final Vec3 eye, final AABB targetBox, final Vec3 aimPoint, final double range) {
++        return Rotations.hit(eye, Rotations.towards(eye, aimPoint), targetBox, range).isPresent();
++    }
++
++    private static Vec3 clampToBox(final Vec3 point, final AABB box) {
++        return new Vec3(
++                Mth.clamp(point.x, box.minX, box.maxX),
++                Mth.clamp(point.y, box.minY, box.maxY),
++                Mth.clamp(point.z, box.minZ, box.maxZ));
++    }
++
++    /** Two-pass 2D Manhattan distance transform over {@code visible[nv * nu]}. */
++    static void computeClearance(final boolean[] visible, final int[] clearance, final int nu, final int nv) {
++        int inf = nu + nv + 1;
++        for (int iv = 0; iv < nv; iv++) {
++            int row = iv * nu;
++            boolean borderV = iv == 0 || iv == nv - 1;
++            for (int iu = 0; iu < nu; iu++) {
++                int idx = row + iu;
++                if (!visible[idx]) {
++                    clearance[idx] = 0;
++                } else if (borderV || iu == 0 || iu == nu - 1) {
++                    clearance[idx] = 1;
++                } else {
++                    int top = clearance[(iv - 1) * nu + iu];
++                    int left = clearance[row + iu - 1];
++                    clearance[idx] = Math.min(inf, Math.min(top, left) + 1);
++                }
++            }
++        }
++
++        for (int iv = nv - 1; iv >= 0; iv--) {
++            int row = iv * nu;
++            for (int iu = nu - 1; iu >= 0; iu--) {
++                int idx = row + iu;
++                int c = clearance[idx];
++                if (c <= 1) {
++                    continue;
++                }
++                if (iv + 1 < nv) {
++                    c = Math.min(c, clearance[(iv + 1) * nu + iu] + 1);
++                }
++                if (iu + 1 < nu) {
++                    c = Math.min(c, clearance[row + iu + 1] + 1);
++                }
++                clearance[idx] = c;
++            }
++        }
++    }
++
++    private static Rotation towardsCoords(final Vec3 eye, final double px, final double py, final double pz) {
++        double dx = px - eye.x;
++        double dy = py - eye.y;
++        double dz = pz - eye.z;
++        double horizontal = Math.sqrt(dx * dx + dz * dz);
++        float yaw = Mth.wrapDegrees((float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
++        float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontal));
++        return new Rotation(yaw, Mth.clamp(pitch, -90.0F, 90.0F));
++    }
++
++    private static double angularDistance(final Vec3 eye, final Rotation from,
++                                          final double px, final double py, final double pz) {
++        Rotation rot = towardsCoords(eye, px, py, pz);
++        double dyaw = Mth.wrapDegrees(rot.yaw() - from.yaw());
++        double dpitch = rot.pitch() - from.pitch();
++        return Math.hypot(dyaw, dpitch);
++    }
++
++    /** Parameter {@code t in [0, 1]} where {@code origin + t * delta} enters {@code box}, or {@code -1} on miss. */
++    static double entryParam(final double ox, final double oy, final double oz,
++                             final double dx, final double dy, final double dz,
++                             final double minX, final double minY, final double minZ,
++                             final double maxX, final double maxY, final double maxZ) {
++        if (ox >= minX && ox <= maxX && oy >= minY && oy <= maxY && oz >= minZ && oz <= maxZ) {
++            return 0.0;
++        }
++        double tEnter = 0.0;
++        double tExit = 1.0;
++
++        if (Math.abs(dx) < 1.0E-9) {
++            if (ox < minX - 1.0E-7 || ox > maxX + 1.0E-7) return -1.0;
++        } else {
++            double inv = 1.0 / dx;
++            double t1 = (minX - ox) * inv;
++            double t2 = (maxX - ox) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        if (Math.abs(dy) < 1.0E-9) {
++            if (oy < minY - 1.0E-7 || oy > maxY + 1.0E-7) return -1.0;
++        } else {
++            double inv = 1.0 / dy;
++            double t1 = (minY - oy) * inv;
++            double t2 = (maxY - oy) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        if (Math.abs(dz) < 1.0E-9) {
++            if (oz < minZ - 1.0E-7 || oz > maxZ + 1.0E-7) return -1.0;
++        } else {
++            double inv = 1.0 / dz;
++            double t1 = (minZ - oz) * inv;
++            double t2 = (maxZ - oz) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        return tEnter <= tExit + 1.0E-7 ? tEnter : -1.0;
++    }
++
++    /** Matches {@link VoxelShape#clip}: hits if segment overlaps box across {@code s in (ENTRY_EPSILON, 1 - EXIT_EPSILON)}. */
++    static boolean slabIntersects(final double ox, final double oy, final double oz,
++                                  final double dx, final double dy, final double dz,
++                                  final double minX, final double minY, final double minZ,
++                                  final double maxX, final double maxY, final double maxZ) {
++        double tEnter = Double.NEGATIVE_INFINITY;
++        double tExit = Double.POSITIVE_INFINITY;
++
++        if (Math.abs(dx) < 1.0E-9) {
++            if (ox < minX + 1.0E-7 || ox > maxX - 1.0E-7) return false;
++        } else {
++            double inv = 1.0 / dx;
++            double t1 = (minX - ox) * inv;
++            double t2 = (maxX - ox) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        if (Math.abs(dy) < 1.0E-9) {
++            if (oy < minY + 1.0E-7 || oy > maxY - 1.0E-7) return false;
++        } else {
++            double inv = 1.0 / dy;
++            double t1 = (minY - oy) * inv;
++            double t2 = (maxY - oy) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        if (Math.abs(dz) < 1.0E-9) {
++            if (oz < minZ + 1.0E-7 || oz > maxZ - 1.0E-7) return false;
++        } else {
++            double inv = 1.0 / dz;
++            double t1 = (minZ - oz) * inv;
++            double t2 = (maxZ - oz) * inv;
++            tEnter = Math.max(tEnter, Math.min(t1, t2));
++            tExit = Math.min(tExit, Math.max(t1, t2));
++        }
++
++        return tEnter <= tExit && tExit > ENTRY_EPSILON && tEnter < 1.0 - EXIT_EPSILON;
++    }
++}
+diff --git a/src/main/java/net/minecraft/client/Minecraft.java b/src/main/java/net/minecraft/client/Minecraft.java
+index a031641d..c0876b48 100644
+--- a/src/main/java/net/minecraft/client/Minecraft.java
++++ b/src/main/java/net/minecraft/client/Minecraft.java
+@@ -398,6 +398,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+     private boolean gameLoadFinished;
+     private final long clientStartTimeMs;
+     private long clientTickCount;
++    private boolean inPreMovementTick;
+     private final PacketProcessor packetProcessor;
+     private final SimpleGizmoCollector perTickGizmos = new SimpleGizmoCollector();
+     private List<SimpleGizmoCollector.GizmoInstance> drainedLatestTickGizmos = new ArrayList<>();
+@@ -1471,12 +1472,6 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+                 this.gameRenderer.update(this.deltaTracker);
+                 float worldPartialTicks = this.deltaTracker.getGameTimeDeltaPartialTick(false);
+                 this.pick(worldPartialTicks);
+-                // Sigma hook: timed clicks use the freshly picked crosshair after visible AimAssist movement.
+-                var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
+-                        com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
+-                if (autoClicker != null && autoClicker.poll(advanceGameTime && this.missTime <= 0)) {
+-                    this.startAttack(true);
+-                }
+                 profiler.popPush("extract");
+                 this.gameRenderer.gameRenderState().framerateLimit = this.framerateLimitTracker.getFramerateLimit();
+                 this.gameRenderer.extract(this.deltaTracker, advanceGameTime);
+@@ -2016,7 +2011,21 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+         return this.musicManager;
+     }
+ 
++    /**
++     * Sigma: true only while inside {@link #tick()} before movement, sneak/sprint or {@code CLIENT_TICK_END}
++     * packets go out, i.e. the exact window where 1.21.2+ / 26.2 servers accept gameplay action packets.
++     */
++    public boolean isInPreMovementTick() {
++        return this.isSameThread() && this.inPreMovementTick && !this.pause;
++    }
++
++    public void leavePreMovementTick() {
++        this.inPreMovementTick = false;
++    }
++
+     public void tick() {
++        this.inPreMovementTick = true;
++        try {
+         // Sigma hook: start of the game tick, before keybinds are polled and before the level ticks.
+         EventBus.call(new EventTick(EventState.PRE));
+         this.clientTickCount++;
+@@ -2133,6 +2142,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+                 this.particleEngine.tick();
+             }
+ 
++            this.inPreMovementTick = false;
+             ClientPacketListener connection = this.getConnection();
+             if (connection != null && !this.pause) {
+                 connection.send(ServerboundClientTickEndPacket.INSTANCE);
+@@ -2157,7 +2167,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+ 
+         profiler.pop();
+         // Sigma hook: end of the game tick.
++        this.inPreMovementTick = false;
+         EventBus.call(new EventTick(EventState.POST));
++        } finally {
++            this.inPreMovementTick = false;
++        }
+     }
+ 
+     private boolean isLevelRunningNormally() {
+@@ -2259,10 +2273,25 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
+             while (this.options.keyPickItem.consumeClick()) {
+             }
+         } else {
++            boolean consumedAttackClick = false;
+             while (this.options.keyAttack.consumeClick()) {
++                consumedAttackClick = true;
+                 instantAttack |= this.startAttack();
+             }
+ 
++            // Sigma hook: poll AutoClicker inside handleKeybinds so generated attacks stay strictly
++            // before LocalPlayer#sendPosition and ServerboundClientTickEndPacket on 26.2+.
++            if (!consumedAttackClick) {
++                var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
++                        com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
++                if (autoClicker != null) {
++                    this.pick(1.0F);
++                    if (autoClicker.poll(this.missTime <= 0)) {
++                        instantAttack |= this.startAttack(true);
++                    }
++                }
++            }
++
+             while (this.options.keyUse.consumeClick()) {
+                 this.startUseItem();
+             }
+diff --git a/src/main/java/net/minecraft/client/multiplayer/MultiPlayerGameMode.java b/src/main/java/net/minecraft/client/multiplayer/MultiPlayerGameMode.java
+index 82cfb924..3fae7181 100644
+--- a/src/main/java/net/minecraft/client/multiplayer/MultiPlayerGameMode.java
++++ b/src/main/java/net/minecraft/client/multiplayer/MultiPlayerGameMode.java
+@@ -416,6 +416,11 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
+         this.ensureHasSentCarriedItem();
+     }
+ 
++    /** Marks the hotbar selection dirty so the next tick's {@link #tick()} sends the slot change inside the tick window. */
++    public void markCarriedItemDirty() {
++        this.carriedIndex = -1;
++    }
++
+     private void ensureHasSentCarriedItem() {
+         int index = this.minecraft.player.getInventory().getSelectedSlot();
+         if (index != this.carriedIndex) {
+diff --git a/src/main/java/net/minecraft/client/player/LocalPlayer.java b/src/main/java/net/minecraft/client/player/LocalPlayer.java
+index 6e9044c4..a45cbce9 100644
+--- a/src/main/java/net/minecraft/client/player/LocalPlayer.java
++++ b/src/main/java/net/minecraft/client/player/LocalPlayer.java
+@@ -293,8 +293,10 @@ public class LocalPlayer extends AbstractClientPlayer
+         if (this.connection.hasClientLoaded()) {
+             // Sigma hook: the player's tick. Cancelling PRE skips it whole, movement packets included.
+             if (EventBus.call(new EventUpdate(EventState.PRE)).isCancelled()) {
++                this.minecraft.leavePreMovementTick();
+                 return;
+             }
++            this.minecraft.leavePreMovementTick();
+ 
+             this.dropSpamThrottler.tick();
+             super.tick();
+@@ -385,6 +387,7 @@ public class LocalPlayer extends AbstractClientPlayer
+     }
+ 
+     private void sendPosition() {
++        this.minecraft.leavePreMovementTick();
+         this.sendIsSprintingIfNeeded();
+         // MODIFIED for porting: was VFP sprinting_and_sneaking MixinLocalPlayer#sendSneakingAfterSprinting
+         // (@Inject after sendIsSprintingIfNeeded in sendPosition). <= 1.21 expects the sneak command right
+diff --git a/src/main/resources/assets/minecraft/sigma/lang/en_us.json b/src/main/resources/assets/minecraft/sigma/lang/en_us.json
+index c08620d0..212f1af9 100644
+--- a/src/main/resources/assets/minecraft/sigma/lang/en_us.json
++++ b/src/main/resources/assets/minecraft/sigma/lang/en_us.json
+@@ -69,6 +69,12 @@
+   "text.Independent random pace variation in percent. Zero uses the midpoint before drift and jitter.": "Independent random pace variation in percent. Zero uses the midpoint before drift and jitter.",
+   "text.Maximum extra clicks after each physical press. A new press replaces unfinished extras.": "Maximum extra clicks after each physical press. A new press replaces unfinished extras.",
+   "text.Milliseconds between Helper clicks, starting after the original click is processed.": "Milliseconds between Helper clicks, starting after the original click is processed.",
++  "text.Hit Position": "Hit Position",
++  "text.Best": "Best",
++  "text.Head": "Head",
++  "text.Body": "Body",
++  "text.Feet": "Feet",
++  "text.Where on the target to aim first; falls back to any open gap when that part is blocked or out of reach.": "Where on the target to aim first; falls back to any open gap when that part is blocked or out of reach.",
+   "category.combat": "Combat",
+   "category.movement": "Movement",
+   "category.player": "Player",
+diff --git a/src/main/resources/assets/minecraft/sigma/lang/zh_cn.json b/src/main/resources/assets/minecraft/sigma/lang/zh_cn.json
+index d34a73fe..0b6ec8eb 100644
+--- a/src/main/resources/assets/minecraft/sigma/lang/zh_cn.json
++++ b/src/main/resources/assets/minecraft/sigma/lang/zh_cn.json
+@@ -69,6 +69,12 @@
+   "text.Independent random pace variation in percent. Zero uses the midpoint before drift and jitter.": "独立随机频率变化的百分比强度；设为 0 时先采用范围中值，再叠加漂移与间隔抖动。",
+   "text.Maximum extra clicks after each physical press. A new press replaces unfinished extras.": "每次手动按下攻击键后追加的最大点击次数；再次按下会替换尚未完成的追加点击。",
+   "text.Milliseconds between Helper clicks, starting after the original click is processed.": "点击辅助的点击间隔，单位为毫秒；从原始点击完成处理后开始计时。",
++  "text.Hit Position": "命中部位",
++  "text.Best": "最佳",
++  "text.Head": "头部",
++  "text.Body": "躯干",
++  "text.Feet": "脚部",
++  "text.Where on the target to aim first; falls back to any open gap when that part is blocked or out of reach.": "优先瞄准的目标部位；当该部位被遮挡或超出攻击距离时自动回退至暴露缝隙。",
+   "category.combat": "Combat",
+   "category.movement": "Movement",
+   "category.player": "Player",
+diff --git a/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycleTest.java b/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycleTest.java
+index 61b31465..29c0ed3f 100644
+--- a/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycleTest.java
++++ b/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/AuraAttackCycleTest.java
+@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
+ import static org.junit.jupiter.api.Assertions.assertThrows;
+ import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
++import com.mentalfrostbyte.jello.event.EventBus;
+ import com.mentalfrostbyte.jello.event.EventState;
++import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
++import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
+ import com.mentalfrostbyte.jello.util.math.Rotations;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+@@ -344,6 +347,104 @@ class AuraAttackCycleTest {
+         assertTrue(restored.isEmpty(), "a failed cleanup cannot leave an old hit armed");
+     }
+ 
++    @Test
++    void midTickDisableDrainsHitInFirstMotionTickAndRestoresCameraInSecondMotionTick() {
++        AuraAttackCycle cycle = new AuraAttackCycle();
++        cycle.reset(CAMERA);
++        FollowingReportCheck server = new FollowingReportCheck();
++        server.report(CAMERA);
++        server.attack(FRONT);
++        cycle.attacked(AIM, true);
++
++        // Module disabled mid-tick (desired == null): tick N's normal sendPosition must still report AIM.
++        EventMotion tickN = motion(CAMERA);
++        cycle.motion(tickN, null, false);
++        assertEquals(AIM.yaw(), tickN.getYaw());
++        assertEquals(AIM.pitch(), tickN.getPitch());
++        assertTrue(tickN.isRotationForced());
++        ServerboundMovePlayerPacket firstPacket = packet(new Rotation(tickN.getYaw(), tickN.getPitch()));
++        server.report(firstPacket);
++        cycle.reported(firstPacket);
++        tickN.setState(EventState.POST);
++        cycle.motion(tickN, null, false);
++        assertEquals(0, server.queued(), "the queued hit is finished by tick N's single normal movement packet");
++        assertEquals(0, server.misses);
++        assertTrue(cycle.isBusy(), "camera handback still remains for tick N+1");
++
++        // Tick N+1's normal sendPosition hands the look back to CAMERA.
++        EventMotion tickNext = motion(CAMERA);
++        cycle.motion(tickNext, null, false);
++        assertEquals(CAMERA.yaw(), tickNext.getYaw());
++        assertTrue(tickNext.isRotationForced());
++        ServerboundMovePlayerPacket secondPacket = packet(new Rotation(tickNext.getYaw(), tickNext.getPitch()));
++        server.report(secondPacket);
++        cycle.reported(secondPacket);
++        tickNext.setState(EventState.POST);
++        cycle.motion(tickNext, null, false);
++        assertFalse(cycle.isBusy(), "silent ownership ends once CAMERA is reported");
++    }
++
++    @Test
++    void drainOnBusFinishesPendingHitAndHandbackOnEventBusThenUnregisters() {
++        AuraAttackCycle cycle = new AuraAttackCycle();
++        cycle.reset(CAMERA);
++        FollowingReportCheck server = new FollowingReportCheck();
++        server.report(CAMERA);
++        server.attack(FRONT);
++        cycle.attacked(AIM, true);
++        cycle.drainOnBus(null);
++        assertTrue(cycle.isDrainingOnBus());
++
++        try {
++            // Tick 1 on EventBus: reports AIM.
++            EventMotion first = EventBus.call(motion(CAMERA));
++            assertEquals(AIM.yaw(), first.getYaw());
++            ServerboundMovePlayerPacket p1 = packet(new Rotation(first.getYaw(), first.getPitch()));
++            server.report(p1);
++            EventBus.call(new EventSendPacket(p1));
++            first.setState(EventState.POST);
++            EventBus.call(first);
++            assertEquals(0, server.misses);
++            assertTrue(cycle.isDrainingOnBus(), "still registered to restore CAMERA on next tick");
++
++            // Tick 2 on EventBus: restores CAMERA and self-unregisters.
++            EventMotion second = EventBus.call(motion(CAMERA));
++            assertEquals(CAMERA.yaw(), second.getYaw());
++            assertTrue(second.isRotationForced());
++            ServerboundMovePlayerPacket p2 = packet(new Rotation(second.getYaw(), second.getPitch()));
++            server.report(p2);
++            EventBus.call(new EventSendPacket(p2));
++            second.setState(EventState.POST);
++            EventBus.call(second);
++            assertFalse(cycle.isBusy());
++            assertFalse(cycle.isDrainingOnBus(), "drainer unregisters itself once CAMERA is restored");
++        } finally {
++            cycle.reset(null);
++        }
++    }
++
++    @Test
++    void reclaimMidDrainPreservesPendingHitAndWorldLoadAbortsDrain() {
++        AuraAttackCycle cycle = new AuraAttackCycle();
++        cycle.reset(CAMERA);
++        cycle.attacked(AIM, true);
++        cycle.drainOnBus(null);
++        assertTrue(cycle.isDrainingOnBus());
++
++        // Re-enabling mid-drain reclaims the live cycle without losing unreportedAttack.
++        cycle.reclaim(CAMERA);
++        assertFalse(cycle.isDrainingOnBus());
++        assertEquals(AIM, cycle.unreportedAttack());
++        assertTrue(cycle.isBusy());
++
++        // World unload clears and unregisters cleanly.
++        cycle.drainOnBus(null);
++        assertTrue(cycle.isDrainingOnBus());
++        EventBus.call(new EventLoadWorld(null));
++        assertFalse(cycle.isBusy());
++        assertFalse(cycle.isDrainingOnBus());
++    }
++
+     private static EventMotion motion(final Rotation camera) {
+         return new EventMotion(0.0, 0.0, 0.0, camera.yaw(), camera.pitch(), true);
+     }
+diff --git a/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/KillAuraTest.java b/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/KillAuraTest.java
+index 9e95608b..3944a6c6 100644
+--- a/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/KillAuraTest.java
++++ b/src/test/java/com/mentalfrostbyte/jello/module/impl/combat/KillAuraTest.java
+@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+ import com.mentalfrostbyte.jello.setting.EnumSetting;
+ import com.mentalfrostbyte.jello.setting.NumberSetting;
+ import com.mentalfrostbyte.jello.setting.Setting;
++import com.mentalfrostbyte.jello.util.math.HitboxAperture;
+ import com.mentalfrostbyte.jello.util.math.Rotations;
+ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
+ import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+@@ -126,14 +127,35 @@ class KillAuraTest {
+         assertEquals(MovementCorrection.SILENT, KillAura.MovementCorrectorMode.MOVCOR.resolve(corrector));
+     }
+ 
++    @Test
++    void hitPositionMapsEveryChoiceAndHidesWhenNotTurning() {
++        KillAura aura = new KillAura();
++        assertTrue(this.visible(aura, "Hit Position"));
++        assertEquals("BEST", aura.setting("Hit Position").orElseThrow().toJson().getAsString());
++        assertEquals("Best", EnumSetting.label(KillAura.HitPosition.BEST));
++        assertEquals("Head", EnumSetting.label(KillAura.HitPosition.HEAD));
++        assertEquals("Body", EnumSetting.label(KillAura.HitPosition.BODY));
++        assertEquals("Feet", EnumSetting.label(KillAura.HitPosition.FEET));
++
++        assertEquals(HitboxAperture.Zone.BEST, KillAura.HitPosition.BEST.toZone());
++        assertEquals(HitboxAperture.Zone.HEAD, KillAura.HitPosition.HEAD.toZone());
++        assertEquals(HitboxAperture.Zone.BODY, KillAura.HitPosition.BODY.toZone());
++        assertEquals(HitboxAperture.Zone.FEET, KillAura.HitPosition.FEET.toZone());
++
++        this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
++        assertFalse(this.visible(aura, "Hit Position"));
++    }
++
+     @Test
+     void onlyTheSettingsInUseAreShown() {
+         KillAura aura = new KillAura();
+         assertFalse(this.visible(aura, "Turn Speed"));
+         this.choose(aura, "Rotation", KillAura.RotationMode.SMOOTH);
+         assertTrue(this.visible(aura, "Turn Speed"));
++        assertTrue(this.visible(aura, "Hit Position"));
+         assertTrue(this.visible(aura, "Movement Corrector"), "a silent look is what needs correcting");
+         this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
++        assertFalse(this.visible(aura, "Hit Position"));
+         assertFalse(this.visible(aura, "Silent"), "nothing to hide when it doesn't turn");
+         assertFalse(this.visible(aura, "Movement Corrector"));
+         this.choose(aura, "CPS Mode", KillAura.CpsMode.SOL);
+diff --git a/src/test/java/com/mentalfrostbyte/jello/util/math/HitboxApertureTest.java b/src/test/java/com/mentalfrostbyte/jello/util/math/HitboxApertureTest.java
+new file mode 100644
+index 00000000..bb784c73
+--- /dev/null
++++ b/src/test/java/com/mentalfrostbyte/jello/util/math/HitboxApertureTest.java
+@@ -0,0 +1,125 @@
++package com.mentalfrostbyte.jello.util.math;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++import static org.junit.jupiter.api.Assertions.assertNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++import com.mentalfrostbyte.jello.util.math.HitboxAperture.Selection;
++import com.mentalfrostbyte.jello.util.math.HitboxAperture.Zone;
++import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
++import net.minecraft.world.phys.AABB;
++import net.minecraft.world.phys.Vec3;
++import org.junit.jupiter.api.Test;
++
++class HitboxApertureTest {
++
++    private static final Vec3 EYE = new Vec3(0.5, 1.62, 0.5);
++    private static final Rotation SOUTH = new Rotation(0.0F, 0.0F);
++
++    @Test
++    void threadsDiagonalStairAndBottomSlabNotchWhereCenterAndNearestFail() {
++        // Enemy standing at z = 2.7..3.3, y = 0..1.8. Between z = 1.0..2.0 sits:
++        // - an upside-down stair (top slab y = 1.5..2.0 across z = 1..2, back step y = 1.0..1.5 across z = 1.5..2.0)
++        // - a bottom slab (y = 0.0..0.5 across z = 1.0..2.0)
++        AABB target = new AABB(0.2, 0.0, 2.7, 0.8, 1.8, 3.3);
++        HitboxAperture.Scanner scanner = new HitboxAperture.Scanner();
++        scanner.addObstacle(0.0, 1.5, 1.0, 1.0, 2.0, 2.0);
++        scanner.addObstacle(0.0, 1.0, 1.5, 1.0, 1.5, 2.0);
++        scanner.addObstacle(0.0, 0.0, 1.0, 1.0, 0.5, 2.0);
++
++        Rotation centerAim = Rotations.towards(EYE, target.getCenter());
++        Rotation nearestAim = Rotations.towards(EYE, Rotations.nearestPoint(EYE, target, 0.15));
++        assertFalse(scanner.verifiesRotation(EYE, centerAim, target, 3.0), "center ray hits the stair's inner step");
++        assertFalse(scanner.verifiesRotation(EYE, nearestAim, target, 3.0), "nearestPoint ray hits the stair's top half");
++
++        Selection found = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.BEST, null, false);
++        assertNotNull(found, "diagonal aperture through the stair notch reaches the lower legs");
++        Rotation solved = Rotations.towards(EYE, found.point());
++        assertTrue(scanner.verifiesRotation(EYE, solved, target, 3.0), "selected look hits target within 3.0m without clipping");
++    }
++
++    @Test
++    void detectsOneSixteenthVoxelSlitAndCentersInsideIt() {
++        // A 1/16 block (0.0625m) slit at y = 1.50..1.5625 across a 3/16-thick barrier z = 1.0..1.1875,
++        // where both getCenter() (y = 0.9) and nearestPoint (y = 1.62) are blocked.
++        AABB target = new AABB(0.2, 0.0, 2.5, 0.8, 1.8, 3.1);
++        HitboxAperture.Scanner scanner = new HitboxAperture.Scanner();
++        scanner.addObstacle(0.0, 0.0, 1.0, 1.0, 1.50, 1.1875);
++        scanner.addObstacle(0.0, 1.5625, 1.0, 1.0, 2.5, 1.1875);
++
++        assertFalse(scanner.verifiesRotation(EYE, Rotations.towards(EYE, target.getCenter()), target, 3.0));
++        assertFalse(scanner.verifiesRotation(EYE, Rotations.towards(EYE, Rotations.nearestPoint(EYE, target, 0.15)), target, 3.0));
++
++        Selection found = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.BEST, null, false);
++        assertNotNull(found, "0.04m surface raster catches a 0.0625m 1/16-block slit");
++        assertTrue(scanner.verifiesRotation(EYE, Rotations.towards(EYE, found.point()), target, 3.0));
++    }
++
++    @Test
++    void headBodyAndFeetHonorPreferredBandsThenSoftFallbackWhenBlocked() {
++        AABB target = new AABB(0.2, 0.0, 2.5, 0.8, 1.8, 3.1);
++        HitboxAperture.Scanner scanner = new HitboxAperture.Scanner();
++
++        Selection openHead = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.HEAD, null, false);
++        Selection openBody = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.BODY, null, false);
++        Selection openFeet = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.FEET, null, false);
++        assertNotNull(openHead);
++        assertNotNull(openBody);
++        assertNotNull(openFeet);
++        assertTrue(openHead.inPreferredZone() && openHead.point().y > 1.35);
++        assertTrue(openBody.inPreferredZone() && openBody.point().y > 0.7 && openBody.point().y < 1.1);
++        assertTrue(openFeet.inPreferredZone() && openFeet.point().y < 0.45);
++
++        // Overhanging stair + upper wall blocks Head and Body completely, leaving ankles y = 0.0..0.5 exposed under z = 2.0..2.5.
++        scanner.addObstacle(0.0, 1.0, 1.5, 1.0, 2.5, 2.5);
++        scanner.addObstacle(0.0, 0.5, 2.0, 1.0, 1.0, 2.5);
++        Selection fallbackFeet = scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.HEAD, null, false);
++        assertNotNull(fallbackFeet, "Head falls back to exposed ankles rather than stalling");
++        assertFalse(fallbackFeet.inPreferredZone());
++        assertTrue(fallbackFeet.point().y < 0.5);
++        assertTrue(scanner.verifiesRotation(EYE, Rotations.towards(EYE, fallbackFeet.point()), target, 3.0));
++    }
++
++    @Test
++    void highLedgeFallsBackFromOutOfReachHeadToInReachFeet() {
++        // Enemy stands 1.6m higher on a ledge at z = 2.6..3.2: head (y ~ 3.13) is > 3.0m away, feet (y ~ 1.62) is 2.1m away.
++        AABB ledgeTarget = new AABB(0.2, 1.6, 2.6, 0.8, 3.4, 3.2);
++        HitboxAperture.Scanner scanner = new HitboxAperture.Scanner();
++
++        Selection chosen = scanner.selectFromObstacles(EYE, SOUTH, ledgeTarget, 3.0, 4.0, Zone.HEAD, null, false);
++        assertNotNull(chosen);
++        assertFalse(chosen.inPreferredZone(), "Head band is > 3.0m away, so solver drops down into 3.0m attack reach");
++        assertTrue(Rotations.hit(EYE, Rotations.towards(EYE, chosen.point()), ledgeTarget, 3.0).isPresent(),
++                "fallback point lands immediately inside the 3.0m attack reach");
++    }
++
++    @Test
++    void returnsNullWhenCompletelyWallOccluded() {
++        AABB target = new AABB(0.2, 0.0, 2.5, 0.8, 1.8, 3.1);
++        HitboxAperture.Scanner scanner = new HitboxAperture.Scanner();
++        scanner.addObstacle(-1.0, -1.0, 1.0, 2.0, 3.0, 2.0);
++
++        assertNull(scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.BEST, null, false));
++        assertNotNull(scanner.selectFromObstacles(EYE, SOUTH, target, 3.0, 4.0, Zone.BEST, null, true),
++                "Through Walls bypasses block obstacles");
++    }
++
++    @Test
++    void refineQuantizedRescuesSubStepSlitInWholeMouseSteps() {
++        double step = 0.15; // Default 100% mouse sensitivity step
++        Rotation from = new Rotation(0.0F, 0.0F);
++        // Ideal pitch sits at 1.074 deg -> Math.round(1.074 / 0.15) = 7 steps (1.05 deg), which clips the upper lip;
++        // 8 whole steps (1.20 deg) threads the slit cleanly.
++        Rotation ideal = new Rotation(0.0F, 1.074F);
++        Rotation rounded = Rotations.quantize(from, ideal, step);
++        assertEquals(1.05F, rounded.pitch(), 1e-4);
++
++        Rotation rescued = HitboxAperture.refineQuantized(from, ideal, rounded, step,
++                rot -> rot.pitch() >= 1.07F && rot.pitch() <= 1.25F && Math.abs(rot.yaw()) < 0.05F);
++        assertEquals(1.20F, rescued.pitch(), 1e-4, "steps up to 8 whole mouse steps where the slit is open");
++        double pitchSteps = (rescued.pitch() - from.pitch()) / step;
++        assertEquals(Math.round(pitchSteps), pitchSteps, 1e-4, "remains an exact integer multiple of mouseStep");
++    }
++}

@@ -65,9 +65,8 @@ public class HandRenderer {
 
 		poseStack.pushPose();
 		((GameRendererAccessor) gameRenderer).invokeBobHurt(camera, poseStack);
-		if (Minecraft.getInstance().options.bobView().get()) {
-			((GameRendererAccessor) gameRenderer).invokeBobView(camera, poseStack);
-		}
+		// MODIFIED for porting: share vanilla/Sigma hand bobbing policy, including SmoothBobbing's Affect Hand setting.
+		((GameRendererAccessor) gameRenderer).invokeBobView(camera, poseStack);
 		scaleMatrix.mul(poseStack.last().pose());
 		RenderSystem.setProjectionMatrix(cachedProjectionMatrixBuffer.getBuffer(scaleMatrix), ProjectionType.PERSPECTIVE);
 

@@ -17,6 +17,7 @@ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMove;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventSafeWalk;
+import com.mentalfrostbyte.jello.gui.modern.ModernBlockFlyCounter;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
@@ -28,6 +29,8 @@ import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
+import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import java.util.EnumMap;
 import java.util.function.BooleanSupplier;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -78,6 +81,8 @@ public final class BlockFly extends Module {
     private LocalPlayer sessionPlayer;
     private Object sessionLevel;
     private BlockFlyPlacement.Target pending;
+    private BlockFlyPlacement.Target deferredTarget;
+    private Rotation deferredSent;
     private Rotation requestedRotation;
     private MovementCorrection correction = MovementCorrection.OFF;
     private boolean silentRotation = true;
@@ -127,12 +132,18 @@ public final class BlockFly extends Module {
     public boolean isActivelyWorking() {
         return isEnabled() && ready() && this.active != null
                 && this.sessionPlayer == mc.player && this.sessionLevel == mc.level
-                && (this.requestedRotation != null || this.pending != null || this.actedThisTick
-                    || this.internalSlotChange || this.liteSlot >= 0);
+                && (this.requestedRotation != null || this.pending != null || this.deferredTarget != null
+                    || this.actedThisTick || this.internalSlotChange || this.liteSlot >= 0);
     }
 
     @Override protected void onEnable() { restart(); }
-    @Override protected void onDisable() { stop(); }
+    @Override protected void onDisable() {
+        try {
+            stop();
+        } finally {
+            ModernBlockFlyCounter.reset();
+        }
+    }
 
     private void restart() {
         stop();
@@ -152,6 +163,8 @@ public final class BlockFly extends Module {
             } finally {
                 clearRotation();
                 this.pending = null;
+                this.deferredTarget = null;
+                this.deferredSent = null;
                 this.motionEvent = null;
                 this.lastPlaceTick = Integer.MIN_VALUE;
                 this.actedThisTick = false;
@@ -178,6 +191,13 @@ public final class BlockFly extends Module {
             return;
         }
         if (event.isPre()) {
+            if (this.deferredTarget != null && this.deferredSent != null) {
+                BlockFlyPlacement.Target deferred = this.deferredTarget;
+                Rotation sent = this.deferredSent;
+                this.deferredTarget = null;
+                this.deferredSent = null;
+                placeAt(deferred, mc.player.getEyePosition(), sent, false);
+            }
             this.pending = null;
         }
         this.active.tick(event);
@@ -248,11 +268,13 @@ public final class BlockFly extends Module {
         if (!ready() || this.active == null) return;
         this.active.render(event);
         if (event.isPost() && this.showAmount.get() && !isMode(Mode.SOUTH_SIDE) && !mc.gui.hud.isHidden()) {
-            String text = blockCount() + " Blocks";
-            int x = (event.getWidth() - mc.font.width(text)) / 2;
-            int y = event.getHeight() - 70;
-            event.getGraphics().fill(x - 6, y - 4, x + mc.font.width(text) + 6, y + 13, 0xB0202228);
-            event.getGraphics().text(mc.font, text, x, y, 0xFFFFFFFF, true);
+            ModernBlockFlyCounter.render(
+                event.getGraphics(),
+                blockCount(),
+                activeBlockStack(),
+                event.getWidth() / 2.0F,
+                event.getHeight() - 76.0F
+            );
         }
     }
 
@@ -327,12 +349,19 @@ public final class BlockFly extends Module {
 
     public void queuePlacement(final BlockFlyPlacement.Target target) { this.pending = target; }
 
-    /** Called only after the movement packet. The actual sent facing wins over the earlier plan. */
+    /** Called after the movement packet; on 1.21.2+ defers the interaction to the next tick's pre-movement window. */
     public boolean place(final BlockFlyPlacement.Target target) {
         if (!ready() || target == null || this.motionEvent == null || !this.motionEvent.isPost()
                 || this.motionEvent.isCancelled() || this.lastPlaceTick == mc.player.tickCount) return false;
         Vec3 eyes = new Vec3(this.motionEvent.getX(), this.motionEvent.getY() + mc.player.getEyeHeight(), this.motionEvent.getZ());
         Rotation sent = new Rotation(this.motionEvent.getYaw(), this.motionEvent.getPitch());
+        boolean deferForTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
+        return placeAt(target, eyes, sent, deferForTickEnd);
+    }
+
+    private boolean placeAt(final BlockFlyPlacement.Target target, final Vec3 eyes,
+                            final Rotation sent, final boolean deferOnly) {
+        if (!ready() || target == null || this.lastPlaceTick == mc.player.tickCount) return false;
         if (!BlockFlyPlacement.valid(mc.player, eyes, target, sent)) return false;
         var hit = BlockFlyPlacement.raycast(mc.player, eyes, sent);
         if (hit == null) return false;
@@ -344,6 +373,14 @@ public final class BlockFly extends Module {
         InteractionHand hand = slot >= 0 && BlockFlyPlacement.isPlaceable(inventory.getItem(slot))
                 ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
         if (hand == InteractionHand.OFF_HAND && !BlockFlyPlacement.isPlaceable(mc.player.getOffhandItem())) return false;
+        if (deferOnly) {
+            // 1.21.2+ / 26.2 forbids sending block-place or slot packets between MovePlayer and CLIENT_TICK_END;
+            // execute at the start of the very next tick before movement or mode re-selection runs.
+            this.deferredTarget = target;
+            this.deferredSent = sent;
+            this.actedThisTick = true;
+            return true;
+        }
         this.actedThisTick = true;
         this.internalSlotChange = true;
         int previousLiteSlot = this.liteSlot;
@@ -397,6 +434,17 @@ public final class BlockFly extends Module {
         return result;
     }
 
+    private ItemStack activeBlockStack() {
+        if (mc.player == null) return ItemStack.EMPTY;
+        if (BlockFlyPlacement.isPlaceable(mc.player.getMainHandItem())) return mc.player.getMainHandItem();
+        if (!this.itemSpoof.is(ItemSpoof.NONE)) {
+            int slot = hotbarSlot();
+            if (slot >= 0) return mc.player.getInventory().getItem(slot);
+        }
+        if (BlockFlyPlacement.isPlaceable(mc.player.getOffhandItem())) return mc.player.getOffhandItem();
+        return ItemStack.EMPTY;
+    }
+
     public int blockCount() {
         if (mc.player == null) return 0;
         int count = 0;
@@ -439,9 +487,9 @@ public final class BlockFly extends Module {
     private void releaseLiteSlot() {
         if (this.liteSlot < 0) return;
         this.liteSlot = -1;
-        if (mc.player != null && mc.player == this.sessionPlayer && mc.getConnection() != null) {
-            mc.player.connection.send(new ServerboundSetCarriedItemPacket(mc.player.getInventory().getSelectedSlot()));
-            if (mc.gameMode != null) mc.gameMode.syncCarriedItem();
+        if (mc.player != null && mc.player == this.sessionPlayer && mc.getConnection() != null && mc.gameMode != null) {
+            mc.gameMode.markCarriedItemDirty();
+            if (mc.isInPreMovementTick()) mc.gameMode.syncCarriedItem();
         }
     }
 
@@ -451,8 +499,12 @@ public final class BlockFly extends Module {
             try {
                 Inventory inventory = mc.player.getInventory();
                 if (this.originalSlot >= 0 && inventory.getSelectedSlot() == this.ownedSlot) inventory.setSelectedSlot(this.originalSlot);
-                if (this.liteSlot >= 0) mc.player.connection.send(new ServerboundSetCarriedItemPacket(inventory.getSelectedSlot()));
-                mc.gameMode.syncCarriedItem();
+                if (this.liteSlot >= 0) mc.gameMode.markCarriedItemDirty();
+                if (mc.isInPreMovementTick()) {
+                    mc.gameMode.syncCarriedItem();
+                } else {
+                    mc.gameMode.markCarriedItemDirty();
+                }
             } finally { this.internalSlotChange = false; }
         }
         this.originalSlot = this.ownedSlot = this.liteSlot = -1;

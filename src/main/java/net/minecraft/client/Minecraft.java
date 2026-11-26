@@ -398,6 +398,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     private boolean gameLoadFinished;
     private final long clientStartTimeMs;
     private long clientTickCount;
+    private boolean inPreMovementTick;
     private final PacketProcessor packetProcessor;
     private final SimpleGizmoCollector perTickGizmos = new SimpleGizmoCollector();
     private List<SimpleGizmoCollector.GizmoInstance> drainedLatestTickGizmos = new ArrayList<>();
@@ -1471,12 +1472,6 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 this.gameRenderer.update(this.deltaTracker);
                 float worldPartialTicks = this.deltaTracker.getGameTimeDeltaPartialTick(false);
                 this.pick(worldPartialTicks);
-                // Sigma hook: timed clicks use the freshly picked crosshair after visible AimAssist movement.
-                var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
-                        com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
-                if (autoClicker != null && autoClicker.poll(advanceGameTime && this.missTime <= 0)) {
-                    this.startAttack(true);
-                }
                 profiler.popPush("extract");
                 this.gameRenderer.gameRenderState().framerateLimit = this.framerateLimitTracker.getFramerateLimit();
                 this.gameRenderer.extract(this.deltaTracker, advanceGameTime);
@@ -2016,7 +2011,21 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         return this.musicManager;
     }
 
+    /**
+     * Sigma: true only while inside {@link #tick()} before movement, sneak/sprint or {@code CLIENT_TICK_END}
+     * packets go out, i.e. the exact window where 1.21.2+ / 26.2 servers accept gameplay action packets.
+     */
+    public boolean isInPreMovementTick() {
+        return this.isSameThread() && this.inPreMovementTick && !this.pause;
+    }
+
+    public void leavePreMovementTick() {
+        this.inPreMovementTick = false;
+    }
+
     public void tick() {
+        this.inPreMovementTick = true;
+        try {
         // Sigma hook: start of the game tick, before keybinds are polled and before the level ticks.
         EventBus.call(new EventTick(EventState.PRE));
         this.clientTickCount++;
@@ -2133,6 +2142,7 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 this.particleEngine.tick();
             }
 
+            this.inPreMovementTick = false;
             ClientPacketListener connection = this.getConnection();
             if (connection != null && !this.pause) {
                 connection.send(ServerboundClientTickEndPacket.INSTANCE);
@@ -2157,7 +2167,11 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
 
         profiler.pop();
         // Sigma hook: end of the game tick.
+        this.inPreMovementTick = false;
         EventBus.call(new EventTick(EventState.POST));
+        } finally {
+            this.inPreMovementTick = false;
+        }
     }
 
     private boolean isLevelRunningNormally() {
@@ -2259,8 +2273,23 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
             while (this.options.keyPickItem.consumeClick()) {
             }
         } else {
+            boolean consumedAttackClick = false;
             while (this.options.keyAttack.consumeClick()) {
+                consumedAttackClick = true;
                 instantAttack |= this.startAttack();
+            }
+
+            // Sigma hook: poll AutoClicker inside handleKeybinds so generated attacks stay strictly
+            // before LocalPlayer#sendPosition and ServerboundClientTickEndPacket on 26.2+.
+            if (!consumedAttackClick) {
+                var autoClicker = com.mentalfrostbyte.jello.module.Modules.enabled(
+                        com.mentalfrostbyte.jello.module.impl.combat.AutoClicker.class);
+                if (autoClicker != null) {
+                    this.pick(1.0F);
+                    if (autoClicker.poll(this.missTime <= 0)) {
+                        instantAttack |= this.startAttack(true);
+                    }
+                }
             }
 
             while (this.options.keyUse.consumeClick()) {

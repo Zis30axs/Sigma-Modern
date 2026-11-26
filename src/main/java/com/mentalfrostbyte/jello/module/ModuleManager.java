@@ -61,6 +61,7 @@ import com.mentalfrostbyte.jello.module.impl.render.Esp;
 import com.mentalfrostbyte.jello.module.impl.render.LowFire;
 import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
 import com.mentalfrostbyte.jello.module.impl.render.NoRender;
+import com.mentalfrostbyte.jello.module.impl.render.SmoothBobbing;
 import com.mentalfrostbyte.jello.module.impl.render.NameTags;
 import com.mentalfrostbyte.jello.module.impl.render.Rotation;
 import com.mentalfrostbyte.jello.module.impl.render.RotationIndicator;
@@ -144,6 +145,7 @@ public final class ModuleManager {
         this.register(new NoJumpDelay());
         this.register(new NoHurtCam());
         this.register(new NoRender());
+        this.register(new SmoothBobbing());
         this.register(new PotionStatus());
         this.register(new Radar());
         this.register(new Rwr());

@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.EventState;
+import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
+import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
@@ -342,6 +345,104 @@ class AuraAttackCycleTest {
         List<Rotation> restored = new ArrayList<>();
         cycle.stop(CAMERA, restored::add);
         assertTrue(restored.isEmpty(), "a failed cleanup cannot leave an old hit armed");
+    }
+
+    @Test
+    void midTickDisableDrainsHitInFirstMotionTickAndRestoresCameraInSecondMotionTick() {
+        AuraAttackCycle cycle = new AuraAttackCycle();
+        cycle.reset(CAMERA);
+        FollowingReportCheck server = new FollowingReportCheck();
+        server.report(CAMERA);
+        server.attack(FRONT);
+        cycle.attacked(AIM, true);
+
+        // Module disabled mid-tick (desired == null): tick N's normal sendPosition must still report AIM.
+        EventMotion tickN = motion(CAMERA);
+        cycle.motion(tickN, null, false);
+        assertEquals(AIM.yaw(), tickN.getYaw());
+        assertEquals(AIM.pitch(), tickN.getPitch());
+        assertTrue(tickN.isRotationForced());
+        ServerboundMovePlayerPacket firstPacket = packet(new Rotation(tickN.getYaw(), tickN.getPitch()));
+        server.report(firstPacket);
+        cycle.reported(firstPacket);
+        tickN.setState(EventState.POST);
+        cycle.motion(tickN, null, false);
+        assertEquals(0, server.queued(), "the queued hit is finished by tick N's single normal movement packet");
+        assertEquals(0, server.misses);
+        assertTrue(cycle.isBusy(), "camera handback still remains for tick N+1");
+
+        // Tick N+1's normal sendPosition hands the look back to CAMERA.
+        EventMotion tickNext = motion(CAMERA);
+        cycle.motion(tickNext, null, false);
+        assertEquals(CAMERA.yaw(), tickNext.getYaw());
+        assertTrue(tickNext.isRotationForced());
+        ServerboundMovePlayerPacket secondPacket = packet(new Rotation(tickNext.getYaw(), tickNext.getPitch()));
+        server.report(secondPacket);
+        cycle.reported(secondPacket);
+        tickNext.setState(EventState.POST);
+        cycle.motion(tickNext, null, false);
+        assertFalse(cycle.isBusy(), "silent ownership ends once CAMERA is reported");
+    }
+
+    @Test
+    void drainOnBusFinishesPendingHitAndHandbackOnEventBusThenUnregisters() {
+        AuraAttackCycle cycle = new AuraAttackCycle();
+        cycle.reset(CAMERA);
+        FollowingReportCheck server = new FollowingReportCheck();
+        server.report(CAMERA);
+        server.attack(FRONT);
+        cycle.attacked(AIM, true);
+        cycle.drainOnBus(null);
+        assertTrue(cycle.isDrainingOnBus());
+
+        try {
+            // Tick 1 on EventBus: reports AIM.
+            EventMotion first = EventBus.call(motion(CAMERA));
+            assertEquals(AIM.yaw(), first.getYaw());
+            ServerboundMovePlayerPacket p1 = packet(new Rotation(first.getYaw(), first.getPitch()));
+            server.report(p1);
+            EventBus.call(new EventSendPacket(p1));
+            first.setState(EventState.POST);
+            EventBus.call(first);
+            assertEquals(0, server.misses);
+            assertTrue(cycle.isDrainingOnBus(), "still registered to restore CAMERA on next tick");
+
+            // Tick 2 on EventBus: restores CAMERA and self-unregisters.
+            EventMotion second = EventBus.call(motion(CAMERA));
+            assertEquals(CAMERA.yaw(), second.getYaw());
+            assertTrue(second.isRotationForced());
+            ServerboundMovePlayerPacket p2 = packet(new Rotation(second.getYaw(), second.getPitch()));
+            server.report(p2);
+            EventBus.call(new EventSendPacket(p2));
+            second.setState(EventState.POST);
+            EventBus.call(second);
+            assertFalse(cycle.isBusy());
+            assertFalse(cycle.isDrainingOnBus(), "drainer unregisters itself once CAMERA is restored");
+        } finally {
+            cycle.reset(null);
+        }
+    }
+
+    @Test
+    void reclaimMidDrainPreservesPendingHitAndWorldLoadAbortsDrain() {
+        AuraAttackCycle cycle = new AuraAttackCycle();
+        cycle.reset(CAMERA);
+        cycle.attacked(AIM, true);
+        cycle.drainOnBus(null);
+        assertTrue(cycle.isDrainingOnBus());
+
+        // Re-enabling mid-drain reclaims the live cycle without losing unreportedAttack.
+        cycle.reclaim(CAMERA);
+        assertFalse(cycle.isDrainingOnBus());
+        assertEquals(AIM, cycle.unreportedAttack());
+        assertTrue(cycle.isBusy());
+
+        // World unload clears and unregisters cleanly.
+        cycle.drainOnBus(null);
+        assertTrue(cycle.isDrainingOnBus());
+        EventBus.call(new EventLoadWorld(null));
+        assertFalse(cycle.isBusy());
+        assertFalse(cycle.isDrainingOnBus());
     }
 
     private static EventMotion motion(final Rotation camera) {

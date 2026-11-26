@@ -142,7 +142,7 @@ public final class ModernHudEditor extends Screen {
         KeyMapping.releaseAll();
         if (minecraft.gameMode != null) {
             minecraft.gameMode.stopDestroyBlock();
-            if (minecraft.player != null && minecraft.player.isUsingItem()) minecraft.gameMode.releaseUsingItem(minecraft.player);
+            if (minecraft.isInPreMovementTick() && minecraft.player != null && minecraft.player.isUsingItem()) minecraft.gameMode.releaseUsingItem(minecraft.player);
         }
     }
 

@@ -9,6 +9,7 @@ import com.mentalfrostbyte.jello.event.impl.game.render.EventRender2D;
 import com.mentalfrostbyte.jello.event.impl.player.EventGetFovModifier;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
+import com.mentalfrostbyte.jello.gui.modern.ModernBlockFlyCounter;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
 import com.mentalfrostbyte.jello.module.impl.movement.blockfly.BlockFlyPlacement.Target;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
@@ -638,19 +639,20 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         this.startHotbarCount = Math.max(this.startHotbarCount, count);
         GuiGraphicsExtractor g = event.getGraphics();
         int y = event.getHeight() / 2 + 15 + this.blockCountOffset.getInt();
-        int color = count < 16 ? 0xFFFF5050 : count < 32 ? 0xFFFFDC50 : 0xFFFFFFFF;
-        String text = count + " Blocks";
         if (this.blockCountStyle.is(CounterStyle.OLD)) {
+            int color = count < 16 ? 0xFFFF5050 : count < 32 ? 0xFFFFDC50 : 0xFFFFFFFF;
+            String text = count + " Blocks";
             g.text(mc.font, text, (event.getWidth() - mc.font.width(text)) / 2, y, color, true);
             return;
         }
-        int width = mc.font.width(text) + 38;
-        int x = (event.getWidth() - width) / 2;
-        g.fill(x, y, x + width, y + 26, 0x5A000000);
-        int filled = Math.round(width * Mth.clamp((float) count / this.startHotbarCount, 0, 1));
-        g.fill(x, y, x + filled, y + 26, 0x5AFFFFFF);
-        if (this.slot != null && !stack(this.slot).isEmpty()) g.item(stack(this.slot), x + 4, y + 5);
-        g.text(mc.font, text, x + 28, y + 9, color, false);
+        Slot shown = this.slot != null && validStack(stack(this.slot)) ? this.slot : selectSlot();
+        ModernBlockFlyCounter.render(
+            g,
+            count,
+            shown != null ? stack(shown) : ItemStack.EMPTY,
+            event.getWidth() / 2.0F,
+            y
+        );
     }
 
     @Override

@@ -12,6 +12,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import net.minecraft.ChatFormatting;
@@ -38,6 +39,7 @@ import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
 import net.minecraft.client.renderer.state.MapRenderState;
 import net.minecraft.client.renderer.state.gui.BlitRenderState;
 import net.minecraft.client.renderer.state.gui.ColoredRectangleRenderState;
+import net.minecraft.client.renderer.state.gui.GuiElementRenderState;
 import net.minecraft.client.renderer.state.gui.GuiItemRenderState;
 import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import net.minecraft.client.renderer.state.gui.GuiTextRenderState;
@@ -153,6 +155,14 @@ public class GuiGraphicsExtractor {
                 x, y, width, height, radius, opacity * com.mentalfrostbyte.jello.gui.modern.ModernStyle.groupAlpha(),
                 this.guiWidth(), this.guiHeight());
         if (element != null) this.guiRenderState.sigma$addHudBlur(element);
+    }
+
+    // MODIFIED for porting: Sigma hook to submit a backend-neutral custom GUI element clipped to the active scissor stack.
+    public void sigma$submitElement(
+        final BiFunction<Matrix3x2f, @Nullable ScreenRectangle, @Nullable GuiElementRenderState> factory
+    ) {
+        var element = factory.apply(new Matrix3x2f(this.pose), this.scissorStack.peek());
+        if (element != null) this.guiRenderState.addGuiElement(element);
     }
 
     public void enableScissor(final int x0, final int y0, final int x1, final int y1) {

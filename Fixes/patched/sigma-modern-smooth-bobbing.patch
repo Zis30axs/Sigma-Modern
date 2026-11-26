@@ -1,0 +1,255 @@
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/ModuleManager.java b/src/main/java/com/mentalfrostbyte/jello/module/ModuleManager.java
+index 9ba2d0be..7d59bd6e 100644
+--- a/src/main/java/com/mentalfrostbyte/jello/module/ModuleManager.java
++++ b/src/main/java/com/mentalfrostbyte/jello/module/ModuleManager.java
+@@ -60,6 +60,7 @@ import com.mentalfrostbyte.jello.module.impl.render.Esp;
+ import com.mentalfrostbyte.jello.module.impl.render.LowFire;
+ import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
+ import com.mentalfrostbyte.jello.module.impl.render.NoRender;
++import com.mentalfrostbyte.jello.module.impl.render.SmoothBobbing;
+ import com.mentalfrostbyte.jello.module.impl.render.NameTags;
+ import com.mentalfrostbyte.jello.module.impl.render.Rotation;
+ import com.mentalfrostbyte.jello.module.impl.render.RotationIndicator;
+@@ -143,6 +144,7 @@ public final class ModuleManager {
+         this.register(new NoJumpDelay());
+         this.register(new NoHurtCam());
+         this.register(new NoRender());
++        this.register(new SmoothBobbing());
+         this.register(new PotionStatus());
+         this.register(new Radar());
+         this.register(new Rwr());
+diff --git a/src/main/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbing.java b/src/main/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbing.java
+new file mode 100644
+index 00000000..1ef4b9b5
+--- /dev/null
++++ b/src/main/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbing.java
+@@ -0,0 +1,144 @@
++package com.mentalfrostbyte.jello.module.impl.render;
++
++import com.mentalfrostbyte.jello.module.Module;
++import com.mentalfrostbyte.jello.module.ModuleCategory;
++import com.mentalfrostbyte.jello.setting.BooleanSetting;
++import com.mentalfrostbyte.jello.setting.NumberSetting;
++import com.mojang.blaze3d.vertex.PoseStack;
++import com.mojang.math.Axis;
++import net.minecraft.client.player.LocalPlayer;
++import net.minecraft.client.renderer.state.level.CameraRenderState;
++import net.minecraft.util.Mth;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * Replaces vanilla's sharp |cos| view bobbing with a smooth C-infinity stride wave,
++ * sprint energy boost, subtle strafe roll, and soft landing cushion.
++ */
++public class SmoothBobbing extends Module {
++
++    private final NumberSetting intensity = this.register(new NumberSetting(
++            "Intensity", "Overall camera bobbing amplitude.", 1.0F, 0.1F, 2.0F, 0.05F));
++    private final NumberSetting sprintBoost = this.register(new NumberSetting(
++            "Sprint Boost", "Extra camera motion energy while sprinting.", 1.35F, 1.0F, 2.0F, 0.05F));
++    private final NumberSetting roll = this.register(new NumberSetting(
++            "Roll", "Side-tilt strength from footsteps and strafing.", 1.0F, 0.0F, 2.0F, 0.1F));
++    private final NumberSetting smoothness = this.register(new NumberSetting(
++            "Smoothness", "Damping speed. Higher feels snappier, lower feels floatier.", 12.0F, 4.0F, 24.0F, 1.0F));
++    private final BooleanSetting affectHand = this.register(new BooleanSetting(
++            "Affect Hand", "Apply smooth bobbing to the first-person hand as well.", true));
++
++    private @Nullable CameraRenderState lastFrameState;
++    private long lastNanos;
++    private float smoothBob;
++    private float smoothSprint = 1.0F;
++    private float smoothStrafe;
++    private float landingDip;
++    private boolean wasOnGround = true;
++    private double lastVy;
++    private float tx, ty, rollDeg, pitchDeg;
++
++    public SmoothBobbing() {
++        super(ModuleCategory.RENDER, "SmoothBobbing",
++                "Smooth camera bobbing, sprint energy and strafe tilt when walking or running");
++    }
++
++    public boolean affectsHand() {
++        return this.affectHand.get();
++    }
++
++    @Override
++    protected void onDisable() {
++        this.resetState();
++    }
++
++    private void resetState() {
++        this.lastFrameState = null;
++        this.lastNanos = 0L;
++        this.smoothBob = 0.0F;
++        this.smoothSprint = 1.0F;
++        this.smoothStrafe = 0.0F;
++        this.landingDip = 0.0F;
++        this.wasOnGround = true;
++        this.lastVy = 0.0;
++        this.tx = this.ty = this.rollDeg = this.pitchDeg = 0.0F;
++    }
++
++    /**
++     * Applies smooth camera motion for the current frame. World view, first-person hand,
++     * and shader hand passes share the same {@link CameraRenderState}, so kinematics advance
++     * strictly once per frame.
++     */
++    public void apply(final CameraRenderState cameraState, final LocalPlayer player, final PoseStack poseStack) {
++        if (this.lastFrameState != cameraState) {
++            this.lastFrameState = cameraState;
++            this.step(cameraState, player);
++        }
++        poseStack.translate(this.tx, this.ty, 0.0F);
++        if (Math.abs(this.rollDeg) > 1.0E-4F) {
++            poseStack.mulPose(Axis.ZP.rotationDegrees(this.rollDeg));
++        }
++        if (Math.abs(this.pitchDeg) > 1.0E-4F) {
++            poseStack.mulPose(Axis.XP.rotationDegrees(this.pitchDeg));
++        }
++    }
++
++    private void step(final CameraRenderState cameraState, final LocalPlayer player) {
++        long now = System.nanoTime();
++        float dt = this.lastNanos == 0L ? 0.016F : (now - this.lastNanos) / 1_000_000_000.0F;
++        this.lastNanos = now;
++        if (dt <= 0.0F || dt > 0.25F) {
++            this.smoothBob = 0.0F;
++            this.smoothSprint = 1.0F;
++            this.smoothStrafe = 0.0F;
++            this.landingDip = 0.0F;
++            this.wasOnGround = player.onGround();
++            this.lastVy = player.getDeltaMovement().y;
++            dt = 0.016F;
++        }
++
++        float blend = 1.0F - (float) Math.exp(-dt * this.smoothness.get());
++        boolean onGround = player.onGround();
++        boolean walkingOnGround = onGround && !player.isSwimming() && !player.isFallFlying() && !player.isPassenger();
++
++        if (!this.wasOnGround && onGround && this.lastVy < -0.18) {
++            this.landingDip = Math.max(this.landingDip, Math.clamp((float) (-this.lastVy) * 0.075F, 0.0F, 0.085F));
++        }
++        this.wasOnGround = onGround;
++        this.lastVy = player.getDeltaMovement().y;
++        this.landingDip *= (float) Math.exp(-dt * 11.0F);
++
++        float targetBob = walkingOnGround ? cameraState.entityRenderState.bob : 0.0F;
++        float targetSprint = walkingOnGround && player.isSprinting() ? this.sprintBoost.get() : 1.0F;
++        this.smoothBob += (targetBob - this.smoothBob) * blend;
++        this.smoothSprint += (targetSprint - this.smoothSprint) * blend;
++
++        double vx = player.getX() - player.xo;
++        double vz = player.getZ() - player.zo;
++        double rad = Math.toRadians(player.getYRot());
++        float rightSpeed = (float) (-vx * Math.cos(rad) - vz * Math.sin(rad));
++        float targetStrafe = walkingOnGround ? Math.clamp(rightSpeed * 5.5F, -1.0F, 1.0F) : 0.0F;
++        this.smoothStrafe += (targetStrafe - this.smoothStrafe) * blend;
++
++        float walk = cameraState.entityRenderState.backwardsInterpolatedWalkDistance;
++        float amp = this.intensity.get();
++        float energy = this.smoothBob * this.smoothSprint * amp;
++        float sway = strideSway(walk);
++        float lift = strideLift(walk);
++
++        this.tx = sway * energy * 0.42F;
++        this.ty = -(lift * energy * 0.68F + this.landingDip * amp);
++        this.rollDeg = (sway * energy * 2.1F + this.smoothStrafe * 1.45F * amp) * this.roll.get();
++        this.pitchDeg = (lift * energy * 2.8F + this.landingDip * 18.0F * amp);
++    }
++
++    /** Smooth sinusoidal left-right sway across each two-step cycle. */
++    static float strideSway(final float walkDistance) {
++        return Mth.sin(walkDistance * (float) Math.PI);
++    }
++
++    /** C-infinity raised-cosine footstep lift in [0, 1], replacing vanilla's sharp |cos| cusp. */
++    static float strideLift(final float walkDistance) {
++        return 0.5F - 0.5F * Mth.cos(walkDistance * (float) (Math.PI * 2.0));
++    }
++}
+diff --git a/src/main/java/net/minecraft/client/renderer/GameRenderer.java b/src/main/java/net/minecraft/client/renderer/GameRenderer.java
+index 3271533c..976b8087 100644
+--- a/src/main/java/net/minecraft/client/renderer/GameRenderer.java
++++ b/src/main/java/net/minecraft/client/renderer/GameRenderer.java
+@@ -29,6 +29,7 @@ import net.minecraft.client.Minecraft;
+ import com.mentalfrostbyte.jello.module.Modules;
+ import com.mentalfrostbyte.jello.module.impl.render.NoHurtCam;
+ import com.mentalfrostbyte.jello.module.impl.render.NoRender;
++import com.mentalfrostbyte.jello.module.impl.render.SmoothBobbing;
+ import com.mentalfrostbyte.jello.event.EventBus;
+ import com.mentalfrostbyte.jello.event.impl.game.render.EventRender3D;
+ import net.minecraft.client.Options;
+@@ -430,6 +431,11 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
+ 
+     private void bobView(final CameraRenderState cameraState, final PoseStack poseStack) {
+         if (cameraState.entityRenderState.isPlayer) {
++            SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
++            if (smoothBobbing != null && this.minecraft.player != null) {
++                smoothBobbing.apply(cameraState, this.minecraft.player, poseStack);
++                return;
++            }
+             float backwardsInterpolatedWalkDistance = cameraState.entityRenderState.backwardsInterpolatedWalkDistance;
+             float bob = cameraState.entityRenderState.bob;
+             poseStack.translate(
+@@ -446,7 +452,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
+     private Matrix4f sigma$worldCameraEffects(final CameraRenderState cameraState, final float worldPartialTicks) {
+         PoseStack bobStack = new PoseStack();
+         this.bobHurt(cameraState, bobStack);
+-        if (this.gameRenderState.optionsRenderState.bobView) {
++        if (this.gameRenderState.optionsRenderState.bobView || Modules.enabled(SmoothBobbing.class) != null) {
+             this.bobView(cameraState, bobStack);
+         }
+ 
+@@ -501,7 +507,12 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
+                 Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
+                 modelViewStack.pushMatrix().mul(modelViewMatrix);
+                 this.bobHurt(cameraState, poseStack);
+-                if (this.gameRenderState.optionsRenderState.bobView) {
++                SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
++                if (smoothBobbing != null) {
++                    if (smoothBobbing.affectsHand()) {
++                        this.bobView(cameraState, poseStack);
++                    }
++                } else if (this.gameRenderState.optionsRenderState.bobView) {
+                     this.bobView(cameraState, poseStack);
+                 }
+ 
+diff --git a/src/test/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbingTest.java b/src/test/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbingTest.java
+new file mode 100644
+index 00000000..387fd017
+--- /dev/null
++++ b/src/test/java/com/mentalfrostbyte/jello/module/impl/render/SmoothBobbingTest.java
+@@ -0,0 +1,32 @@
++package com.mentalfrostbyte.jello.module.impl.render;
++
++import static org.junit.jupiter.api.Assertions.*;
++
++import org.junit.jupiter.api.Test;
++
++class SmoothBobbingTest {
++    @Test
++    void strideLiftIsSmoothAndBoundedAcrossAStepCycle() {
++        assertEquals(0.0F, SmoothBobbing.strideLift(0.0F), 1.0E-5F);
++        assertEquals(1.0F, SmoothBobbing.strideLift(0.5F), 1.0E-5F);
++        assertEquals(0.0F, SmoothBobbing.strideLift(1.0F), 1.0E-5F);
++        assertEquals(SmoothBobbing.strideLift(0.25F), SmoothBobbing.strideLift(0.75F), 1.0E-5F);
++        assertEquals(0.5F, SmoothBobbing.strideLift(0.25F), 1.0E-5F);
++    }
++
++    @Test
++    void strideSwayAlternatesSignBetweenLeftAndRightSteps() {
++        assertEquals(0.0F, SmoothBobbing.strideSway(0.0F), 1.0E-5F);
++        assertEquals(1.0F, SmoothBobbing.strideSway(0.5F), 1.0E-5F);
++        assertEquals(0.0F, SmoothBobbing.strideSway(1.0F), 1.0E-5F);
++        assertEquals(-1.0F, SmoothBobbing.strideSway(1.5F), 1.0E-5F);
++    }
++
++    @Test
++    void defaultsMatchExpectedModuleMetadata() {
++        SmoothBobbing module = new SmoothBobbing();
++        assertEquals("SmoothBobbing", module.getName());
++        assertTrue(module.affectsHand());
++        assertEquals(5, module.settings().size());
++    }
++}

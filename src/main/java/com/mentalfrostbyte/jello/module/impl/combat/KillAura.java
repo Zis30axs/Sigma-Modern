@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.module.impl.combat;
 
+import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.event.EventPriority;
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
@@ -9,11 +10,17 @@ import com.mentalfrostbyte.jello.event.impl.player.EventStopUsingItem;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
+import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimSteering;
+import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimSteering.Turn;
+import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimStyleModel;
 import com.mentalfrostbyte.jello.module.impl.player.AutoPearl;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
+import com.mentalfrostbyte.jello.setting.TextSetting;
+import com.mentalfrostbyte.jello.util.math.HitboxAperture;
+import com.mentalfrostbyte.jello.util.math.HitboxAperture.Selection;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
@@ -48,12 +55,13 @@ import org.jspecify.annotations.Nullable;
  * ({@link EventMotion}) and the outgoing packets - and attacks through the same {@code MultiPlayerGameMode.attack} a click goes through, so {@code EventAttack}
  * listeners such as Criticals and SuperKnockback work with it.</p>
  *
- * <p>Each tick, at its start, it picks a target, works out this tick's look direction, and - if that look meets the
- * target within reach and an attack is due - attacks, all before the tick's movement report. That is the order a
- * vanilla click keeps: the attack goes out first and the look it was aimed with follows in the same tick's movement
- * packet. Which entities are eligible comes from the shared {@link Target} module. With {@code Silent} the look is only
- * reported to the server; the camera stays with the player, and the walking is kept in step with the reported look by
- * the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
+ * <p>Each tick, at its start, it picks a target, works out this tick's look direction through any unobstructed hitbox
+ * aperture (stairs, slabs, fences or ledges, honouring {@code Hit Position} first and falling back to open gaps when
+ * blocked), and - if that look meets the target within reach and an attack is due - attacks, all before the tick's
+ * movement report. That is the order a vanilla click keeps: the attack goes out first and the look it was aimed with
+ * follows in the same tick's movement packet. Which entities are eligible comes from the shared {@link Target} module.
+ * With {@code Silent} the look is only reported to the server; the camera stays with the player, and the walking is
+ * kept in step with the reported look by the {@link MovementCorrector} (the {@code Movement Corrector} setting).</p>
  *
  * <p>The rotation and AutoBlock modes span both sides of the line an anticheat draws, for {@code SelfDetection} to be
  * tested with; which of them GrimAC flags, and why, is in {@code SELFCHECK_PORTING.md}. {@code Claude1}, {@code Claude2}
@@ -85,14 +93,38 @@ public class KillAura extends Module {
     public enum RotationMode {
         /** Never turns; attacks what the player happens to be looking at, or - with Ray Trace off - anything in reach. */
         NONE,
-        /** Faces the target's centre at once, keeping the yaw continuous. */
+        /** Faces the selected aim point at once, keeping the yaw continuous. */
         SNAP,
-        /** Faces the target's centre at once with atan2's yaw as it comes, wrapped to -180..180. */
+        /** Faces the selected aim point at once with atan2's yaw as it comes, wrapped to -180..180. */
         WRAPPED,
-        /** Turns towards the target's centre by at most {@code Turn Speed} a tick. */
+        /** Turns towards the selected aim point by at most {@code Turn Speed} a tick. */
         SMOOTH,
-        /** Experimental: eases towards the nearest point of the target in whole mouse steps. */
-        CLAUDE1
+        /** Experimental: eases towards the selected aim point in whole mouse steps. */
+        CLAUDE1,
+        /** Reuses the locally trained AimAssist model, with Smooth as the untrained fallback. */
+        LORA;
+
+        @Override
+        public String toString() {
+            return this == LORA ? "LoRA" : this.name();
+        }
+    }
+
+    /** Which vertical band of the hitbox to aim at first; falls back to any exposed aperture when blocked or beyond reach. */
+    public enum HitPosition {
+        BEST,
+        HEAD,
+        BODY,
+        FEET;
+
+        HitboxAperture.Zone toZone() {
+            return switch (this) {
+                case BEST -> HitboxAperture.Zone.BEST;
+                case HEAD -> HitboxAperture.Zone.HEAD;
+                case BODY -> HitboxAperture.Zone.BODY;
+                case FEET -> HitboxAperture.Zone.FEET;
+            };
+        }
     }
 
     public enum AutoBlock {
@@ -161,10 +193,20 @@ public class KillAura extends Module {
             "Sol: longest extra pause in milliseconds.", 140.0F, 0.0F, 1000.0F, 5.0F));
 
     private final EnumSetting<RotationMode> rotationMode = this.register(new EnumSetting<>("Rotation",
-            "How it turns to the target. Claude1 is experimental.", RotationMode.SNAP));
+            "How it turns to the target. LoRA uses AimAssist's local training; Claude1 is experimental.", RotationMode.SNAP));
 
     private final NumberSetting turnSpeed = this.register(new NumberSetting("Turn Speed",
-            "Smooth: the most it turns in a tick, in degrees.", 40.0F, 1.0F, 180.0F, 1.0F));
+            "Smooth and LoRA: the most it turns in a tick, in degrees.", 40.0F, 1.0F, 180.0F, 1.0F));
+
+    private final NumberSetting randomness = this.register(new NumberSetting("Randomness",
+            "LoRA: smooth variation based on AimAssist's learned movement residual, in percent.", 15.0F, 0.0F, 100.0F, 5.0F));
+
+    private final TextSetting training = this.register(new TextSetting("Training",
+            "Open the shared AimAssist training. Untrained LoRA uses Smooth until all scenarios have enough samples.", "Open training"));
+
+    private final EnumSetting<HitPosition> hitPosition = this.register(new EnumSetting<>("Hit Position",
+            "Where on the target to aim first; falls back to any open gap when that part is blocked or out of reach.",
+            HitPosition.BEST));
 
     private final BooleanSetting silent = this.register(new BooleanSetting("Silent",
             "Turns only what the server is told; your camera stays where you point it.", true));
@@ -193,11 +235,18 @@ public class KillAura extends Module {
     private @Nullable LivingEntity target;
     /** The look reported this tick, or null to leave the report to vanilla. */
     private @Nullable Rotation rotation;
+    private @Nullable Rotation lastLearnedAim, lastLearnedFrom;
+    private double learnedNoiseYaw, learnedNoisePitch;
+    private int learnedSamples = -1;
     /**
      * The look on the wire and whether an attack still needs its following movement report. The wire record
      * includes teleport confirmations, which vanilla's own last-reported rotation record misses.
      */
     private final AuraAttackCycle attackCycle = new AuraAttackCycle();
+    private final HitboxAperture.Scanner aperture = new HitboxAperture.Scanner();
+    private @Nullable LivingEntity aimedTarget;
+    private @Nullable Vec3 lastAimOffset;
+    private boolean lastInPreferredZone;
     private float clickBudget;
     private float cps;
     private long nextSolClickAtMs;
@@ -217,6 +266,7 @@ public class KillAura extends Module {
         this.timing.onChange(this::resetClickScheduler);
         this.minCps.onChange(this::resetClickScheduler);
         this.maxCps.onChange(this::resetClickScheduler);
+        this.hitPosition.onChange(this::clearAimMemory);
         this.minCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.maxCps.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
         this.cpsMode.visibleWhen(() -> !this.timing.is(Timing.COOLDOWN));
@@ -225,7 +275,11 @@ public class KillAura extends Module {
         this.pauseChance.visibleWhen(this::solSettingsVisible);
         this.pauseMin.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
         this.pauseMax.visibleWhen(() -> this.solSettingsVisible() && this.pauseChance.get() > 0.0F);
-        this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH));
+        this.rotationMode.onChange(this::resetLearning);
+        this.turnSpeed.visibleWhen(() -> this.rotationMode.is(RotationMode.SMOOTH) || this.rotationMode.is(RotationMode.LORA));
+        this.randomness.visibleWhen(() -> this.rotationMode.is(RotationMode.LORA));
+        this.training.visibleWhen(() -> this.rotationMode.is(RotationMode.LORA));
+        this.hitPosition.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
         this.silent.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE));
         this.movementCorrector.visibleWhen(() -> !this.rotationMode.is(RotationMode.NONE) && this.silent.get());
         this.throughWalls.visibleWhen(this.rayTrace::get);
@@ -235,8 +289,10 @@ public class KillAura extends Module {
     @Override
     protected void onEnable() {
         this.clearActivity();
+        this.clearAimMemory();
+        this.resetLearning();
         LocalPlayer player = mc.player;
-        this.attackCycle.reset(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
+        this.attackCycle.reclaim(player == null ? null : new Rotation(player.getYRot(), player.getXRot()));
         this.rotation = null;
         this.target = null;
         this.resetClickScheduler();
@@ -251,31 +307,47 @@ public class KillAura extends Module {
 
     private void releaseCombat() {
         this.clearActivity();
+        this.clearAimMemory();
+        this.resetLearning();
         LocalPlayer player = mc.player;
-        if (player != null && this.blockingByAura && mc.gameMode != null) {
+        if (player != null && this.blockingByAura && mc.gameMode != null && mc.isInPreMovementTick()) {
             mc.gameMode.releaseUsingItem(player);
         }
+        // When toggled off outside the pre-movement tick window, clearing blockingByAura lets
+        // Minecraft#handleKeybinds release the item cleanly on the next tick without flagging Post.
         this.blockingByAura = false;
         this.pendingAttack = false;
         this.resetClickScheduler();
         this.rotation = null;
         this.target = null;
         MovementCorrector corrector = MovementCorrector.current();
+        MovementCorrection drainMode = this.silent.get() && corrector != null
+                ? this.movementCorrector.get().resolve(corrector) : null;
         if (corrector != null) {
             corrector.release(this);
         }
         if (player != null && mc.level != null && player.connection.hasClientLoaded()) {
-            // A server may check queued attacks only when the next movement arrives. Drain them with the
-            // attack's look before handing back the camera, including a toggle before this tick's report.
-            this.attackCycle.stop(new Rotation(player.getYRot(), player.getXRot()),
-                    look -> player.sendRotation(look.yaw(), look.pitch()));
+            // Drain any pending attack report and silent camera handback inside normal EventMotion ticks
+            // instead of emitting out-of-tick MovePlayerPacket.Rot packets before/after CLIENT_TICK_END.
+            this.attackCycle.drainOnBus(drainMode);
         } else {
             this.attackCycle.reset(null);
         }
     }
 
+    private void clearAimMemory() {
+        this.aimedTarget = null;
+        this.lastAimOffset = null;
+        this.lastInPreferredZone = false;
+        this.aperture.clearObstacles();
+    }
+
     public @Nullable LivingEntity getTarget() {
         return this.target;
+    }
+
+    public TextSetting getTrainingSetting() {
+        return this.training;
     }
 
     /**
@@ -312,6 +384,9 @@ public class KillAura extends Module {
     @EventTarget
     public void onLoadWorld(final EventLoadWorld event) {
         this.clearActivity();
+        this.clearAimMemory();
+        this.resetLearning();
+        this.attackCycle.reset(null);
         this.astraClicks.reset();
         this.resetClickScheduler();
     }
@@ -324,26 +399,47 @@ public class KillAura extends Module {
         if (!event.isPre()) {
             return;
         }
+        if (this.activityPlayer != player || this.activityLevel != level) {
+            this.clearAimMemory();
+            this.resetLearning();
+        }
         this.clearActivity();
         if (AutoPearl.isRescuing()) {
             this.releaseCombat();
             return;
         }
         if (player == null || level == null || gameMode == null || !player.isAlive()) {
+            this.clearAimMemory();
+            this.resetLearning();
             this.resetClickScheduler();
             return;
         }
         this.activityPlayer = player;
         this.activityLevel = level;
-        // If another listener cancelled the previous tick's report, finish its hit before choosing a
-        // new target or handing the look back to the camera. The normal path has nothing left to send.
-        this.attackCycle.flushAttack(look -> player.sendRotation(look.yaw(), look.pitch()));
+        // If another listener cancelled the previous tick's report, hold that attack look for this
+        // tick's normal movement packet instead of firing an extra mid-tick rotation packet.
+        Rotation pendingAttackLook = this.attackCycle.unreportedAttack();
+        if (pendingAttackLook != null) {
+            this.rotation = pendingAttackLook;
+            if (!this.silent.get()) {
+                player.setYRot(pendingAttackLook.yaw());
+                player.setXRot(pendingAttackLook.pitch());
+            }
+            this.correctMovement();
+            return;
+        }
         Rotation lastSent = this.attackCycle.lastSent();
         Rotation from = lastSent != null ? lastSent : new Rotation(player.getYRot(), player.getXRot());
         Vec3 eye = player.getEyePosition();
-        this.target = mc.gui.screen() == null && !player.isSpectator() ? this.pickTarget(player, level, eye) : null;
+        LivingEntity nextTarget = mc.gui.screen() == null && !player.isSpectator() ? this.pickTarget(player, level, eye) : null;
+        if (nextTarget != this.target) {
+            this.resetLearning();
+        }
+        this.target = nextTarget;
 
         if (this.target == null) {
+            this.clearAimMemory();
+            this.resetLearning();
             this.rotation = this.returning(from, new Rotation(player.getYRot(), player.getXRot()));
             this.correctMovement();
             this.lowerBlock(player, gameMode);
@@ -352,7 +448,13 @@ public class KillAura extends Module {
             return;
         }
 
-        this.rotation = this.step(from, this.aimAt(eye, this.target));
+        if (this.target != this.aimedTarget) {
+            this.clearAimMemory();
+            this.aimedTarget = this.target;
+        }
+
+        Rotation wanted = this.aimAt(player, level, eye, from, this.target);
+        this.rotation = this.step(player, level, eye, from, wanted, this.target);
         if (this.rotation != null && !this.silent.get()) {
             player.setYRot(this.rotation.yaw());
             player.setXRot(this.rotation.pitch());
@@ -414,8 +516,11 @@ public class KillAura extends Module {
 
     private @Nullable LivingEntity pickTarget(final LocalPlayer player, final ClientLevel level, final Vec3 eye) {
         double reach = this.aimRange.get();
-        // Stay on the current target while it is still a target; switching every tick makes the look jump about.
-        if (this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach) {
+        double hitReach = this.range.get();
+        boolean mustSee = this.rayTrace.get() && !this.throughWalls.get();
+        // Stay on the current target while it still offers a valid aperture; drop it immediately if fully behind a wall.
+        if (this.target != null && this.valid(player, this.target) && distance(eye, this.target) <= reach
+                && (!mustSee || this.aperture.hasVisibleAperture(level, player, this.target, eye, hitReach, reach))) {
             return this.target;
         }
         Comparator<LivingEntity> order = switch (this.priority.get()) {
@@ -427,6 +532,7 @@ public class KillAura extends Module {
         LivingEntity best = null;
         for (Entity entity : level.entitiesForRendering()) {
             if (entity instanceof LivingEntity living && this.valid(player, living) && distance(eye, living) <= reach
+                    && (!mustSee || this.aperture.hasVisibleAperture(level, player, living, eye, hitReach, reach))
                     && (best == null || order.compare(living, best) < 0)) {
                 best = living;
             }
@@ -440,31 +546,65 @@ public class KillAura extends Module {
     }
 
     private static double distance(final Vec3 eye, final Entity entity) {
-        return Math.sqrt(entity.getBoundingBox().distanceToSqr(eye));
+        return Math.sqrt(entity.getBoundingBox().inflate(entity.getPickRadius()).distanceToSqr(eye));
     }
 
     // ---------------------------------------------------------------------------------------------- rotations
 
-    private Rotation aimAt(final Vec3 eye, final LivingEntity entity) {
-        AABB box = entity.getBoundingBox();
-        Vec3 point = this.rotationMode.is(RotationMode.CLAUDE1) ? Rotations.nearestPoint(eye, box, 0.15) : box.getCenter();
-        return Rotations.towards(eye, point);
+    private Rotation aimAt(final LocalPlayer player, final ClientLevel level, final Vec3 eye,
+                           final Rotation from, final LivingEntity entity) {
+        boolean ignoreBlocks = !this.rayTrace.get() || this.throughWalls.get();
+        Selection selection = this.aperture.selectInWorld(
+                level, player, entity, eye, from,
+                this.range.get(), this.aimRange.get(),
+                this.hitPosition.get().toZone(),
+                this.lastAimOffset, this.lastInPreferredZone,
+                ignoreBlocks);
+        if (selection != null) {
+            this.lastAimOffset = selection.offsetFromCenter();
+            this.lastInPreferredZone = selection.inPreferredZone();
+            return Rotations.towards(eye, selection.point());
+        }
+        Vec3 fallback = this.hitPosition.get().toZone().preferredAnchor(eye, entity.getBoundingBox().inflate(entity.getPickRadius()));
+        return Rotations.towards(eye, fallback);
     }
 
     /** This tick's look, stepping from what the server was last told; null when this mode does not turn. */
-    private @Nullable Rotation step(final Rotation from, final Rotation wanted) {
+    private @Nullable Rotation step(final LocalPlayer player, final ClientLevel level, final Vec3 eye,
+                                    final Rotation from, final Rotation wanted, final LivingEntity entity) {
         return switch (this.rotationMode.get()) {
             case NONE -> null;
             case WRAPPED -> wanted;
             case SNAP -> Rotations.continuous(from, wanted);
             case SMOOTH -> Rotations.limit(from, Rotations.continuous(from, wanted), this.turnSpeed.get(), this.turnSpeed.get());
-            case CLAUDE1 -> claude1(from, Rotations.continuous(from, wanted), Rotations.mouseStep(mc.options.sensitivity().get()));
+            case CLAUDE1 -> {
+                double mouseStep = Rotations.mouseStep(mc.options.sensitivity().get());
+                Rotation continuousWanted = Rotations.continuous(from, wanted);
+                Rotation quantized = claude1(from, continuousWanted, mouseStep);
+                if (this.rayTrace.get()) {
+                    quantized = HitboxAperture.refineQuantized(from, continuousWanted, quantized, mouseStep,
+                            candidate -> this.reach(player, level, eye, candidate, entity).isPresent());
+                }
+                yield quantized;
+            }
+            case LORA -> {
+                double mouseStep = Rotations.mouseStep(mc.options.sensitivity().get());
+                Rotation quantized = this.learnedRotation(from, wanted,
+                        Client.getInstance().getModuleManager().get(AimAssist.class).getStyleModel(),
+                        mouseStep);
+                if (this.rayTrace.get()) {
+                    Rotation continuousWanted = Rotations.continuous(from, wanted);
+                    quantized = HitboxAperture.refineQuantized(from, continuousWanted, quantized, mouseStep,
+                            candidate -> this.reach(player, level, eye, candidate, entity).isPresent());
+                }
+                yield quantized;
+            }
         };
     }
 
     /**
-     * With no target, the gradual modes turn back to the player's own look the way they turned away, and hand the
-     * report back to vanilla once they are there; the others hand it back at once.
+     * With no target, gradual modes ease back to the player's own look and hand the report back to vanilla
+     * once they are there. LoRA uses Smooth for this handback after clearing its target-specific history.
      */
     private @Nullable Rotation returning(final Rotation from, final Rotation own) {
         if (this.rotation == null || !this.silent.get()) {
@@ -472,7 +612,7 @@ public class KillAura extends Module {
         }
         Rotation back = Rotations.continuous(from, own);
         Rotation next = switch (this.rotationMode.get()) {
-            case SMOOTH -> Rotations.limit(from, back, this.turnSpeed.get(), this.turnSpeed.get());
+            case SMOOTH, LORA -> Rotations.limit(from, back, this.turnSpeed.get(), this.turnSpeed.get());
             case CLAUDE1 -> claude1(from, back, Rotations.mouseStep(mc.options.sensitivity().get()));
             default -> null;
         };
@@ -480,6 +620,57 @@ public class KillAura extends Module {
             return null;
         }
         return next;
+    }
+
+    /** Uses the shared model read-only; prediction and smooth noise history belong to this aura alone. */
+    Rotation learnedRotation(final Rotation from, final Rotation wanted, final AimStyleModel model, final double mouseStep) {
+        Rotation goal = Rotations.continuous(from, wanted);
+        if (!model.isReady()) {
+            this.resetLearning();
+            return Rotations.limit(from, goal, this.turnSpeed.get(), this.turnSpeed.get());
+        }
+        int samples = model.sampleCount();
+        if (this.learnedSamples != samples) {
+            this.resetLearning();
+            this.learnedSamples = samples;
+        }
+
+        // Training velocities are degrees per second; the aura advances once per 20 Hz game tick.
+        double seconds = 1.0 / 20.0;
+        double yawError = AimSteering.wrap(goal.yaw() - from.yaw());
+        double pitchError = goal.pitch() - from.pitch();
+        double targetYawVelocity = this.lastLearnedAim == null ? 0.0
+                : AimSteering.wrap(goal.yaw() - this.lastLearnedAim.yaw()) / seconds;
+        double targetPitchVelocity = this.lastLearnedAim == null ? 0.0
+                : (goal.pitch() - this.lastLearnedAim.pitch()) / seconds;
+        double previousYawVelocity = this.lastLearnedFrom == null ? 0.0
+                : AimSteering.wrap(from.yaw() - this.lastLearnedFrom.yaw()) / seconds;
+        double previousPitchVelocity = this.lastLearnedFrom == null ? 0.0
+                : (from.pitch() - this.lastLearnedFrom.pitch()) / seconds;
+        AimStyleModel.Velocity prediction = model.predict(new AimStyleModel.Input(
+                yawError, pitchError, targetYawVelocity, targetPitchVelocity, previousYawVelocity, previousPitchVelocity));
+        AimStyleModel.Velocity deviation = model.residualDeviation();
+
+        double retention = Math.exp(-seconds / 0.12);
+        double innovation = Math.sqrt(1.0 - retention * retention);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        this.learnedNoiseYaw = AimSteering.clamp(retention * this.learnedNoiseYaw + innovation * random.nextGaussian(), -2.0, 2.0);
+        this.learnedNoisePitch = AimSteering.clamp(retention * this.learnedNoisePitch + innovation * random.nextGaussian(), -2.0, 2.0);
+        double variation = this.randomness.get() / 100.0;
+        Turn turn = AimSteering.learned(yawError, pitchError,
+                prediction.yaw() + this.learnedNoiseYaw * deviation.yaw() * variation,
+                prediction.pitch() + this.learnedNoisePitch * deviation.pitch() * variation,
+                this.turnSpeed.get() / seconds, seconds);
+        this.lastLearnedAim = goal;
+        this.lastLearnedFrom = from;
+        return Rotations.quantize(from, new Rotation((float)(from.yaw() + turn.yaw()),
+                (float)(from.pitch() + turn.pitch())), mouseStep);
+    }
+
+    private void resetLearning() {
+        this.lastLearnedAim = this.lastLearnedFrom = null;
+        this.learnedNoiseYaw = this.learnedNoisePitch = 0.0;
+        this.learnedSamples = -1;
     }
 
     /**
@@ -512,7 +703,10 @@ public class KillAura extends Module {
         if (hit.isEmpty() || this.throughWalls.get()) {
             return hit;
         }
-        HitResult wall = level.clip(new ClipContext(eye, hit.get(), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+        // Match LocalPlayer.pick's OUTLINE block semantics (fences 1.0m, stair/slab notches open) and stop an epsilon
+        // before the surface hit so flush floor/wall contact behind the entry face does not masquerade as an obstacle.
+        Vec3 stop = eye.lerp(hit.get(), 1.0 - HitboxAperture.EXIT_EPSILON);
+        HitResult wall = level.clip(new ClipContext(eye, stop, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         return wall.getType() == HitResult.Type.MISS ? hit : Optional.empty();
     }
 

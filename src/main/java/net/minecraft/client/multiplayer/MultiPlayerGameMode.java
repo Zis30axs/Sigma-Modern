@@ -416,6 +416,11 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
         this.ensureHasSentCarriedItem();
     }
 
+    /** Marks the hotbar selection dirty so the next tick's {@link #tick()} sends the slot change inside the tick window. */
+    public void markCarriedItemDirty() {
+        this.carriedIndex = -1;
+    }
+
     private void ensureHasSentCarriedItem() {
         int index = this.minecraft.player.getInventory().getSelectedSlot();
         if (index != this.carriedIndex) {

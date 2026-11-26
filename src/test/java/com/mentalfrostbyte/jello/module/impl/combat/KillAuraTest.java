@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimStyleModel;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
+import com.mentalfrostbyte.jello.util.math.HitboxAperture;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
@@ -90,6 +92,71 @@ class KillAuraTest {
     }
 
     @Test
+    void incompleteTrainingUsesTheExistingSmoothRotation() {
+        KillAura aura = new KillAura();
+        this.number(aura, "Turn Speed", 3.0F);
+        AimStyleModel model = new AimStyleModel();
+        AimStyleModel.Input input = new AimStyleModel.Input(20, 0, 0, 0, 0, 0);
+        for (int i = 0; i < AimStyleModel.MIN_SAMPLES; i++) {
+            model.observe(input, new AimStyleModel.Velocity(100, 0), 0);
+        }
+        assertFalse(model.isReady(), "All scenarios must be practiced, not just the total sample count");
+        assertEquals(new Rotation(181.0F, 8.0F),
+                aura.learnedRotation(new Rotation(179.0F, 5.0F), new Rotation(-179.0F, 10.0F), model, STEP));
+    }
+
+    @Test
+    void sharedDemonstrationsChangeAuraTurningWithoutCollectingCombatSamples() {
+        AimStyleModel slow = this.trainedStyle(30.0);
+        AimStyleModel fast = this.trainedStyle(240.0);
+        KillAura slowAura = new KillAura();
+        KillAura fastAura = new KillAura();
+        this.number(slowAura, "Randomness", 0.0F);
+        this.number(fastAura, "Randomness", 0.0F);
+        Rotation from = new Rotation(0.0F, 0.0F), goal = new Rotation(20.0F, 0.0F);
+        int samples = slow.sampleCount();
+        Rotation slowTurn = slowAura.learnedRotation(from, goal, slow, STEP);
+        Rotation fastTurn = fastAura.learnedRotation(from, goal, fast, STEP);
+        assertTrue(slowTurn.yaw() > 0.0F && slowTurn.yaw() < fastTurn.yaw(),
+                "The learned movement style must affect the actual aura turn");
+        assertTrue(fastTurn.yaw() <= goal.yaw() + STEP);
+        slowAura.learnedRotation(slowTurn, goal, slow, STEP);
+        assertEquals(samples, slow.sampleCount(), "Combat must only read the same training model");
+    }
+
+    @Test
+    void rotationModeAndSharedProfileUpdatesDiscardOldMotionHistory() {
+        AimStyleModel model = this.trainedStyle(100.0);
+        KillAura aura = new KillAura();
+        KillAura fresh = new KillAura();
+        this.number(aura, "Randomness", 0.0F);
+        this.number(fresh, "Randomness", 0.0F);
+        this.choose(aura, "Rotation", KillAura.RotationMode.LORA);
+        aura.learnedRotation(new Rotation(0.0F, 0.0F), new Rotation(-20.0F, 10.0F), model, STEP);
+        this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
+        this.choose(aura, "Rotation", KillAura.RotationMode.LORA);
+        Rotation from = new Rotation(1.0F, 1.0F), goal = new Rotation(20.0F, 0.0F);
+        assertEquals(fresh.learnedRotation(from, goal, model, STEP), aura.learnedRotation(from, goal, model, STEP));
+
+        aura.learnedRotation(new Rotation(10.0F, 4.0F), new Rotation(-40.0F, 10.0F), model, STEP);
+        model.observe(new AimStyleModel.Input(20, 0, 0, 0, 0, 0), new AimStyleModel.Velocity(150, 0), 0);
+        KillAura afterTraining = new KillAura();
+        this.number(afterTraining, "Randomness", 0.0F);
+        assertEquals(afterTraining.learnedRotation(from, goal, model, STEP), aura.learnedRotation(from, goal, model, STEP),
+                "Saving more practice must not retain the previous profile's motion history");
+    }
+
+    private AimStyleModel trainedStyle(double yawVelocity) {
+        AimStyleModel model = new AimStyleModel();
+        AimStyleModel.Input input = new AimStyleModel.Input(20, 0, 0, 0, 0, 0);
+        for (int i = 0; i < AimStyleModel.MIN_SAMPLES; i++) {
+            model.observe(input, new AimStyleModel.Velocity(yawVelocity, 0), i % AimStyleModel.SCENARIO_COUNT);
+        }
+        assertTrue(model.isReady());
+        return model;
+    }
+
+    @Test
     void autoTimingKeepsTheCpsLimiterOnEveryProtocol() {
         assertFalse(KillAura.timingDue(KillAura.Timing.AUTO, false, true, false),
                 "modern Auto must not attack just because the cooldown is full");
@@ -127,13 +194,45 @@ class KillAuraTest {
     }
 
     @Test
+    void hitPositionMapsEveryChoiceAndHidesWhenNotTurning() {
+        KillAura aura = new KillAura();
+        assertTrue(this.visible(aura, "Hit Position"));
+        assertEquals("BEST", aura.setting("Hit Position").orElseThrow().toJson().getAsString());
+        assertEquals("Best", EnumSetting.label(KillAura.HitPosition.BEST));
+        assertEquals("Head", EnumSetting.label(KillAura.HitPosition.HEAD));
+        assertEquals("Body", EnumSetting.label(KillAura.HitPosition.BODY));
+        assertEquals("Feet", EnumSetting.label(KillAura.HitPosition.FEET));
+
+        assertEquals(HitboxAperture.Zone.BEST, KillAura.HitPosition.BEST.toZone());
+        assertEquals(HitboxAperture.Zone.HEAD, KillAura.HitPosition.HEAD.toZone());
+        assertEquals(HitboxAperture.Zone.BODY, KillAura.HitPosition.BODY.toZone());
+        assertEquals(HitboxAperture.Zone.FEET, KillAura.HitPosition.FEET.toZone());
+
+        this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
+        assertFalse(this.visible(aura, "Hit Position"));
+    }
+
+    @Test
     void onlyTheSettingsInUseAreShown() {
         KillAura aura = new KillAura();
         assertFalse(this.visible(aura, "Turn Speed"));
+        assertFalse(this.visible(aura, "Randomness"));
+        assertFalse(this.visible(aura, "Training"));
         this.choose(aura, "Rotation", KillAura.RotationMode.SMOOTH);
         assertTrue(this.visible(aura, "Turn Speed"));
+        assertTrue(this.visible(aura, "Hit Position"));
         assertTrue(this.visible(aura, "Movement Corrector"), "a silent look is what needs correcting");
+        this.choose(aura, "Rotation", KillAura.RotationMode.LORA);
+        assertEquals("LoRA", EnumSetting.label(KillAura.RotationMode.LORA));
+        assertEquals("LORA", aura.setting("Rotation").orElseThrow().toJson().getAsString());
+        assertTrue(this.visible(aura, "Turn Speed"));
+        assertTrue(this.visible(aura, "Randomness"));
+        assertTrue(this.visible(aura, "Training"));
+        assertTrue(this.visible(aura, "Hit Position"));
         this.choose(aura, "Rotation", KillAura.RotationMode.NONE);
+        assertFalse(this.visible(aura, "Randomness"));
+        assertFalse(this.visible(aura, "Training"));
+        assertFalse(this.visible(aura, "Hit Position"));
         assertFalse(this.visible(aura, "Silent"), "nothing to hide when it doesn't turn");
         assertFalse(this.visible(aura, "Movement Corrector"));
         this.choose(aura, "CPS Mode", KillAura.CpsMode.SOL);
