@@ -19,10 +19,11 @@ public final class InvManager extends Module {
     private final ItemListSetting whitelist = register(new ItemListSetting("Whitelist", "Always keep these items, including when also blacklisted."));
     private final ItemListSetting blacklist = register(new ItemListSetting("Blacklist", "Skip these when looting and discard them when cleanup is enabled."));
     private final BooleanSetting inventoryOnly = register(new BooleanSetting("Inventory Open", "Organize only while the survival inventory is visible.", true));
+    private final BooleanSetting autoArmor = register(new BooleanSetting("Auto Armor", "Equip the highest-EHP armor pieces into the armor slots.", true));
     private final BooleanSetting merge = register(new BooleanSetting("Merge Stacks", "Consolidate compatible partial stacks.", true));
     private final BooleanSetting clean = register(new BooleanSetting("Cleanup", "Drop blacklisted stacks and apply enabled stock limits.", true));
     private final BooleanSetting duplicates = register(new BooleanSetting("Discard Spare Gear",
-            "Discard lower-ranked spare gear for occupied layout rules after sorting. Named and whitelisted gear is kept.", false));
+            "Discard lower-ranked or duplicate spare armor and gear after sorting. Named, whitelisted and unique Silk Touch/Fortune tools are kept.", false));
     private final BooleanSetting limits = register(new BooleanSetting("Stock Limits", "Limit looting and discard whole surplus stacks after sorting.", false));
     private final Map<InventoryRole, NumberSetting> caps = new EnumMap<>(InventoryRole.class);
     private final NumberSetting delay = register(new NumberSetting("Action Delay", "Ticks between inventory operations.", 2, 1, 20, 1));
@@ -49,17 +50,14 @@ public final class InvManager extends Module {
     InventoryPlan.Policy policy() {
         var selected = new EnumMap<InventoryRole, Integer>(InventoryRole.class);
         if (limits.get()) caps.forEach((role, value) -> selected.put(role, value.getInt()));
-        return new InventoryPlan.Policy(layout.get(), whitelist.get(), blacklist.get(), selected);
+        return new InventoryPlan.Policy(layout.get(), whitelist.get(), blacklist.get(), selected,
+                InventoryRole.isLegacyCombat(), clean.get() && duplicates.get());
     }
 
     int disposableSlot(InventoryPlan.Policy policy) {
         if (!clean.get()) return -1;
         var slots = mc.player.inventoryMenu.slots.stream().map(Slot::getItem).toList();
-        for (int i = 9; i < Math.min(slots.size(), 45); i++) {
-            if (!"LOCK".equals(policy.layout().get(i)) && policy.rejected(slots.get(i))) return i;
-        }
-        var planned = InventoryPlan.next(slots, policy, false, true, duplicates.get());
-        return planned != null && planned.kind() == InventoryPlan.Kind.DROP ? planned.from() : -1;
+        return InventoryPlan.disposableSlot(slots, policy, duplicates.get(), autoArmor.get());
     }
 
     @Override protected void onDisable() { cooldown = 0; }
@@ -74,11 +72,15 @@ public final class InvManager extends Module {
         if (cooldown > 0) { cooldown--; return; }
         var menu = p.inventoryMenu;
         cooldown = delay.getInt() - 1;
-        var action = InventoryPlan.next(menu.slots.stream().map(Slot::getItem).toList(), policy(), merge.get(), clean.get(), duplicates.get());
+        var action = InventoryPlan.next(menu.slots.stream().map(Slot::getItem).toList(),
+                policy(), merge.get(), clean.get(), duplicates.get(), autoArmor.get());
         if (action == null) return;
         int from = action.from(), to = action.to();
         if (action.kind() == InventoryPlan.Kind.DROP) {
             click(menu, from, 1, ContainerInput.THROW);
+        } else if (action.kind() == InventoryPlan.Kind.SWAP && to >= 5 && to <= 8
+                && !menu.getSlot(to).hasItem() && from >= 9 && from <= 44) {
+            click(menu, from, 0, ContainerInput.QUICK_MOVE);
         } else if (action.kind() == InventoryPlan.Kind.SWAP && to >= 36 && to <= 44) {
             click(menu, from, to - 36, ContainerInput.SWAP);
         } else if (action.kind() == InventoryPlan.Kind.SWAP && from >= 36 && from <= 44) {

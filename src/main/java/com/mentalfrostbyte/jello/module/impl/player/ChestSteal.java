@@ -18,6 +18,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
@@ -97,6 +98,10 @@ public final class ChestSteal extends Module {
         if (policy != null) {
             storage.forEach(s -> owned.add(s.getItem()));
             owned.add(p.getOffhandItem());
+            owned.add(p.getItemBySlot(EquipmentSlot.HEAD));
+            owned.add(p.getItemBySlot(EquipmentSlot.CHEST));
+            owned.add(p.getItemBySlot(EquipmentSlot.LEGS));
+            owned.add(p.getItemBySlot(EquipmentSlot.FEET));
         }
         boolean eligible = false;
         var choices = new ArrayList<Slot>();
