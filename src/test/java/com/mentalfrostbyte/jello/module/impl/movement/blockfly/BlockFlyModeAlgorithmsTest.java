@@ -2,14 +2,24 @@ package com.mentalfrostbyte.jello.module.impl.movement.blockfly;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -59,7 +69,84 @@ class BlockFlyModeAlgorithmsTest {
         assertFalse(BlockFlyLegacyMode.isMoving(keys(true, true, true, true)));
     }
 
+    @Test
+    void findBlockCacheReachesMultiRingAndRespectsExcludeDown() {
+        StubWorld world = new StubWorld();
+        world.set(new BlockPos(3, 63, 0), Blocks.STONE.defaultBlockState());
+        Vec3 eyes = new Vec3(0.5, 65.62, 0.5);
+        BlockFlyLegacyMode.BlockCache multiRing = BlockFlyLegacyMode.findBlockCache(
+                world, new BlockPos(0, 63, 0), true, eyes, 4.5);
+        assertNotNull(multiRing);
+        assertEquals(new BlockPos(3, 63, 0), multiRing.anchor());
+        assertEquals(Direction.WEST, multiRing.face());
+
+        StubWorld ceilingWorld = new StubWorld();
+        ceilingWorld.set(new BlockPos(0, 64, 0), Blocks.STONE.defaultBlockState());
+        assertNull(BlockFlyLegacyMode.findBlockCache(ceilingWorld, new BlockPos(0, 63, 0), true, eyes, 4.5));
+        BlockFlyLegacyMode.BlockCache underside = BlockFlyLegacyMode.findBlockCache(
+                ceilingWorld, new BlockPos(0, 63, 0), false, eyes, 4.5);
+        assertNotNull(underside);
+        assertEquals(Direction.DOWN, underside.face());
+    }
+
+    @Test
+    void extendPositionStepsUntilFirstReplaceableCell() {
+        StubWorld world = new StubWorld();
+        world.set(new BlockPos(0, 63, 0), Blocks.STONE.defaultBlockState());
+        world.set(new BlockPos(0, 63, 1), Blocks.STONE.defaultBlockState());
+        Vec3 extended = BlockFlyLegacyMode.extendPosition(world, 0.5, 64.0, 0.5, 0.0F, 3.0F);
+        assertEquals(0.5, extended.x, 1.0E-6);
+        assertTrue(extended.z >= 2.0 && extended.z < 2.5);
+        assertTrue(BlockFlyLegacyMode.isReplaceable(world, BlockPos.containing(extended.x, extended.y - 1.0, extended.z)));
+    }
+
+    @Test
+    void navenFaceVisibilityAndFallingPredictionMatchUpstreamMath() {
+        BlockPos anchor = new BlockPos(0, 64, 0);
+        assertTrue(BlockFlyLCustomMode.checkNavenFaceVisible(new Vec3(1.5, 66.0, 0.5), anchor, Direction.EAST, 20.25));
+        assertFalse(BlockFlyLCustomMode.checkNavenFaceVisible(new Vec3(0.5, 66.0, 0.5), anchor, Direction.EAST, 20.25));
+        assertFalse(BlockFlyLCustomMode.checkNavenFaceVisible(new Vec3(8.0, 66.0, 0.5), anchor, Direction.EAST, 20.25));
+        assertTrue(BlockFlyLCustomMode.checkNavenFaceVisible(new Vec3(0.5, 66.0, 0.5), anchor, Direction.UP, 20.25));
+        assertFalse(BlockFlyLCustomMode.checkNavenFaceVisible(new Vec3(0.5, 64.0, 0.5), anchor, Direction.UP, 20.25));
+
+        double predictedY = BlockFlyLCustomMode.predictFallingY(65.0, 0.0, 2);
+        assertEquals(64.9216, predictedY, 1.0E-6);
+    }
+
     private static Input keys(final boolean forward, final boolean backward, final boolean left, final boolean right) {
         return new Input(forward, backward, left, right, false, false, false);
+    }
+
+    private static final class StubWorld implements BlockGetter {
+        private final Map<BlockPos, BlockState> blocks = new HashMap<>();
+
+        void set(final BlockPos pos, final BlockState state) {
+            this.blocks.put(pos.immutable(), state);
+        }
+
+        @Override
+        public BlockEntity getBlockEntity(final BlockPos pos) {
+            return null;
+        }
+
+        @Override
+        public BlockState getBlockState(final BlockPos pos) {
+            return this.blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState());
+        }
+
+        @Override
+        public FluidState getFluidState(final BlockPos pos) {
+            return this.getBlockState(pos).getFluidState();
+        }
+
+        @Override
+        public int getHeight() {
+            return 384;
+        }
+
+        @Override
+        public int getMinY() {
+            return -64;
+        }
     }
 }

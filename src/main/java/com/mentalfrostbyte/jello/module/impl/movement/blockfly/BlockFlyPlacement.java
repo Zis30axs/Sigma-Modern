@@ -55,9 +55,13 @@ public final class BlockFlyPlacement {
             Blocks.DROPPER, Blocks.CRAFTING_TABLE, Blocks.COBWEB, Blocks.PUMPKIN, Blocks.ACACIA_SAPLING
     );
 
-    public record Target(BlockPos placedPos, BlockHitResult hit, Rotation rotation, Vec3 eyes) {
+    public record Target(BlockPos placedPos, BlockHitResult hit, Rotation rotation, Vec3 eyes, boolean strictRaycast) {
         public Target {
             placedPos = placedPos.immutable();
+        }
+
+        public Target(final BlockPos placedPos, final BlockHitResult hit, final Rotation rotation, final Vec3 eyes) {
+            this(placedPos, hit, rotation, eyes, true);
         }
     }
 
@@ -122,6 +126,11 @@ public final class BlockFlyPlacement {
     public static boolean valid(final LocalPlayer player, final Vec3 eyes, final Target target, final Rotation rotation) {
         return inBounds(player, target.placedPos())
                 && valid(player.level(), CollisionContext.of(player), eyes, target, rotation, player.blockInteractionRange());
+    }
+
+    public static boolean validDirect(final LocalPlayer player, final Vec3 eyes, final Target target) {
+        return inBounds(player, target.placedPos())
+                && validDirect(player.level(), eyes, target, player.blockInteractionRange());
     }
 
     private static boolean inBounds(final LocalPlayer player, final BlockPos pos) {
@@ -194,6 +203,19 @@ public final class BlockFlyPlacement {
             return false;
         }
         return matches(raycast(level, context, eyes, rotation, range), intended.getBlockPos(), intended.getDirection());
+    }
+
+    static boolean validDirect(final BlockGetter level, final Vec3 eyes, final Target target, final double range) {
+        BlockHitResult intended = target.hit();
+        if (intended == null || intended.getType() != HitResult.Type.BLOCK || intended.isInside()
+                || !intended.getBlockPos().relative(intended.getDirection()).equals(target.placedPos())
+                || level.isOutsideBuildHeight(target.placedPos())
+                || !level.getBlockState(target.placedPos()).canBeReplaced()
+                || level.getBlockState(intended.getBlockPos()).canBeReplaced()) {
+            return false;
+        }
+        double effectiveRange = Double.isFinite(range) && range > 0.0 ? Math.max(range * range, 20.25) : 20.25;
+        return eyes.distanceToSqr(intended.getLocation()) <= effectiveRange;
     }
 
     static List<BlockPos> positionsAround(final BlockPos base, final int radius) {

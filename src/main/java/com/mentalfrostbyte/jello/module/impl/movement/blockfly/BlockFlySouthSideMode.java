@@ -80,7 +80,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
 
     private final EnumSetting<Style> mode;
     private final BooleanSetting alwaysUpdateRot, spoofItem, noSwing, eagle, snap, noUptelly, godBridge;
-    private final BooleanSetting smoothed, safeMode, testOnGround, fixRotation, randomSlow, blockFly, abuseRotation;
+    private final BooleanSetting smoothed, safeMode, testOnGround, fixRotation, randomSlow, blinkHold, abuseRotation;
     private final BooleanSetting debug, keepFoV, mark, duplicateRotPlace, interactItem, blockCount;
     private final NumberSetting placeTick, rotTick, safeDistance, tellyEagleTick, keepEagleSneakTick, fovValue, blockCountOffset;
     private final EnumSetting<SlotMode> blockSlotMode;
@@ -96,9 +96,11 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
     );
 
     private record Slot(int index, InteractionHand hand) { }
+    private record DeferredPlacement(Target target, Vec3 eyes, Rotation rotation, double pitchDiff, float yawDiff) { }
     private @Nullable Slot slot;
     private @Nullable Target target;
     private @Nullable Target lastFound;
+    private @Nullable DeferredPlacement deferredPlacement;
     private @Nullable BlockPos lastPlaced;
     private @Nullable Rotation lastRotation;
     private Rotation sentRotation = new Rotation(0, 0);
@@ -108,6 +110,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
     private @Nullable LocalPlayer player;
     private int originalSlot = -1;
     private int selectedSlot = -1;
+    private int lastPlaceTick = Integer.MIN_VALUE;
     private int onGroundTicks, offGroundTicks, rotateCount, placeCount, ups, eagleTicks, jumpDelay;
     private int startHotbarCount = 1;
     private double posY, pitchDifference, lastPlacePitchDifference;
@@ -138,8 +141,9 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         this.testOnGround = bool("Test OnGround", false);
         this.fixRotation = bool("Fix Rotation", true);
         this.randomSlow = bool("SlowUpTelly", false);
-        this.blockFly = bool("Block Fly", false);
-        this.abuseRotation = bool("Abuse Rotation", true);
+        this.blinkHold = parent.modeSetting(BlockFly.Mode.SOUTH_SIDE,
+                new BooleanSetting("SouthSide Blink Hold", "Blink-queues outgoing packets for up to 16 ticks before flushing (legacy).", false));
+        this.abuseRotation = bool("Abuse Rotation", false);
         this.blockSlotMode = parent.modeSetting(BlockFly.Mode.SOUTH_SIDE,
                 new EnumSetting<>("SouthSide Block Slot Mode", "Last valid hotbar slot, or largest stack.", SlotMode.FARTHEST));
         this.jumpMode = parent.modeSetting(BlockFly.Mode.SOUTH_SIDE,
@@ -184,6 +188,19 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         return this.parent.modeSetting(BlockFly.Mode.SOUTH_SIDE, new NumberSetting("SouthSide " + name, name, initial, min, max, step));
     }
 
+    static boolean shouldDeferPlacementForTickEnd(final ProtocolVersion targetVersion) {
+        return targetVersion.newerThanOrEqualTo(ProtocolVersion.v1_21_2);
+    }
+
+    static boolean shouldRunAbuseRotation(final ProtocolVersion targetVersion) {
+        return targetVersion.betweenInclusive(ProtocolVersion.v1_17, ProtocolVersion.v1_20_5);
+    }
+
+    @Override
+    public boolean hasDeferredWork() {
+        return this.deferredPlacement != null || this.holding;
+    }
+
     @Override
     public void enable() {
         this.session = mc.getConnection();
@@ -194,8 +211,10 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         this.startHotbarCount = Math.max(1, countBlocks());
         this.posY = Mth.floor(mc.player.getY() - 1);
         this.target = this.lastFound = null;
+        this.deferredPlacement = null;
         this.lastPlaced = null;
         this.slot = null;
+        this.lastPlaceTick = Integer.MIN_VALUE;
         this.onGroundTicks = this.offGroundTicks = this.rotateCount = this.placeCount = this.ups = this.eagleTicks = this.jumpDelay = 0;
         this.pitchDifference = this.lastPlacePitchDifference = 0;
         this.lastPlacedDeltaYaw = Float.NaN;
@@ -209,9 +228,15 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         release(sameSession(), true);
         if (sameSession() && this.originalSlot >= 0 && mc.player.getInventory().getSelectedSlot() == this.selectedSlot) {
             mc.player.getInventory().setSelectedSlot(this.originalSlot);
-            mc.gameMode.syncCarriedItem();
+            if (mc.isInPreMovementTick()) {
+                mc.gameMode.syncCarriedItem();
+            } else {
+                mc.gameMode.markCarriedItemDirty();
+            }
         }
         this.parent.clearRotation();
+        this.deferredPlacement = null;
+        this.lastPlaceTick = Integer.MIN_VALUE;
         this.slot = null;
         this.target = null;
         this.cancelMove = false;
@@ -227,14 +252,16 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
     @Override
     public void worldLoad(final EventLoadWorld event) {
         release(false, true);
+        this.deferredPlacement = null;
+        this.lastPlaceTick = Integer.MIN_VALUE;
         this.session = null;
     }
 
     @Override
     public void tick(final EventTick event) {
-        if (!sameSession()) { release(false, true); return; }
+        if (!sameSession()) { release(false, true); this.deferredPlacement = null; return; }
         if (event.isPost()) {
-            if (!this.blockFly.get()) release(true, true);
+            if (!this.blinkHold.get()) release(true, true);
             else if (this.holding && ++this.heldTicks > 16) release(true, false);
             if (this.mark.get() && this.lastPlaced != null) {
                 try (Gizmos.TemporaryCollection ignored = mc.collectPerTickGizmos()) {
@@ -243,6 +270,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
             }
             return;
         }
+        flushDeferredPlacement();
         if (mc.player.onGround()) { this.onGroundTicks++; this.offGroundTicks = 0; }
         else { this.offGroundTicks++; this.onGroundTicks = 0; }
         if (this.jumpDelay > 0) this.jumpDelay--;
@@ -418,36 +446,66 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
         Rotation reported = new Rotation(event.getYaw(), event.getPitch());
         if (!BlockFlyPlacement.valid(mc.player, eyes, this.target, reported)) return;
         if (this.duplicateRotPlace.get() && this.pitchDifference > 2 && Math.abs(this.pitchDifference - this.lastPlacePitchDifference) < 0.0001) return;
+        float yawDiff = Math.abs(reported.yaw() - this.previousSentRotation.yaw());
+        if (shouldDeferPlacementForTickEnd(ProtocolTranslator.getTargetVersion())) {
+            // 1.21.2+ / 26.2 forbids sending slot or block-place packets between MovePlayer and CLIENT_TICK_END.
+            this.deferredPlacement = new DeferredPlacement(this.target, eyes, reported, this.pitchDifference, yawDiff);
+            return;
+        }
+        executePlacement(this.target, eyes, reported, this.pitchDifference, yawDiff);
+    }
+
+    private void flushDeferredPlacement() {
+        DeferredPlacement pending = this.deferredPlacement;
+        this.deferredPlacement = null;
+        if (pending == null || mc.player == null || mc.level == null || mc.gameMode == null || mc.gui.screen() != null) {
+            return;
+        }
+        Vec3 currentEyes = mc.player.getEyePosition();
+        if (currentEyes.distanceToSqr(pending.eyes()) > 1.0E-4) {
+            return;
+        }
+        this.slot = selectSlot();
+        if (this.slot == null) {
+            return;
+        }
+        executePlacement(pending.target(), currentEyes, pending.rotation(), pending.pitchDiff(), pending.yawDiff());
+    }
+
+    private void executePlacement(final Target placeTarget, final Vec3 eyes, final Rotation reported,
+                                  final double pitchDiff, final float yawDiff) {
+        if (this.slot == null || this.lastPlaceTick == mc.player.tickCount) return;
+        if (!BlockFlyPlacement.valid(mc.player, eyes, placeTarget, reported)) return;
         BlockHitResult hit = BlockFlyPlacement.raycast(mc.player, eyes, reported);
         if (hit == null || !validStack(stack(this.slot))) return;
         selectForUse();
-        BlockPlaceContext context = new BlockPlaceContext(mc.player, this.slot.hand(), stack(this.slot), hit);
-        if (!context.canPlace() || !context.getClickedPos().equals(this.target.placedPos())) return;
-        if (this.blockFly.get()) {
-            if (!this.holding) { this.holding = true; this.heldTicks = 0; }
-            if (this.placeCount == 0 && ProtocolTranslator.getTargetVersion().newerThan(ProtocolVersion.v1_8)) {
-                mc.player.connection.send(new ServerboundPlayerActionPacket(ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND,
-                        BlockPos.ZERO, Direction.DOWN));
-            }
-        }
         float cameraYaw = mc.player.getYRot(), cameraPitch = mc.player.getXRot();
         try {
             // Directional block prediction must see the rotation in the movement packet too.
             mc.player.setYRot(reported.yaw());
             mc.player.setXRot(reported.pitch());
+            BlockPlaceContext context = new BlockPlaceContext(mc.player, this.slot.hand(), stack(this.slot), hit);
+            if (!context.canPlace() || !context.getClickedPos().equals(placeTarget.placedPos())) return;
+            if (this.blinkHold.get() && !this.holding) {
+                this.holding = true;
+                this.heldTicks = 0;
+            }
+            this.lastPlaceTick = mc.player.tickCount;
             InteractionResult result = mc.gameMode.useItemOn(mc.player, this.slot.hand(), hit);
-            if (result == InteractionResult.PASS && this.interactItem.get()) mc.gameMode.useItem(mc.player, this.slot.hand());
+            if (result == InteractionResult.PASS && this.interactItem.get()
+                    && ProtocolTranslator.getTargetVersion().olderThan(ProtocolVersion.v1_21)) {
+                mc.gameMode.useItem(mc.player, this.slot.hand());
+            }
             if (result.consumesAction()) {
                 this.placeCount++;
-                this.lastPlaced = this.target.placedPos();
-                if (this.pitchDifference > 0) this.lastPlacePitchDifference = this.pitchDifference;
-                float yawDiff = Math.abs(reported.yaw() - this.previousSentRotation.yaw());
+                this.lastPlaced = placeTarget.placedPos();
+                if (pitchDiff > 0) this.lastPlacePitchDifference = pitchDiff;
                 if (yawDiff > 0.0F) this.lastPlacedDeltaYaw = yawDiff;
                 if (this.noSwing.get()) mc.player.connection.send(new ServerboundSwingPacket(this.slot.hand()));
                 else mc.player.swing(this.slot.hand());
             }
             // Preserve the original ordering: a block-use is always emitted before these item uses.
-            if (this.abuseRotation.get()) {
+            if (this.abuseRotation.get() && shouldRunAbuseRotation(ProtocolTranslator.getTargetVersion())) {
                 float change = Mth.wrapDegrees(reported.yaw() - this.previousSentRotation.yaw());
                 int steps = Math.min(6, (int) (Math.abs(change) / 30));
                 float yaw = this.previousSentRotation.yaw();
@@ -677,6 +735,7 @@ public final class BlockFlySouthSideMode extends BlockFlyMode {
             mc.execute(() -> {
                 if (captured != null && captured == this.session && sameSession()) {
                     release(false, true);
+                    this.deferredPlacement = null;
                     this.target = null;
                     this.cancelMove = false;
                 }

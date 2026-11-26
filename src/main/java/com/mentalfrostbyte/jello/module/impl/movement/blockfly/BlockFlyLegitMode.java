@@ -150,7 +150,6 @@ public final class BlockFlyLegitMode extends BlockFlyMode {
             this.parent.clearRotation();
             return;
         }
-        this.parent.replenish();
         long now = System.nanoTime();
         MotionIntent intent = getMotionIntent();
         updateEagle(intent, now);
@@ -848,13 +847,14 @@ public final class BlockFlyLegitMode extends BlockFlyMode {
     }
 
     private boolean tryPlace() {
-        if (this.placedThisTick || this.target == null || !this.serverAimReady || !canOperate()
+        if (this.placedThisTick || this.target == null || !canOperate()
                 || System.nanoTime() < this.nextPlaceNanos || !isReplaceable(this.target.placePos)) return false;
         BlockHitResult ray = serverRayCast();
         if (!isExactHit(ray, this.target)) return false;
-        this.nextPlaceNanos = safeAddNanos(System.nanoTime(), randomDelayNanos(this.placeMinDelay, this.placeMaxDelay, 0, 30_000));
+        this.parent.replenish();
         BlockFlyPlacement.Target placement = new BlockFlyPlacement.Target(this.target.placePos, ray, this.lastSent, this.lastEyes);
         if (!this.parent.place(placement)) return false;
+        this.nextPlaceNanos = safeAddNanos(System.nanoTime(), randomDelayNanos(this.placeMinDelay, this.placeMaxDelay, 0, 30_000));
         this.placedThisTick = true;
         this.serverAimReady = false;
         return true;

@@ -4,7 +4,9 @@ import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventClick;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
+import com.mentalfrostbyte.jello.event.impl.player.movement.EventSafeWalk;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
+import com.mentalfrostbyte.jello.module.impl.movement.blockfly.BlockFlyPlacement.Target;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
 import com.mentalfrostbyte.jello.util.math.Rotations;
@@ -17,7 +19,6 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
@@ -29,6 +30,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
 
 /** HeyPixel's shared jump, Eagle, snap and held-item presentation policy. */
 abstract class BlockFlyCustomBase extends BlockFlyMode {
@@ -44,7 +46,8 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
     protected final BooleanSetting renderItemSpoof;
     protected Rotation rotation;
     protected Rotation correctRotation;
-    protected BlockFlyPlacement.Target target;
+    protected boolean hasAnchor;
+    protected boolean tellyGroundFrame;
     protected int baseY;
     protected int offGroundTicks;
     protected boolean active;
@@ -54,8 +57,8 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
     private int sneakTicks;
     private boolean forceSneak;
     private boolean queued;
-    private BlockFlyPlacement.Target queuedTarget;
-    private LocalPlayer sessionPlayer;
+    private @Nullable Target queuedTarget;
+    private @Nullable LocalPlayer sessionPlayer;
 
     BlockFlyCustomBase(final BlockFly parent, final BlockFly.Mode mode, final String prefix) {
         super(parent);
@@ -68,11 +71,15 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
     }
 
     protected abstract boolean activationHeld();
-    protected abstract BlockFlyPlacement.Target search(LocalPlayer player, Vec3 eyes);
-    protected abstract Rotation desiredRotation(LocalPlayer player, Vec3 eyes, BlockFlyPlacement.Target target);
+    protected abstract boolean updatePlan(LocalPlayer player, Vec3 eyes);
+    protected abstract Rotation computeDesiredRotation(LocalPlayer player, Vec3 eyes);
+    protected abstract boolean hitsSnapAnchor(LocalPlayer player, Vec3 eyes, Rotation look);
+    protected abstract @Nullable Target resolveMotionPlacement(
+            LocalPlayer player, EventMotion event, Vec3 eyes, Rotation currentLook);
     protected abstract float turnSpeed();
     protected boolean grimRotation() { return false; }
     protected boolean rejectUseName() { return false; }
+    protected boolean eagleSafeWalk() { return false; }
 
     @Override
     public boolean usesSharedMovement() { return this.active && this.activationHeld(); }
@@ -89,7 +96,8 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         this.offGroundTicks = 0;
         this.sneakTicks = 0;
         this.active = false;
-        this.target = null;
+        this.hasAnchor = false;
+        this.tellyGroundFrame = false;
         this.forceSneak = false;
         this.wantsJump = false;
         this.queued = false;
@@ -120,13 +128,12 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         this.ownedSlot = -1;
     }
 
-    private void releaseInput() {
+    protected void releaseInput() {
         this.restoreOwnedSlot();
         // Only EventMovementInput is modified, so physical and toggle key states never need unwinding.
-        this.active = this.forceSneak = this.wantsJump = this.queued = false;
+        this.active = this.hasAnchor = this.tellyGroundFrame = this.forceSneak = this.wantsJump = this.queued = false;
         this.sneakTicks = 0;
         this.baseY = Integer.MIN_VALUE;
-        this.target = null;
         this.queuedTarget = null;
         if (mc.player != null) this.rotation = new Rotation(mc.player.getYRot(), mc.player.getXRot());
     }
@@ -159,7 +166,7 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         if (this.baseY == Integer.MIN_VALUE || this.baseY > belowY || player.onGround() || !moving
                 || holdingJump || this.bridgeMode.is(BridgeMode.NORMAL)) this.baseY = belowY;
 
-        this.target = this.search(player, player.getEyePosition());
+        this.hasAnchor = this.updatePlan(player, player.getEyePosition());
         this.forceSneak = false;
         if (this.sneak.get()) {
             this.sneakTicks++;
@@ -171,17 +178,39 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         if (this.bridgeMode.is(BridgeMode.NORMAL) && this.eagle.get()) {
             this.forceSneak |= player.onGround() && this.atEdge(player);
         }
-        if (this.target != null) {
-            this.correctRotation = this.desiredRotation(player, player.getEyePosition(), this.target);
+        if (this.hasAnchor) {
+            this.correctRotation = this.computeDesiredRotation(player, player.getEyePosition());
             this.rotation = this.turnTowards(this.correctRotation);
-            if (this.bridgeMode.is(BridgeMode.TELLY_BRIDGE) && this.offGroundTicks < 1 && moving) {
-                this.rotation = new Rotation(Rotations.continuous(this.rotation.yaw(), player.getYRot()), this.rotation.pitch());
-            } else if (this.bridgeMode.is(BridgeMode.NORMAL) && this.snap.get() && !holdingJump
-                    && !this.hitsTarget(player, player.getEyePosition(), this.rotation, this.target)) {
-                this.rotation = new Rotation(player.getYRot() + jitter(0.25F), this.rotation.pitch());
+        }
+        if (this.bridgeMode.is(BridgeMode.TELLY_BRIDGE) && this.offGroundTicks < 1 && moving) {
+            this.tellyGroundFrame = true;
+            float forwardYaw = Rotations.continuous(this.rotation.yaw(), player.getYRot());
+            this.rotation = new Rotation(
+                    Rotations.limit(this.rotation, new Rotation(forwardYaw, this.rotation.pitch()), 180.0F, 180.0F).yaw(),
+                    this.rotation.pitch());
+            this.parent.requestRotation(this.rotation, true, MovementCorrection.SILENT);
+            return;
+        }
+        this.tellyGroundFrame = false;
+        if (this.hasAnchor) {
+            if (this.bridgeMode.is(BridgeMode.NORMAL) && this.snap.get() && !holdingJump
+                    && !this.hitsSnapAnchor(player, player.getEyePosition(), this.rotation)) {
+                float forwardYaw = Rotations.continuous(this.rotation.yaw(), player.getYRot());
+                this.rotation = new Rotation(forwardYaw + jitter(0.25F), this.rotation.pitch());
             }
             this.parent.requestRotation(this.rotation, true, MovementCorrection.SILENT);
-        } else this.parent.clearRotation();
+        } else {
+            this.parent.clearRotation();
+        }
+    }
+
+    @Override
+    public void safeWalk(final EventSafeWalk event) {
+        if (this.active && this.activationHeld() && this.eagleSafeWalk()
+                && this.bridgeMode.is(BridgeMode.NORMAL) && this.eagle.get()
+                && mc.player != null && mc.player.onGround() && this.atEdge(mc.player)) {
+            event.setSafe(true);
+        }
     }
 
     @Override
@@ -214,23 +243,21 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
             }
             return;
         }
-        if (this.target == null) return;
+        if (!this.hasAnchor && !this.tellyGroundFrame) return;
         LocalPlayer player = mc.player;
         Vec3 eyes = new Vec3(event.getX(), event.getY() + player.getEyeHeight(), event.getZ());
         this.parent.aim(event, this.rotation, true, MovementCorrection.SILENT);
         if (this.grimRotation()) event.forceRotation();
-        if (this.bridgeMode.is(BridgeMode.TELLY_BRIDGE) && player.onGround()
-                && BlockFlyLegacyMode.isMoving(BlockFlyLegacyMode.physicalInput())) return;
+        if (this.tellyGroundFrame || !this.hasAnchor) return;
 
-        // The predicted eye origin can change during movement. Recast using the exact outgoing look.
-        BlockFlyPlacement.Target current = BlockFlyPlacement.fromHit(player, eyes,
-                BlockFlyPlacement.raycast(player, eyes, this.rotation), this.rotation);
-        if (current == null || !current.placedPos().equals(this.target.placedPos())) return;
-        if (current.hit().getDirection() == Direction.DOWN) return;
-        if (current.hit().getDirection() == Direction.UP && !player.onGround()
-                && BlockFlyLegacyMode.isMoving(BlockFlyLegacyMode.physicalInput()) && !mc.options.keyJump.isDown()
-                && !this.bridgeMode.is(BridgeMode.NORMAL)) return;
-        if (!this.isValidStack(player.getMainHandItem())) return;
+        BlockFlyPlacement.Target current = this.resolveMotionPlacement(player, event, eyes, this.rotation);
+        if (current == null || !this.isValidStack(player.getMainHandItem())) return;
+        if (current.rotation().pitch() != this.rotation.pitch()
+                || current.rotation().yaw() != this.rotation.yaw()) {
+            this.rotation = new Rotation(this.rotation.yaw(), current.rotation().pitch());
+            this.parent.aim(event, this.rotation, true, MovementCorrection.SILENT);
+            if (this.grimRotation()) event.forceRotation();
+        }
         this.parent.queuePlacement(current);
         this.queued = true;
         this.queuedTarget = current;
@@ -253,7 +280,7 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
     /** A render-only look; it must never be written back to LocalPlayer's camera angles. */
     @Override
     public Rotation cameraRotation() {
-        return this.active && this.target != null && !this.hideSnap.get() ? this.rotation : null;
+        return this.active && this.hasAnchor && !this.hideSnap.get() ? this.rotation : null;
     }
 
     protected final Rotation turnTowards(final Rotation desired) {
@@ -278,7 +305,12 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
     private boolean selectBlock(final LocalPlayer player) {
         for (int slot = 0; slot < 9; slot++) {
             if (this.isValidStack(player.getInventory().getItem(slot))) {
-                player.getInventory().setSelectedSlot(slot);
+                if (player.getInventory().getSelectedSlot() != slot) {
+                    player.getInventory().setSelectedSlot(slot);
+                    if (mc.isInPreMovementTick() && mc.gameMode != null && mc.getConnection() != null) {
+                        mc.gameMode.syncCarriedItem();
+                    }
+                }
                 this.ownedSlot = slot;
                 return true;
             }
@@ -286,7 +318,7 @@ abstract class BlockFlyCustomBase extends BlockFlyMode {
         return false;
     }
 
-    private boolean isValidStack(final ItemStack stack) {
+    protected boolean isValidStack(final ItemStack stack) {
         if (!BlockFlyPlacement.isPlaceable(stack) || stack.getCount() <= 1
                 || !(stack.getItem() instanceof BlockItem item) || item.getBlock() instanceof SlabBlock
                 || EXTRA_EXCLUDED.contains(item.getBlock())) return false;

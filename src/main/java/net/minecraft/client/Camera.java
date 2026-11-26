@@ -2,6 +2,7 @@ package net.minecraft.client;
 
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
+import com.mentalfrostbyte.jello.module.impl.render.Freecam;
 import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.Arrays;
 import net.minecraft.client.entity.ClientAvatarState;
@@ -126,8 +127,12 @@ public class Camera implements TrackedWaypoint.Camera {
         cameraState.initialized = this.isInitialized();
         cameraState.isPanoramicMode = this.isPanoramicMode;
         cameraState.isFrustumCaptured = this.capturedFrustum != null;
+        // Sigma hook: Freecam disables cave occlusion culling unless Cave Culling is kept on, and suppresses view shake.
+        Freecam freecam = Modules.enabled(Freecam.class);
+        boolean freecamActive = freecam != null && freecam.isActive();
         cameraState.smartCull = this.minecraft.smartCull;
-        if (this.minecraft.player.isSpectator() && this.level.getBlockState(this.blockPosition).isSolidRender()) {
+        if ((freecamActive && !freecam.usesCaveCulling())
+            || ((this.minecraft.player.isSpectator() || freecamActive) && this.level.getBlockState(this.blockPosition).isSolidRender())) {
             cameraState.smartCull = false;
         }
 
@@ -177,12 +182,21 @@ public class Camera implements TrackedWaypoint.Camera {
             cameraState.entityRenderState.isPlayer = false;
         }
 
+        if (freecamActive) {
+            cameraState.entityRenderState.isSleeping = false;
+            cameraState.entityRenderState.hurtTime = 0.0F;
+            cameraState.entityRenderState.bob = 0.0F;
+        }
+
         cameraState.hudFov = this.hudFov;
     }
 
     private void tickFov() {
         float targetFovModifier;
-        if (this.minecraft.getCameraEntity() instanceof AbstractClientPlayer player) {
+        Freecam freecam = Modules.enabled(Freecam.class);
+        if (freecam != null && freecam.isActive()) {
+            targetFovModifier = 1.0F;
+        } else if (this.minecraft.getCameraEntity() instanceof AbstractClientPlayer player) {
             Options options = this.minecraft.options;
             boolean firstPerson = options.getCameraType().isFirstPerson();
             float effectScale = options.fovEffectScale().get().floatValue();
@@ -310,6 +324,15 @@ public class Camera implements TrackedWaypoint.Camera {
     }
 
     private void alignWithEntity(final float partialTicks) {
+        // Sigma hook: detach the camera cleanly onto Freecam's interpolated pose while leaving the player body rendered.
+        Freecam freecam = Modules.enabled(Freecam.class);
+        if (freecam != null && freecam.isActive()) {
+            this.detached = true;
+            this.setRotation(freecam.getYaw(partialTicks), freecam.getPitch(partialTicks));
+            this.setPosition(freecam.getPosition(partialTicks));
+            return;
+        }
+
         if (this.entity.isPassenger()
             && this.entity.getVehicle() instanceof Minecart minecart
             && minecart.getBehavior() instanceof NewMinecartBehavior behavior

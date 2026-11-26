@@ -502,6 +502,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
     private void renderItemInHand(final CameraRenderState cameraState, final float deltaPartialTick, final Matrix4fc modelViewMatrix) {
         if (!cameraState.isPanoramicMode) {
             if (this.gameRenderState.optionsRenderState.cameraType.isFirstPerson()
+                && !this.mainCamera.isDetached()
                 && !cameraState.entityRenderState.isSleeping
                 && !this.gameRenderState.guiRenderState.isHudHidden
                 && this.minecraft.gameMode.getPlayerMode() != GameType.SPECTATOR) {
@@ -569,7 +570,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
             SmoothBobbing smoothBobbing = Modules.enabled(SmoothBobbing.class);
             if (smoothBobbing != null) {
                 smoothBobbing.beginFrame(cameraState,
-                        this.minecraft.getCameraEntity() == this.minecraft.player ? this.minecraft.player : null);
+                        this.minecraft.getCameraEntity() == this.minecraft.player && !this.mainCamera.isDetached() ? this.minecraft.player : null);
             }
             if (this.sigma$usesPaniniProjection(cameraState)) {
                 com.mentalfrostbyte.jello.gui.modern.ModernHudProjection.beginFrame(null, null);

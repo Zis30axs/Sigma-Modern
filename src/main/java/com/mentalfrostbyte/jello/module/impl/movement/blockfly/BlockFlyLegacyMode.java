@@ -6,9 +6,11 @@ import com.mentalfrostbyte.jello.event.impl.player.movement.EventMove;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventSafeWalk;
 import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
+import com.mentalfrostbyte.jello.module.impl.movement.blockfly.BlockFlyPlacement.Target;
 import com.mentalfrostbyte.jello.util.math.Rotations;
 import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
+import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -16,19 +18,32 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Input;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
 
-/** The common movement curves of the original NCP, Smooth and Hypixel modes. */
+/** The common movement and post-movement placement flow of the original NCP, Smooth and Hypixel modes. */
 abstract class BlockFlyLegacyMode extends BlockFlyMode {
     enum SpeedMode { NONE, JUMP, CONSTANT, AAC, CUBECRAFT, SLOW, SNEAK }
 
+    record BlockCache(BlockPos anchor, Direction face) {
+        BlockPos placedPos() { return this.anchor.relative(this.face); }
+    }
+
+    private static final int[][] CARDINAL_OFFSETS = {
+            {0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, 1}, {0, 0, -1}
+    };
+    private static final int[][] CACHE_PATTERNS = {
+            {1, 1, 1, 0}, {2, 1, 2, 0}, {3, 1, 3, 0}, {4, 1, 4, 0}, {0, -1, 0, 1}
+    };
+
     private final BlockFly.Mode mode;
-    private Rotation rotation;
-    private Rotation reportRotation;
-    private BlockFlyPlacement.Target plannedTarget;
+    private @Nullable Rotation rotation;
     private double baseY;
     private int offGroundTicks;
     private boolean descending;
@@ -51,8 +66,6 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
     @Override
     public void enable() {
         this.rotation = null;
-        this.reportRotation = null;
-        this.plannedTarget = null;
         this.baseY = mc.player == null ? 0.0 : mc.player.getY();
         this.offGroundTicks = -1;
         this.descending = false;
@@ -63,8 +76,6 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
     public void disable() {
         this.parent.timer(1.0F);
         this.rotation = null;
-        this.reportRotation = null;
-        this.plannedTarget = null;
         this.descending = false;
     }
 
@@ -82,20 +93,15 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
     @Override
     public void tick(final EventTick event) {
         if (!event.isPre()) return;
-        this.plannedTarget = null;
-        this.reportRotation = null;
         if (mc.player == null || mc.level == null || mc.gui.screen() != null || !this.parent.hasBlocks()) {
             this.descending = false;
+            this.rotation = null;
             this.parent.clearRotation();
             this.parent.queuePlacement(null);
             this.parent.timer(1.0F);
             return;
         }
-        LocalPlayer player = mc.player;
         this.descending = this.downwards() && mc.options.keyShift.isDown();
-        // Choose before keyboard remapping and physics; the report later reuses this same look.
-        this.plan(new EventMotion(player.getX(), player.getY(), player.getZ(),
-                player.getYRot(), player.getXRot(), player.onGround()));
     }
 
     @Override
@@ -103,6 +109,7 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
         if (!event.isPre()) return;
         this.parent.queuePlacement(null);
         if (mc.player == null || mc.level == null || mc.gui.screen() != null || !this.parent.hasBlocks()) {
+            this.rotation = null;
             this.parent.clearRotation();
             if (mc.player != null) {
                 event.setYaw(mc.player.getYRot());
@@ -110,101 +117,120 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
             }
             return;
         }
-        if (this.reportRotation == null) return;
-        this.parent.aim(event, this.reportRotation, true, MovementCorrection.SILENT);
-        if (this.plannedTarget == null) return;
-        Vec3 eyes = new Vec3(event.getX(), event.getY() + mc.player.getEyeHeight(), event.getZ());
-        BlockFlyPlacement.Target current = BlockFlyPlacement.fromHit(mc.player, eyes,
-                BlockFlyPlacement.raycast(mc.player, eyes, this.reportRotation), this.reportRotation);
-        if (current != null && current.placedPos().equals(this.plannedTarget.placedPos())
-                && current.hit().getBlockPos().equals(this.plannedTarget.hit().getBlockPos())
-                && current.hit().getDirection() == this.plannedTarget.hit().getDirection()) {
-            this.parent.queuePlacement(current);
-        }
-    }
-
-    private void plan(final EventMotion event) {
         LocalPlayer player = mc.player;
         Vec3 eyes = new Vec3(event.getX(), event.getY() + player.getEyeHeight(), event.getZ());
-        Rotation previous = this.rotation == null ? new Rotation(event.getYaw(), event.getPitch()) : this.rotation;
-        double y = event.getY();
+        if (event.isOnGround()) this.baseY = event.getY();
+
         double x = event.getX();
+        double y = event.getY();
         double z = event.getZ();
-        if (player.onGround()) this.baseY = player.getY();
+        if (this.extend() > 0.0F && isMoving(physicalInput()) && !player.horizontalCollision && !mc.options.keyJump.isDown()) {
+            Vec3 extended = extendPosition(mc.level, event.getX(), event.getY(), event.getZ(),
+                    movementYaw(player.getYRot(), physicalInput()), this.extend());
+            x = extended.x;
+            z = extended.z;
+        }
 
         if (player.getDeltaMovement().y < 0.0 && player.fallDistance > 1.0F
                 && BlockFlyPlacement.raycast(player, eyes, new Rotation(0.0F, 90.0F)) == null) {
             y += Math.max(player.getDeltaMovement().y * 2.0, -4.0);
-        } else if (this.descending) {
+        } else if (this.descending && this.mode != BlockFly.Mode.SMOOTH) {
             y -= 1.0;
         } else if ((this.speedMode() == SpeedMode.JUMP || this.speedMode() == SpeedMode.CUBECRAFT)
                 && !mc.options.keyJump.isDown()) {
             y = this.baseY;
         }
 
-        // The original Extend advances in 0.45-block steps only while standing on a support.
-        if (this.mode == BlockFly.Mode.NCP && this.extend() > 0.0F && !player.horizontalCollision
-                && !mc.options.keyJump.isDown() && !isReplaceable(BlockPos.containing(x, y - 1.0, z))) {
-            double angle = Math.toRadians(movementYaw(player.getYRot(), physicalInput()));
-            double distance = this.extend() * 0.9;
-            if (isMoving(physicalInput())) {
-                for (double step = Math.min(0.45, distance); step <= distance + 1.0E-6; step = Math.min(step + 0.45, distance)) {
-                    x = event.getX() - Math.sin(angle) * step;
-                    z = event.getZ() + Math.cos(angle) * step;
-                    if (isReplaceable(BlockPos.containing(x, y - 1.0, z)) || step == distance) break;
+        if (isReplaceable(mc.level, BlockPos.containing(event.getX(), event.getY() - 1.0, event.getZ()))) {
+            x = event.getX();
+            z = event.getZ();
+        }
+
+        BlockPos targetCell = BlockPos.containing(x, y - 1.0, z);
+        Rotation previous = this.rotation == null ? new Rotation(event.getYaw(), event.getPitch()) : this.rotation;
+        BlockFlyPlacement.Target target = null;
+        Rotation desiredLook = null;
+
+        if (isReplaceable(mc.level, targetCell)) {
+            boolean excludeDown = this.mode != BlockFly.Mode.SMOOTH && !this.descending && this.downwards();
+            BlockCache cache = findBlockCache(mc.level, targetCell, excludeDown, eyes, player.blockInteractionRange());
+            if (cache != null) {
+                desiredLook = rotationsToBlockFace(eyes, cache.anchor(), cache.face(), previous);
+                if (this.mode == BlockFly.Mode.HYPIXEL) {
+                    Vec3 faceCenter = Vec3.atCenterOf(cache.anchor()).add(
+                            cache.face().getStepX() * 0.5, 0.0, cache.face().getStepZ() * 0.5);
+                    if (cache.anchor().getY() - event.getY() < 0.0
+                            && Math.hypot(event.getX() - faceCenter.x, event.getZ() - faceCenter.z) < 2.0) {
+                        desiredLook = new Rotation(player.getYRot() + 1.0F, 90.0F);
+                    }
+                    BlockHitResult hit = new BlockHitResult(
+                            randomFaceHitVec(cache.anchor(), cache.face()), cache.face(), cache.anchor(), false);
+                    target = new BlockFlyPlacement.Target(cache.placedPos(), hit, desiredLook, eyes, false);
+                } else if (this.mode == BlockFly.Mode.SMOOTH) {
+                    target = resolveSmoothTarget(player, event, eyes, cache, previous);
+                    if (target != null) {
+                        desiredLook = target.rotation();
+                    }
+                } else {
+                    BlockHitResult hit = new BlockHitResult(
+                            randomFaceHitVec(cache.anchor(), cache.face()), cache.face(), cache.anchor(), false);
+                    target = new BlockFlyPlacement.Target(cache.placedPos(), hit, desiredLook, eyes, false);
                 }
             }
         }
 
-        BlockPos placed = BlockPos.containing(x, y - 1.0, z);
-        if (!isReplaceable(placed) && isMoving(physicalInput())) {
-            BlockPos nextFeet = BlockPos.containing(event.getX() + player.getDeltaMovement().x, y - 1.0,
-                    event.getZ() + player.getDeltaMovement().z);
-            if (isReplaceable(nextFeet)) placed = nextFeet;
-        }
-        BlockFlyPlacement.Target target = isReplaceable(placed)
-                ? findOnLayer(player, eyes, placed, 1, previous) : null;
-
-        if (target != null && this.mode == BlockFly.Mode.SMOOTH) {
-            // Smooth follows the side of the current bridge from a feet-level horizontal ray.
-            Vec3 start = new Vec3(event.getX(), event.getY() - 0.8, event.getZ());
-            float yaw = movementYaw(player.getYRot(), physicalInput()) + 180.0F;
-            Vec3 end = start.add(Vec3.directionFromRotation(0.0F, yaw).scale(2.3));
-            BlockHitResult side = mc.level.clip(new ClipContext(start, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-            if (side.getType() == HitResult.Type.BLOCK) {
-                Rotation smooth = Rotations.continuous(previous, Rotations.towards(eyes, side.getLocation()));
-                BlockFlyPlacement.Target rayTarget = BlockFlyPlacement.fromHit(player, eyes,
-                        BlockFlyPlacement.raycast(player, eyes, smooth), smooth);
-                if (rayTarget != null && rayTarget.placedPos().getY() == placed.getY()) target = rayTarget;
-            }
-            if (target.hit().getDirection() == Direction.UP && player.onGround()
-                    && target.hit().getBlockPos().getY() <= player.getY() - 1.0) target = null;
-        }
-
-        if (target != null && this.mode == BlockFly.Mode.HYPIXEL) {
-            // Prefer the old straight-down Hypixel posture only when that ray really reaches this placement.
-            Rotation downward = new Rotation(player.getYRot() + 1.0F, 90.0F);
-            BlockFlyPlacement.Target aimed = BlockFlyPlacement.fromHit(player, eyes,
-                    BlockFlyPlacement.raycast(player, eyes, downward), downward);
-            if (aimed != null && aimed.placedPos().equals(target.placedPos())) target = aimed;
-        }
-
         if (target != null) {
             this.parent.replenish();
-            this.rotation = Rotations.continuous(previous, target.rotation());
+            this.rotation = Rotations.continuous(previous, desiredLook);
             if (Math.abs(Mth.wrapDegrees(this.rotation.yaw() - previous.yaw())) > 0.01F
-                    || Math.abs(this.rotation.pitch() - previous.pitch()) > 0.01F) this.lastRotationTick = player.tickCount;
-            this.reportRotation = this.rotation;
-            this.parent.requestRotation(this.reportRotation, true, MovementCorrection.SILENT);
-            this.plannedTarget = target;
+                    || Math.abs(this.rotation.pitch() - previous.pitch()) > 0.01F) {
+                this.lastRotationTick = player.tickCount;
+            }
+            this.parent.aim(event, this.rotation, true, MovementCorrection.OFF);
+            this.parent.queuePlacement(target);
         } else if (this.keepRotations() && this.rotation != null) {
             Rotation retained = this.mode == BlockFly.Mode.HYPIXEL
                     ? new Rotation(player.getYRot() + 1.0F, 90.0F) : this.rotation;
-            this.reportRotation = retained;
-            this.parent.requestRotation(this.reportRotation, true, MovementCorrection.SILENT);
+            this.parent.aim(event, retained, true, MovementCorrection.OFF);
         } else {
             this.parent.clearRotation();
         }
+    }
+
+    private @Nullable Target resolveSmoothTarget(final LocalPlayer player, final EventMotion event,
+                                                 final Vec3 eyes, final BlockCache cache,
+                                                 final Rotation previous) {
+        Vec3 start = new Vec3(event.getX(), event.getY() - 0.8, event.getZ());
+        float lookYaw = movementYaw(player.getYRot(), physicalInput()) - 270.0F;
+        double angle = Math.toRadians(lookYaw);
+        double endOffsetY = (mc.options.keyJump.isDown() || this.speedMode() == SpeedMode.JUMP) ? -0.6 : 0.0;
+        Vec3 endDelta = new Vec3(-Math.sin(angle) * 2.3, endOffsetY, Math.cos(angle) * 2.3);
+        BlockHitResult side = mc.level.clip(new ClipContext(
+                start, start.add(endDelta), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        if (side.getType() != HitResult.Type.BLOCK) {
+            Vec3 fallbackStart = new Vec3(player.xo, player.yo - 0.8, player.zo);
+            side = mc.level.clip(new ClipContext(
+                    fallbackStart, fallbackStart.add(endDelta), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        }
+        if (side.getType() == HitResult.Type.BLOCK) {
+            Rotation smooth = Rotations.continuous(previous, Rotations.towards(eyes, side.getLocation()));
+            BlockFlyPlacement.Target rayTarget = BlockFlyPlacement.fromHit(player, eyes,
+                    BlockFlyPlacement.raycast(player, eyes, smooth), smooth);
+            if (rayTarget != null && !isFloorTopHit(rayTarget, event)) {
+                return rayTarget;
+            }
+        }
+        BlockFlyPlacement.Target fallback = BlockFlyPlacement.find(player, eyes, cache.placedPos(), previous);
+        if (fallback != null && !isFloorTopHit(fallback, event)) {
+            return fallback;
+        }
+        return null;
+    }
+
+    private static boolean isFloorTopHit(final BlockFlyPlacement.Target target, final EventMotion event) {
+        return target.hit().getDirection() == Direction.UP
+                && target.hit().getBlockPos().getY() <= event.getY() - 1.0
+                && event.isOnGround();
     }
 
     @Override
@@ -300,17 +326,89 @@ abstract class BlockFlyLegacyMode extends BlockFlyMode {
         event.setZ(Math.cos(angle) * value);
     }
 
-    private static boolean isReplaceable(final BlockPos pos) {
-        return mc.level != null && mc.level.hasChunkAt(pos) && mc.level.getBlockState(pos).canBeReplaced();
+    static Vec3 extendPosition(final BlockGetter level, final double startX, final double playerY,
+                               final double startZ, final float moveYaw, final float extend) {
+        double maxSteps = Math.max(0.0, extend * 2.0);
+        if (maxSteps <= 0.0) return new Vec3(startX, playerY, startZ);
+        double angle = Math.toRadians(moveYaw);
+        double stepX = -Math.sin(angle) * 0.45;
+        double stepZ = Math.cos(angle) * 0.45;
+        double curX = startX;
+        double curZ = startZ;
+        double step = 0.0;
+        while (!isReplaceable(level, BlockPos.containing(curX, playerY - 1.0, curZ))) {
+            step = Math.min(step + 1.0, maxSteps);
+            curX = startX + stepX * step;
+            curZ = startZ + stepZ * step;
+            if (step >= maxSteps) break;
+        }
+        return new Vec3(curX, playerY, curZ);
     }
 
-    static BlockFlyPlacement.Target findOnLayer(final LocalPlayer player, final Vec3 eyes, final BlockPos base,
-                                                final int radius, final Rotation previous) {
-        for (BlockPos pos : BlockFlyPlacement.positionsAround(base, radius)) {
-            if (pos.getY() != base.getY()) continue;
-            BlockFlyPlacement.Target target = BlockFlyPlacement.find(player, eyes, pos, previous);
-            if (target != null) return target;
+    static @Nullable BlockCache findBlockCache(final BlockGetter level, final BlockPos basePos,
+                                               final boolean excludeDown, final Vec3 eyes, final double range) {
+        double maxDistSq = Double.isFinite(range) && range > 0.0 ? Math.max(range * range, 20.25) : 20.25;
+        for (int[] pattern : CACHE_PATTERNS) {
+            boolean isOffset = pattern[3] != 0;
+            for (int[] offset : CARDINAL_OFFSETS) {
+                int ox = isOffset ? offset[0] + pattern[0] : offset[0] * pattern[0];
+                int oy = isOffset ? offset[1] + pattern[1] : offset[1] * pattern[1];
+                int oz = isOffset ? offset[2] + pattern[2] : offset[2] * pattern[2];
+                BlockPos placed = basePos.offset(ox, oy, oz);
+                if (!isReplaceable(level, placed)) continue;
+                for (Direction face : Direction.values()) {
+                    if (face == Direction.DOWN && excludeDown) continue;
+                    BlockPos anchor = placed.relative(face.getOpposite());
+                    if (!isValidAnchor(level, anchor)) continue;
+                    Vec3 faceCenter = Vec3.atCenterOf(anchor).add(
+                            face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+                    if (eyes.distanceToSqr(faceCenter) <= maxDistSq) {
+                        return new BlockCache(anchor.immutable(), face);
+                    }
+                }
+            }
         }
         return null;
+    }
+
+    static Rotation rotationsToBlockFace(final Vec3 eyes, final BlockPos anchor, final Direction face,
+                                         final Rotation previous) {
+        double offsetX = face == Direction.EAST ? 0.49 : face == Direction.WEST ? -0.49 : 0.0;
+        double offsetZ = face == Direction.SOUTH ? 0.49 : face == Direction.NORTH ? -0.49 : 0.0;
+        double offsetY = face == Direction.UP ? 1.0 : 0.0;
+        Vec3 target = new Vec3(anchor.getX() + 0.5 + offsetX, anchor.getY() - 0.02 + offsetY, anchor.getZ() + 0.5 + offsetZ);
+        return Rotations.continuous(previous, Rotations.towards(eyes, target));
+    }
+
+    private static Vec3 randomFaceHitVec(final BlockPos anchor, final Direction face) {
+        double x = anchor.getX() + 0.5 + face.getStepX() * 0.5;
+        double y = anchor.getY() + 0.5 + face.getStepY() * 0.5;
+        double z = anchor.getZ() + 0.5 + face.getStepZ() * 0.5;
+        if (face == Direction.UP || face == Direction.DOWN) {
+            x += randomOffset(0.2);
+            z += randomOffset(0.2);
+        } else {
+            y += randomOffset(0.2);
+            if (face == Direction.WEST || face == Direction.EAST) z += randomOffset(0.2);
+            if (face == Direction.SOUTH || face == Direction.NORTH) x += randomOffset(0.2);
+        }
+        return new Vec3(x, y, z);
+    }
+
+    private static double randomOffset(final double bound) {
+        return ThreadLocalRandom.current().nextDouble(-bound, bound);
+    }
+
+    static boolean isReplaceable(final BlockGetter level, final BlockPos pos) {
+        if (level.isOutsideBuildHeight(pos)) return false;
+        if (level instanceof Level world && !world.hasChunkAt(pos)) return false;
+        return level.getBlockState(pos).canBeReplaced();
+    }
+
+    static boolean isValidAnchor(final BlockGetter level, final BlockPos pos) {
+        if (level.isOutsideBuildHeight(pos)) return false;
+        if (level instanceof Level world && !world.hasChunkAt(pos)) return false;
+        BlockState state = level.getBlockState(pos);
+        return !state.canBeReplaced() && !state.getShape(level, pos).isEmpty();
     }
 }

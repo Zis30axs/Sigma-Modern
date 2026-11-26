@@ -30,11 +30,16 @@ import com.mentalfrostbyte.jello.util.math.Rotations.Rotation;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrection;
 import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
+import com.viaversion.viaversion.api.protocol.packet.PacketWrapper;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import com.viaversion.viaversion.api.type.Types;
+import com.viaversion.viaversion.protocols.v1_11_1to1_12.Protocol1_11_1To1_12;
+import com.viaversion.viaversion.protocols.v1_9_1to1_9_3.packet.ServerboundPackets1_9_3;
 import java.util.EnumMap;
 import java.util.function.BooleanSupplier;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.network.protocol.game.ServerboundSwingPacket;
 import net.minecraft.util.Mth;
@@ -45,6 +50,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 /** SigmaClient's eight bridge policies, with one owner for inventory and placement lifecycle. */
@@ -86,7 +92,8 @@ public final class BlockFly extends Module {
     private Rotation requestedRotation;
     private MovementCorrection correction = MovementCorrection.OFF;
     private boolean silentRotation = true;
-    private int lastPlaceTick = Integer.MIN_VALUE;
+    private int lastExecutedPlaceTick = Integer.MIN_VALUE;
+    private int lastQueuedPlaceTick = Integer.MIN_VALUE;
     private int originalSlot = -1;
     private int ownedSlot = -1;
     private int liteSlot = -1;
@@ -133,7 +140,8 @@ public final class BlockFly extends Module {
         return isEnabled() && ready() && this.active != null
                 && this.sessionPlayer == mc.player && this.sessionLevel == mc.level
                 && (this.requestedRotation != null || this.pending != null || this.deferredTarget != null
-                    || this.actedThisTick || this.internalSlotChange || this.liteSlot >= 0);
+                    || this.actedThisTick || this.internalSlotChange || this.liteSlot >= 0
+                    || this.active.hasDeferredWork());
     }
 
     @Override protected void onEnable() { restart(); }
@@ -166,7 +174,8 @@ public final class BlockFly extends Module {
                 this.deferredTarget = null;
                 this.deferredSent = null;
                 this.motionEvent = null;
-                this.lastPlaceTick = Integer.MIN_VALUE;
+                this.lastExecutedPlaceTick = Integer.MIN_VALUE;
+                this.lastQueuedPlaceTick = Integer.MIN_VALUE;
                 this.actedThisTick = false;
                 this.timerMultiplier = 1;
                 this.active = null;
@@ -196,7 +205,9 @@ public final class BlockFly extends Module {
                 Rotation sent = this.deferredSent;
                 this.deferredTarget = null;
                 this.deferredSent = null;
-                placeAt(deferred, mc.player.getEyePosition(), sent, false);
+                if (mc.player.getEyePosition().distanceToSqr(deferred.eyes()) <= 1.0E-4) {
+                    placeAt(deferred, deferred.eyes(), sent, false);
+                }
             }
             this.pending = null;
         }
@@ -352,19 +363,27 @@ public final class BlockFly extends Module {
     /** Called after the movement packet; on 1.21.2+ defers the interaction to the next tick's pre-movement window. */
     public boolean place(final BlockFlyPlacement.Target target) {
         if (!ready() || target == null || this.motionEvent == null || !this.motionEvent.isPost()
-                || this.motionEvent.isCancelled() || this.lastPlaceTick == mc.player.tickCount) return false;
+                || this.motionEvent.isCancelled() || this.lastQueuedPlaceTick == mc.player.tickCount) return false;
         Vec3 eyes = new Vec3(this.motionEvent.getX(), this.motionEvent.getY() + mc.player.getEyeHeight(), this.motionEvent.getZ());
         Rotation sent = new Rotation(this.motionEvent.getYaw(), this.motionEvent.getPitch());
         boolean deferForTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
-        return placeAt(target, eyes, sent, deferForTickEnd);
+        boolean queuedOrPlaced = placeAt(target, eyes, sent, deferForTickEnd);
+        if (queuedOrPlaced) this.lastQueuedPlaceTick = mc.player.tickCount;
+        return queuedOrPlaced;
     }
 
     private boolean placeAt(final BlockFlyPlacement.Target target, final Vec3 eyes,
                             final Rotation sent, final boolean deferOnly) {
-        if (!ready() || target == null || this.lastPlaceTick == mc.player.tickCount) return false;
-        if (!BlockFlyPlacement.valid(mc.player, eyes, target, sent)) return false;
-        var hit = BlockFlyPlacement.raycast(mc.player, eyes, sent);
-        if (hit == null) return false;
+        if (!ready() || target == null || (!deferOnly && this.lastExecutedPlaceTick == mc.player.tickCount)) return false;
+        final BlockHitResult hit;
+        if (target.strictRaycast()) {
+            if (!BlockFlyPlacement.valid(mc.player, eyes, target, sent)) return false;
+            hit = BlockFlyPlacement.raycast(mc.player, eyes, sent);
+            if (hit == null) return false;
+        } else {
+            if (!BlockFlyPlacement.validDirect(mc.player, eyes, target)) return false;
+            hit = target.hit();
+        }
         Inventory inventory = mc.player.getInventory();
         int previous = inventory.getSelectedSlot();
         boolean modeOwnsSlot = isMode(Mode.CUSTOM) || isMode(Mode.L_CUSTOM);
@@ -373,45 +392,50 @@ public final class BlockFly extends Module {
         InteractionHand hand = slot >= 0 && BlockFlyPlacement.isPlaceable(inventory.getItem(slot))
                 ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
         if (hand == InteractionHand.OFF_HAND && !BlockFlyPlacement.isPlaceable(mc.player.getOffhandItem())) return false;
-        if (deferOnly) {
-            // 1.21.2+ / 26.2 forbids sending block-place or slot packets between MovePlayer and CLIENT_TICK_END;
-            // execute at the start of the very next tick before movement or mode re-selection runs.
-            this.deferredTarget = target;
-            this.deferredSent = sent;
-            this.actedThisTick = true;
-            return true;
-        }
-        this.actedThisTick = true;
-        this.internalSlotChange = true;
+        ItemStack placeStack = hand == InteractionHand.MAIN_HAND ? inventory.getItem(slot) : mc.player.getOffhandItem();
         int previousLiteSlot = this.liteSlot;
         boolean interacted = false;
         float cameraYaw = mc.player.getYRot(), cameraPitch = mc.player.getXRot();
         try {
-            if (hand == InteractionHand.MAIN_HAND && slot != previous) {
-                if (policy == ItemSpoof.SWITCH && (this.originalSlot < 0 || previous != this.ownedSlot)) this.originalSlot = previous;
-                inventory.setSelectedSlot(slot);
-                this.ownedSlot = slot;
-            }
-            if (policy == ItemSpoof.LITE_SPOOF && hand == InteractionHand.MAIN_HAND) this.liteSlot = slot;
             // Native block-state prediction (stairs, observers, etc.) must use the reported facing.
             mc.player.setYRot(sent.yaw());
             mc.player.setXRot(sent.pitch());
-            BlockPlaceContext context = new BlockPlaceContext(mc.player, hand, mc.player.getItemInHand(hand), hit);
+            BlockPlaceContext context = new BlockPlaceContext(mc.player, hand, placeStack, hit);
             if (!context.canPlace() || !context.getClickedPos().equals(target.placedPos())) return false;
-            this.lastPlaceTick = mc.player.tickCount;
-            boolean success = mc.gameMode.useItemOn(mc.player, hand, hit).consumesAction();
-            interacted = true;
-            if (success) swing(hand);
-            return success;
+            if (deferOnly) {
+                // 1.21.2+ / 26.2 forbids sending block-place or slot packets between MovePlayer and CLIENT_TICK_END;
+                // execute at the start of the very next tick before movement or mode re-selection runs.
+                this.deferredTarget = new BlockFlyPlacement.Target(target.placedPos(), hit, sent, eyes, target.strictRaycast());
+                this.deferredSent = sent;
+                this.actedThisTick = true;
+                return true;
+            }
+            this.actedThisTick = true;
+            this.internalSlotChange = true;
+            try {
+                if (hand == InteractionHand.MAIN_HAND && slot != previous) {
+                    if (policy == ItemSpoof.SWITCH && (this.originalSlot < 0 || previous != this.ownedSlot)) this.originalSlot = previous;
+                    inventory.setSelectedSlot(slot);
+                    this.ownedSlot = slot;
+                }
+                if (policy == ItemSpoof.LITE_SPOOF && hand == InteractionHand.MAIN_HAND) this.liteSlot = slot;
+                if (modeOwnsSlot && hand == InteractionHand.MAIN_HAND) mc.gameMode.syncCarriedItem();
+                this.lastExecutedPlaceTick = mc.player.tickCount;
+                boolean success = mc.gameMode.useItemOn(mc.player, hand, hit).consumesAction();
+                interacted = true;
+                if (success) swing(hand);
+                return success;
+            } finally {
+                if (!interacted) this.liteSlot = previousLiteSlot;
+                if (policy == ItemSpoof.SPOOF || policy == ItemSpoof.LITE_SPOOF) {
+                    inventory.setSelectedSlot(previous);
+                    if (policy == ItemSpoof.SPOOF) mc.gameMode.syncCarriedItem();
+                }
+                this.internalSlotChange = false;
+            }
         } finally {
             mc.player.setYRot(cameraYaw);
             mc.player.setXRot(cameraPitch);
-            if (!interacted) this.liteSlot = previousLiteSlot;
-            if (policy == ItemSpoof.SPOOF || policy == ItemSpoof.LITE_SPOOF) {
-                inventory.setSelectedSlot(previous);
-                if (policy == ItemSpoof.SPOOF) mc.gameMode.syncCarriedItem();
-            }
-            this.internalSlotChange = false;
         }
     }
 
@@ -467,21 +491,33 @@ public final class BlockFly extends Module {
         if (!ready() || this.itemSpoof.is(ItemSpoof.NONE) || mc.player.containerMenu != mc.player.inventoryMenu
                 || (mc.gui.screen() != null && !(mc.gui.screen() instanceof InventoryScreen))
                 || this.picking.is(PickingMode.OPEN_INV) && !(mc.gui.screen() instanceof InventoryScreen)) return;
+        boolean inInventoryScreen = mc.gui.screen() instanceof InventoryScreen;
         Inventory inventory = mc.player.getInventory();
         int hotbar = hotbarSlot();
-        if (hotbar >= 0 && !this.intelligentPicker.get()) return;
+        if (!inInventoryScreen && hotbar >= 0) return;
         int best = -1;
         for (int i = 9; i < 36; i++) {
             ItemStack stack = inventory.getItem(i);
             if (BlockFlyPlacement.isPlaceable(stack) && (best < 0 || stack.getCount() > inventory.getItem(best).getCount())) best = i;
         }
-        if (best < 0 || hotbar >= 0 && inventory.getItem(best).getCount() <= inventory.getItem(hotbar).getCount()) return;
+        if (best < 0) return;
+        if (hotbar >= 0 && (!this.intelligentPicker.get() || inventory.getItem(best).getCount() <= inventory.getItem(hotbar).getCount())) return;
         if (hotbar < 0) {
             hotbar = 7;
             for (int i = 0; i < 9; i++) if (inventory.getItem(i).isEmpty()) { hotbar = i; break; }
         }
         this.actedThisTick = true;
+        boolean fakeInv = !inInventoryScreen && this.picking.is(PickingMode.FAKE_INV);
+        if (fakeInv && ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+            PacketWrapper clientCommand = PacketWrapper.create(
+                    ServerboundPackets1_9_3.CLIENT_COMMAND, ProtocolTranslator.getPlayNetworkUserConnection());
+            clientCommand.write(Types.VAR_INT, 2);
+            clientCommand.scheduleSendToServer(Protocol1_11_1To1_12.class);
+        }
         mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, best, hotbar, ContainerInput.SWAP, mc.player);
+        if (fakeInv) {
+            mc.getConnection().send(new ServerboundContainerClosePacket(mc.player.inventoryMenu.containerId));
+        }
     }
 
     private void releaseLiteSlot() {
@@ -534,8 +570,8 @@ public final class BlockFly extends Module {
                 || player.getAbilities().flying || player.isInWater() || player.isInLava()) return;
         boolean supported = !mc.level.noCollision(player, player.getBoundingBox().move(0, -0.01, 0));
         switch (this.tower.get()) {
-            case NCP, AAC -> {
-                if (this.tower.is(TowerMode.NCP) && player.hasEffect(MobEffects.JUMP_BOOST) && event.getY() > 0) {
+            case NCP -> {
+                if (player.hasEffect(MobEffects.JUMP_BOOST) && event.getY() > 0) {
                     double next = player.getY() + event.getY();
                     if (Mth.floor(next) != Mth.floor(player.getY()) && next - Mth.floor(next) < 0.15) event.setY(Mth.floor(next) - player.getY());
                 } else if (event.getY() > 0.247 && event.getY() < 0.249) {
@@ -547,6 +583,30 @@ public final class BlockFly extends Module {
                     if (!Speed.isMoving(player.input.keyPresses)) { event.setX(0); event.setZ(0); }
                 }
                 player.setDeltaMovement(player.getDeltaMovement().x, event.getY(), player.getDeltaMovement().z);
+            }
+            case AAC -> {
+                if (player.verticalCollision && supported) {
+                    player.jumpFromGround();
+                    event.setY(player.getDeltaMovement().y);
+                    if (Speed.isMoving(player.input.keyPresses)) {
+                        var effect = player.getEffect(MobEffects.SPEED);
+                        double speed = 0.2873 * (effect == null ? 1.0 : 1.0 + 0.2 * (effect.getAmplifier() + 1));
+                        double angle = Math.toRadians(Speed.movementYaw(player.getYRot(), player.input.keyPresses));
+                        event.setX(-Math.sin(angle) * speed);
+                        event.setZ(Math.cos(angle) * speed);
+                    } else {
+                        event.setX(0);
+                        event.setZ(0);
+                    }
+                } else if (!player.verticalCollision) {
+                    if (event.getY() > 0.247 && event.getY() < 0.249) {
+                        event.setY(Mth.floor(player.getY() + event.getY()) - player.getY());
+                        if (!Speed.isMoving(player.input.keyPresses)) { event.setX(0); event.setZ(0); }
+                    } else if (supported && Math.abs(player.getY() - Math.rint(player.getY())) < 1.0E-5) {
+                        event.setY(-1.0E-10);
+                    }
+                }
+                player.setDeltaMovement(event.getX(), event.getY(), event.getZ());
             }
             case VANILLA -> {
                 if (supported && mc.level.noCollision(player, player.getBoundingBox().move(0, 1, 0))) {

@@ -505,6 +505,10 @@ public class Hud {
     }
 
     private void extractCrosshair(final GuiGraphicsExtractor graphics, final DeltaTracker deltaTracker) {
+        // Sigma hook: Freecam's FPV mode draws its own tactical reticle instead of the vanilla crosshair.
+        if (com.mentalfrostbyte.jello.module.impl.render.Freecam.replacesCrosshair()) {
+            return;
+        }
         Options options = this.minecraft.options;
         if (options.getCameraType().isFirstPerson()) {
             if (this.minecraft.gameMode.getPlayerMode() != GameType.SPECTATOR || this.canRenderCrosshairForSpectator(this.minecraft.hitResult)) {

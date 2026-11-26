@@ -1772,7 +1772,10 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         this.gui.setPauseScreen(suppressPauseMenuIfWeReallyArePausing, canGameReallyBePaused);
     }
 
-    private void continueAttack(final boolean down) {
+    private void continueAttack(boolean down) {
+        if (com.mentalfrostbyte.jello.module.impl.render.Freecam.blocksInteractions()) {
+            down = false;
+        }
         if (!down) {
             this.missTime = 0;
         }
@@ -3429,6 +3432,15 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
         if (cameraEntity != null) {
             if (this.level != null && this.player != null) {
                 Profiler.get().push("pick");
+                // Sigma hook: update crosshair picking from the detached Freecam viewpoint for block outlines and inspection.
+                com.mentalfrostbyte.jello.module.impl.render.Freecam freecam =
+                    com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.render.Freecam.class);
+                if (freecam != null && freecam.capturesInput()) {
+                    this.hitResult = freecam.raycast(this, partialTicks);
+                    this.crosshairPickEntity = this.hitResult instanceof EntityHitResult entityHitResult ? entityHitResult.getEntity() : null;
+                    Profiler.get().pop();
+                    return;
+                }
                 // MODIFIED for porting: was VFP bedrock/reach_around_raycast MixinMinecraft
                 // #bedrockReachAroundRaycast (@ModifyExpressionValue on the LocalPlayer#raycastHitResult call).
                 // The wrapped value has to feed crosshairPickEntity below as well, hence the wrap here.

@@ -7,6 +7,7 @@ import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.event.impl.game.render.EventRender2D;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
+import com.mentalfrostbyte.jello.event.impl.game.EventTick;
 import com.mentalfrostbyte.jello.event.impl.player.EventLivingUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
@@ -209,9 +210,12 @@ public class BlockFlyTellyMode extends BlockFlyMode {
     boolean placingViaModule = false;
     boolean manualC08InWindow = false;
 
+    private record DeferredTellyPlacement(Object[] candidate, net.minecraft.world.phys.Vec3 eyes, Rotations.Rotation rotation) { }
+
     private GuiGraphicsExtractor graphics;
     private net.minecraft.world.phys.Vec3 placementEyes;
     private Object[] pendingPlacement;
+    private DeferredTellyPlacement deferredTellyPlacement;
     private Rotations.Rotation sentRotation;
     private boolean placementPhase;
     private BlockFlyPlacement.Target placingTarget;
@@ -256,6 +260,36 @@ public class BlockFlyTellyMode extends BlockFlyMode {
 
     private static String normalize(String value) {
         return value == null ? "" : value.toLowerCase().replace("-", "").replace("_", "").replace(" ", "");
+    }
+
+    @Override
+    public boolean hasDeferredWork() {
+        return deferredTellyPlacement != null;
+    }
+
+    @Override
+    public void tick(EventTick event) {
+        if (!event.isPre()) return;
+        DeferredTellyPlacement deferred = deferredTellyPlacement;
+        deferredTellyPlacement = null;
+        if (deferred == null || !running || mc.player == null || mc.level == null || mc.gui.screen() != null
+                || mc.player.getEyePosition().distanceToSqr(deferred.eyes()) > 1.0E-4) {
+            return;
+        }
+        Entity player = getPlayer();
+        if (player == null) return;
+        syncPlacementTick(player);
+        placementEyes = deferred.eyes();
+        sentRotation = deferred.rotation();
+        placementPhase = true;
+        try {
+            attemptPlacement(player, deferred.candidate(), player.getHeldItem());
+        } finally {
+            placementPhase = false;
+            placementEyes = null;
+            c08CounterAtTickBoundary = totalC08Counter;
+            releaseExperimentalPlacementClaim();
+        }
     }
 
     @Override
@@ -305,7 +339,14 @@ public class BlockFlyTellyMode extends BlockFlyMode {
                 pendingPlacement = null;
                 Entity player = getPlayer();
                 if (!event.isCancelled() && running && player != null && candidate != null) {
-                    attemptPlacement(player, candidate, player.getHeldItem());
+                    if (ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2)) {
+                        // 1.21.2+ / 26.2 forbids sending block-place or slot packets after MovePlayer and before CLIENT_TICK_END.
+                        if (placementEyes != null && sentRotation != null) {
+                            deferredTellyPlacement = new DeferredTellyPlacement(candidate, placementEyes, sentRotation);
+                        }
+                    } else {
+                        attemptPlacement(player, candidate, player.getHeldItem());
+                    }
                 }
                 onPostMotion();
             } finally {
@@ -1231,6 +1272,7 @@ public class BlockFlyTellyMode extends BlockFlyMode {
         scriptedRotationPitch = 0.0f;
         parent.clearRotation();
         pendingPlacement = null;
+        deferredTellyPlacement = null;
         placementEyes = null;
         sentRotation = null;
         placementPhase = false;
@@ -1650,7 +1692,13 @@ public class BlockFlyTellyMode extends BlockFlyMode {
         if (mc.player != null && mc.player == slotPlayer && originalSlot >= 0
                 && mc.player.getInventory().getSelectedSlot() == ownedSlot) {
             mc.player.getInventory().setSelectedSlot(originalSlot);
-            if (mc.gameMode != null && mc.getConnection() != null) mc.gameMode.syncCarriedItem();
+            if (mc.gameMode != null && mc.getConnection() != null) {
+                if (mc.isInPreMovementTick()) {
+                    mc.gameMode.syncCarriedItem();
+                } else {
+                    mc.gameMode.markCarriedItemDirty();
+                }
+            }
         }
         slotPlayer = null;
         originalSlot = ownedSlot = -1;
@@ -1683,6 +1731,7 @@ public class BlockFlyTellyMode extends BlockFlyMode {
 
     void resetControllerState() {
         pendingPlacement = null;
+        deferredTellyPlacement = null;
         releaseExperimentalPlacementClaim();
         bridgeRemove("AutoPlacePlacing");
         currentClientTick = -2147483648;

@@ -248,6 +248,12 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
                     }
 
                     int wheel = wheelXY.y == 0 ? -wheelXY.x : wheelXY.y;
+                    // Sigma hook: Freecam adjusts its flight speed with the mouse wheel instead of cycling hotbar slots.
+                    com.mentalfrostbyte.jello.module.impl.render.Freecam freecam =
+                        com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.render.Freecam.class);
+                    if (freecam != null && freecam.onScroll(wheel)) {
+                        return;
+                    }
                     if (this.minecraft.player.isSpectator()) {
                         if (this.minecraft.gui.hud.getSpectatorGui().isMenuActive()) {
                             this.minecraft.gui.hud.getSpectatorGui().onMouseScrolled(-wheel);
@@ -462,6 +468,13 @@ public class MouseHandler implements com.viaversion.viafabricplus.injection.acce
         if (this.minecraft.player != null) {
             double yaw = this.minecraft.options.invertMouseX().get() ? -xo : xo;
             double pitch = this.minecraft.options.invertMouseY().get() ? -yo : yo;
+            // Sigma hook: rotate only the detached Freecam when piloting it, leaving the server player's look untouched.
+            com.mentalfrostbyte.jello.module.impl.render.Freecam freecam =
+                com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.render.Freecam.class);
+            if (freecam != null && freecam.capturesInput()) {
+                freecam.turn(yaw, pitch);
+                return;
+            }
             // Sigma hook: visible AimAssist uses the same per-frame camera path as physical mouse input.
             com.mentalfrostbyte.jello.module.impl.combat.AimAssist aimAssist =
                 com.mentalfrostbyte.jello.module.Modules.enabled(com.mentalfrostbyte.jello.module.impl.combat.AimAssist.class);

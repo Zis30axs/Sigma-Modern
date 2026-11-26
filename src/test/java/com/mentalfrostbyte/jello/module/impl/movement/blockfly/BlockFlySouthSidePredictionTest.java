@@ -1,7 +1,12 @@
 package com.mentalfrostbyte.jello.module.impl.movement.blockfly;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.mentalfrostbyte.jello.module.impl.movement.BlockFly;
+import com.mentalfrostbyte.jello.setting.BooleanSetting;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.phys.Vec3;
@@ -40,5 +45,36 @@ class BlockFlySouthSidePredictionTest {
         var straight = BlockFlySouthSideMode.predict(Vec3.ZERO, Vec3.ZERO, 0, 1, 0, false, 0);
         var diagonal = BlockFlySouthSideMode.predict(Vec3.ZERO, Vec3.ZERO, 1, 1, 0, false, 0);
         assertEquals(straight.nextEyes().horizontalDistance(), diagonal.nextEyes().horizontalDistance(), 1.0E-9);
+    }
+
+    @Test
+    void placementDeferralStartsAt1212ForClientTickEndCompliance() {
+        assertFalse(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_8));
+        assertFalse(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_20_5));
+        assertFalse(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_21));
+        assertTrue(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_21_2));
+        assertTrue(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_21_4));
+        assertTrue(BlockFlySouthSideMode.shouldDeferPlacementForTickEnd(ProtocolVersion.v1_21_11));
+    }
+
+    @Test
+    void abuseRotationIsRestrictedToVersionsWithPreUsePosRotPackets() {
+        assertFalse(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_8));
+        assertTrue(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_17));
+        assertTrue(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_20_5));
+        assertFalse(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_21));
+        assertFalse(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_21_4));
+        assertFalse(BlockFlySouthSideMode.shouldRunAbuseRotation(ProtocolVersion.v1_21_11));
+    }
+
+    @Test
+    void southSideBlinkHoldAndAbuseRotationDefaultSafelyAndLegacySettingRemoved() {
+        BlockFly module = new BlockFly();
+        BooleanSetting blinkHold = (BooleanSetting) module.setting("SouthSide Blink Hold").orElseThrow();
+        BooleanSetting abuseRotation = (BooleanSetting) module.setting("SouthSide Abuse Rotation").orElseThrow();
+
+        assertFalse(blinkHold.get());
+        assertFalse(abuseRotation.get());
+        assertTrue(module.setting("SouthSide Block Fly").isEmpty());
     }
 }

@@ -347,6 +347,7 @@ import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import com.mentalfrostbyte.jello.module.impl.movement.NoSlow;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -1608,6 +1609,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleMountScreenOpen(final ClientboundMountScreenOpenPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // Sigma hook: GrimTest container NoSlow suppresses window open while actively using an item.
+        if (NoSlow.onOpenScreen(this.minecraft, packet.getContainerId())) {
+            return;
+        }
         Entity entity = this.level.getEntity(packet.getEntityId());
         LocalPlayer player = this.minecraft.player;
         int inventoryColumns = packet.getInventoryColumns();
@@ -1626,6 +1631,10 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     @Override
     public void handleOpenScreen(final ClientboundOpenScreenPacket packet) {
         PacketUtils.ensureRunningOnSameThread(packet, this, this.minecraft.packetProcessor());
+        // Sigma hook: GrimTest container NoSlow suppresses window open while actively using an item.
+        if (NoSlow.onOpenScreen(this.minecraft, packet.getContainerId())) {
+            return;
+        }
         MenuScreens.create(packet.getType(), this.minecraft, packet.getContainerId(), packet.getTitle());
     }
 

@@ -104,6 +104,32 @@ class BlockFlyPlacementTest {
     }
 
     @Test
+    void validDirectAcceptsHypixelDownwardAndUndersideAnchorsWithinReach() {
+        TinyWorld world = new TinyWorld();
+        world.set(BlockPos.ZERO, Blocks.STONE.defaultBlockState());
+        Vec3 eyes = new Vec3(0.8, 2.6, 0.5);
+        Rotation down = new Rotation(1.0F, 90.0F);
+        Target hypixelSide = new Target(new BlockPos(1, 0, 0),
+                new BlockHitResult(new Vec3(1.0, 0.5, 0.5), Direction.EAST, BlockPos.ZERO, false),
+                down, eyes, false);
+        assertTrue(BlockFlyPlacement.validDirect(world, eyes, hypixelSide, 4.5));
+
+        world.set(new BlockPos(0, 2, 0), Blocks.STONE.defaultBlockState());
+        Target underside = new Target(new BlockPos(0, 1, 0),
+                new BlockHitResult(new Vec3(0.5, 2.0, 0.5), Direction.DOWN, new BlockPos(0, 2, 0), false),
+                down, eyes, false);
+        assertTrue(BlockFlyPlacement.validDirect(world, eyes, underside, 4.5));
+
+        world.set(new BlockPos(1, 0, 0), Blocks.STONE.defaultBlockState());
+        assertFalse(BlockFlyPlacement.validDirect(world, eyes, hypixelSide, 4.5));
+
+        Target emptyAnchor = new Target(new BlockPos(2, 0, 0),
+                new BlockHitResult(new Vec3(2.0, 0.5, 0.5), Direction.EAST, new BlockPos(1, 0, 0), false),
+                down, new Vec3(10.0, 2.6, 0.5), false);
+        assertFalse(BlockFlyPlacement.validDirect(world, new Vec3(10.0, 2.6, 0.5), emptyAnchor, 4.5));
+    }
+
+    @Test
     void nearbySearchIsBoundedAndOrdersNearestPositionsFirst() {
         List<BlockPos> positions = BlockFlyPlacement.positionsAround(new BlockPos(-5, 30, -7), 100);
         assertEquals(new BlockPos(-5, 30, -7), positions.getFirst());

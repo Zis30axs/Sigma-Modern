@@ -46,6 +46,7 @@ public abstract class BlockFlyMode implements MinecraftInstance {
     public void keyPress(final EventKeyPress event) { }
     public void worldLoad(final EventLoadWorld event) { }
     public boolean usesSharedMovement() { return false; }
+    public boolean hasDeferredWork() { return false; }
     public ItemStack renderedItem(final InteractionHand hand, final ItemStack original) { return original; }
     public com.mentalfrostbyte.jello.util.math.Rotations.Rotation cameraRotation() { return null; }
 }

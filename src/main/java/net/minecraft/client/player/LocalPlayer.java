@@ -18,6 +18,7 @@ import com.mentalfrostbyte.jello.event.impl.player.EventUpdate;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMotion;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventMovementInput;
 import com.mentalfrostbyte.jello.event.impl.player.movement.EventSafeWalk;
+import com.mentalfrostbyte.jello.module.impl.movement.NoSlow;
 import com.mentalfrostbyte.jello.util.math.ReportedRotations;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -750,6 +751,8 @@ public class LocalPlayer extends AbstractClientPlayer
             super.startUsingItem(hand);
             this.startedUsingItem = true;
             this.usingItemHand = hand;
+            // Sigma hook: start each item-use session with clean NoSlow state.
+            NoSlow.onItemUseBoundary(this);
         }
     }
 
@@ -759,7 +762,10 @@ public class LocalPlayer extends AbstractClientPlayer
     }
 
     private boolean isSlowDueToUsingItem() {
-        return this.isUsingItem() && !this.useItem.getOrDefault(DataComponents.USE_EFFECTS, UseEffects.DEFAULT).canSprint();
+        // Sigma hook: NoSlow lets sprinting continue on un-slowed ticks.
+        return this.isUsingItem()
+            && !NoSlow.allowSprintWhileUsing(this)
+            && !this.useItem.getOrDefault(DataComponents.USE_EFFECTS, UseEffects.DEFAULT).canSprint();
     }
 
     private float itemUseSpeedMultiplier() {
@@ -770,6 +776,8 @@ public class LocalPlayer extends AbstractClientPlayer
     public void stopUsingItem() {
         super.stopUsingItem();
         this.startedUsingItem = false;
+        // Sigma hook: clear NoSlow state at the end of item use (including container bypass latches).
+        NoSlow.onItemUseBoundary(this);
     }
 
     @Override
@@ -783,6 +791,7 @@ public class LocalPlayer extends AbstractClientPlayer
         if (DATA_LIVING_ENTITY_FLAGS.equals(accessor)) {
             boolean serverUsingItem = (this.entityData.get(DATA_LIVING_ENTITY_FLAGS) & 1) > 0;
             InteractionHand serverUsingHand = (this.entityData.get(DATA_LIVING_ENTITY_FLAGS) & 2) > 0 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+            NoSlow.onServerUsingItemData(this, serverUsingItem);
             if (serverUsingItem && !this.startedUsingItem) {
                 this.startUsingItem(serverUsingHand);
             } else if (!serverUsingItem && this.startedUsingItem) {
@@ -916,7 +925,8 @@ public class LocalPlayer extends AbstractClientPlayer
         // (@Redirect on the first Vec2#scale in modifyInput). <= 1.21.4 had no 0.98 input scale.
         Vec2 newInput = ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? input : input.scale(0.98F);
         if (this.isUsingItem() && !this.isPassenger()) {
-            newInput = newInput.scale(this.itemUseSpeedMultiplier());
+            // Sigma hook: NoSlow scales or bypasses item-use slowdown per tick.
+            newInput = NoSlow.scaleItemUseInput(this, newInput, this.itemUseSpeedMultiplier());
         }
 
         // MODIFIED for porting: was VFP movement/slowdown MixinLocalPlayer#changeSneakSlowdownCondition
@@ -1274,7 +1284,7 @@ public class LocalPlayer extends AbstractClientPlayer
                 || this.isMobilityRestricted()
                 || this.isMovingSlowly()
                 || this.isPassenger() && !ridingCamel
-                || this.isUsingItem() && !this.isPassenger() && !this.isUnderWater();
+                || this.isUsingItem() && !NoSlow.allowSprintWhileUsing(this) && !this.isPassenger() && !this.isUnderWater();
         } else if (vfpTarget.olderThanOrEqualTo(ProtocolVersion.v1_21_7)) {
             return this.isMobilityRestricted()
                 || this.isPassenger() && !this.vehicleCanSprint(this.getVehicle())
@@ -1589,7 +1599,7 @@ public class LocalPlayer extends AbstractClientPlayer
             return !this.isSprinting()
                 && (version.olderThanOrEqualTo(ProtocolVersion.v1_21_4) ? this.vfpIsWalking1_21_4() : this.input.hasForwardImpulse())
                 && this.vfpHasEnoughFoodToSprint1_19_1()
-                && !this.isUsingItem()
+                && (!this.isUsingItem() || NoSlow.allowSprintWhileUsing(this))
                 && !this.isMobilityRestricted()
                 && (!(version.newerThan(ProtocolVersion.v1_19_3) && this.isPassenger()) || this.vehicleCanSprint(this.getVehicle()))
                 && (!(version.newerThan(ProtocolVersion.v1_19_3) && this.isFallFlying()) || this.isUnderWater())
