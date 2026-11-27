@@ -2,6 +2,7 @@ package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
 import com.mentalfrostbyte.jello.lang.ClientLanguage;
 import com.mentalfrostbyte.jello.lang.Translations;
@@ -19,6 +20,7 @@ import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
 import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -27,6 +29,7 @@ import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -44,6 +47,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     // Public so GuiScreenInteractionSmoke (a different package) can compute click targets from the exact
     // same numbers this screen lays out with, instead of duplicating magic constants that could drift.
     public static final int HEADER_H = 44;
+    public static final int FILTER_H = 26;
     public static final int SECTION_H = 24;
     public static final int SEARCH_FIELD_H = 40;
     public static final int ROW_H = 40;
@@ -52,7 +56,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     public static final int SIDEBAR_W = 128;
     public static final int SIDEBAR_GAP = 12;
     public static final int SIDEBAR_ITEM_H = 30;
-    private static final int SIDEBAR_ITEM_MIN_H = 20;
+    private static final int SIDEBAR_ITEM_MIN_H = 16;
     private static final float COMPASS_PX_PER_DEG = 2.4F;
 
     private enum View { CATEGORY, DETAIL, SEARCH, LANGUAGE }
@@ -62,7 +66,15 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private final java.util.Map<Object, Float> anim = new java.util.HashMap<>();
 
     private View view = View.CATEGORY;
-    private ModuleCategory activeCategory = ModuleCategory.values()[0];
+    // null is the All categories row.
+    private @Nullable ModuleCategory activeCategory;
+    private ModuleStyleFilter style = ModuleStyleFilter.MODERN;
+    private int sidebarScroll;
+    private List<Module> matches = List.of();
+    private final EnumMap<ModuleCategory, List<Module>> matchesByCategory = new EnumMap<>(ModuleCategory.class);
+    private ModuleStyleFilter matchedStyle;
+    private ClientLanguage matchedLanguage;
+    private String matchedQuery = "";
     private Module detailModule;
     // The choice whose dropdown grid is open, over the detail view; null when none is.
     private EnumSetting<?> popover;
@@ -81,7 +93,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private final ModernMusicDrawer music = new ModernMusicDrawer(282);
 
     private record Hit(int x, int y, int w, int h, Object key, Module module, Setting<?> setting) {}
-    private record SidebarHit(int x, int y, int w, int h, ModuleCategory category) {}
+    private record SidebarHit(int x, int y, int w, int h, @Nullable ModuleCategory category) {}
 
     public ModernClickGuiScreen(ModuleManager modules) {
         super(Component.literal("SigmaModern"));
@@ -125,21 +137,26 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     /** Extra header space below the title row, before the row list: the section heading. */
     private int subheaderHeight() {
         return switch (this.view) {
-            case CATEGORY, LANGUAGE -> SECTION_H;
-            case SEARCH, DETAIL -> 0;
+            case CATEGORY, SEARCH -> FILTER_H + SECTION_H;
+            case LANGUAGE -> SECTION_H;
+            case DETAIL -> 0;
         };
     }
 
-    /** Row content sits right of the sidebar in CATEGORY view; DETAIL/SEARCH use the full content width. */
+    private boolean browsing() {
+        return this.view == View.CATEGORY || this.view == View.SEARCH;
+    }
+
+    /** Module rows share the sidebar while browsing or searching. */
     private int rowContentX() {
         int x = panelX() + PAD;
-        if (this.view == View.CATEGORY) x += SIDEBAR_W + SIDEBAR_GAP;
+        if (browsing()) x += SIDEBAR_W + SIDEBAR_GAP;
         return x;
     }
 
     private int rowContentW() {
         int w = panelWidth() - PAD * 2;
-        if (this.view == View.CATEGORY) w -= SIDEBAR_W + SIDEBAR_GAP;
+        if (browsing()) w -= SIDEBAR_W + SIDEBAR_GAP;
         return w;
     }
 
@@ -148,18 +165,21 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
      * the window allows - otherwise the last categories would be clipped off, and unclickable, on short windows.
      */
     public int sidebarItemHeight() {
-        int available = maxPanelHeight() - HEADER_H - FOOTER_H - 4;
-        return Math.max(SIDEBAR_ITEM_MIN_H, Math.min(SIDEBAR_ITEM_H, available / ModuleCategory.values().length));
+        int available = maxPanelHeight() - HEADER_H - FILTER_H - FOOTER_H - 4;
+        return Math.max(SIDEBAR_ITEM_MIN_H, Math.min(SIDEBAR_ITEM_H, available / (1 + ModuleCategory.values().length)));
     }
 
-    private int sidebarHeight() { return ModuleCategory.values().length * sidebarItemHeight(); }
+    private int sidebarHeight() { return (1 + ModuleCategory.values().length) * sidebarItemHeight(); }
 
     private List<SidebarHit> sidebarItems() {
         List<SidebarHit> out = new ArrayList<>();
         ModuleCategory[] categories = ModuleCategory.values();
-        int x = panelX() + PAD, y = panelY() + HEADER_H, itemH = sidebarItemHeight();
+        int maxScroll = Math.max(0, sidebarHeight() - (maxPanelHeight() - HEADER_H - FILTER_H - FOOTER_H));
+        this.sidebarScroll = Math.clamp(this.sidebarScroll, 0, maxScroll);
+        int x = panelX() + PAD, y = panelY() + HEADER_H + FILTER_H - this.sidebarScroll, itemH = sidebarItemHeight();
+        out.add(new SidebarHit(x, y, SIDEBAR_W, itemH, null));
         for (int i = 0; i < categories.length; i++) {
-            out.add(new SidebarHit(x, y + i * itemH, SIDEBAR_W, itemH, categories[i]));
+            out.add(new SidebarHit(x, y + (i + 1) * itemH, SIDEBAR_W, itemH, categories[i]));
         }
         return out;
     }
@@ -190,7 +210,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 y += ROW_H;
             }
         } else {
-            List<Module> pool = this.view == View.SEARCH ? filteredModules() : this.modules.byCategory(this.activeCategory);
+            List<Module> pool = filteredModules(this.activeCategory);
             if (pool.isEmpty()) {
                 hits.add(new Hit(contentX, y, contentW, 30, "empty", null, null));
                 y += 30;
@@ -207,14 +227,63 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         return hits;
     }
 
-    private List<Module> filteredModules() {
-        String q = this.search.trim().toLowerCase(Locale.ROOT);
-        List<Module> out = new ArrayList<>();
-        for (Module m : this.modules.all()) {
-            if (q.isEmpty() || (m.getName().toLowerCase(Locale.ROOT).contains(q) || ModernText.text(m.getName()).toLowerCase(Locale.ROOT).contains(q))
-                || ModernText.text(m.getDescription()).toLowerCase(Locale.ROOT).contains(q)) out.add(m);
+    /** Search canonical and translated labels once per filter change; module enabled states stay live. */
+    private List<Module> filteredModules(@Nullable ModuleCategory category) {
+        String query = this.search.strip().toLowerCase(Locale.ROOT);
+        ClientLanguage language = translations().selected();
+        if (this.matchedStyle != this.style || this.matchedLanguage != language || !this.matchedQuery.equals(query)) {
+            this.matches = this.style.select(this.modules.all(), null).stream()
+                    .filter(m -> query.isEmpty() || m.getName().toLowerCase(Locale.ROOT).contains(query)
+                            || ModernText.text(m.getName()).toLowerCase(Locale.ROOT).contains(query)
+                            || ModernText.text(m.getDescription()).toLowerCase(Locale.ROOT).contains(query))
+                    .toList();
+            this.matchesByCategory.clear();
+            for (Module module : this.matches) {
+                this.matchesByCategory.computeIfAbsent(module.getCategory(), ignored -> new ArrayList<>()).add(module);
+            }
+            this.matchedQuery = query;
+            this.matchedStyle = this.style;
+            this.matchedLanguage = language;
         }
-        return out;
+        return category == null ? this.matches : this.matchesByCategory.getOrDefault(category, List.of());
+    }
+
+    private static String categoryLabel(@Nullable ModuleCategory category) {
+        return category == null ? ModernText.tr("clickgui.category.all") : ModernText.category(category);
+    }
+
+    private static String styleLabel(ModuleStyleFilter style) {
+        return switch (style) {
+            case ALL -> ModernText.tr("clickgui.style.all");
+            case SHARED -> ModernText.tr("clickgui.style.shared");
+            case JELLO -> "Jello";
+            case CLASSIC -> "Classic";
+            case MODERN -> "Modern";
+        };
+    }
+
+    private Hit styleHit(ModuleStyleFilter choice) {
+        int left = panelX() + PAD, width = panelWidth() - 2 * PAD;
+        int labelWidth = Math.min(82, width / 6);
+        int i = choice.ordinal(), n = ModuleStyleFilter.values().length;
+        int x = left + labelWidth + (width - labelWidth) * i / n;
+        int right = left + labelWidth + (width - labelWidth) * (i + 1) / n;
+        return new Hit(x, panelY() + HEADER_H + 2, right - x - 2, FILTER_H - 6, choice, null, null);
+    }
+
+    private void drawStyleFilter(GuiGraphicsExtractor g, int mx, int my) {
+        int left = panelX() + PAD;
+        ModernTypography.draw(g, ModernTypography.fit(ModernText.tr("clickgui.style.label"),
+                styleHit(ModuleStyleFilter.ALL).x() - left - 3), left, panelY() + HEADER_H + 8, ModernStyle.INK_MUTED, false);
+        for (ModuleStyleFilter choice : ModuleStyleFilter.values()) {
+            Hit h = styleHit(choice);
+            boolean selected = choice == this.style;
+            boolean hover = ModernStyle.inside(mx, my, h.x(), h.y(), h.w(), h.h());
+            ModernStyle.rounded(g, h.x(), h.y(), h.w(), h.h(), 5, selected ? 0x55BFE8FF : hover ? 0x251C394A : 0x141C394A);
+            String label = ModernTypography.fit(styleLabel(choice), h.w() - 4);
+            ModernTypography.draw(g, label, h.x() + (h.w() - ModernTypography.width(label)) / 2,
+                    h.y() + 6, selected ? ModernStyle.BLUE : ModernStyle.INK_MUTED, false);
+        }
     }
 
     private int visibleContentTop() {
@@ -246,7 +315,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         rows();
         // In CATEGORY view the panel must stay tall enough to show every sidebar entry, even if the
         // selected category itself has few (or zero) modules.
-        int neededContent = this.view == View.CATEGORY ? Math.max(this.contentHeight, sidebarHeight()) : this.contentHeight;
+        int neededContent = browsing() ? Math.max(this.contentHeight, sidebarHeight() - SECTION_H) : this.contentHeight;
         int viewport = maxPanelHeight() - HEADER_H - subheaderHeight() - FOOTER_H;
         return Math.min(maxPanelHeight(),
             HEADER_H + subheaderHeight() + Math.min(neededContent, Math.max(viewport, ROW_H)) + FOOTER_H);
@@ -293,14 +362,20 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             int chromeTop = panelY + HEADER_H;
             int contentBottom = panelY + panelH - FOOTER_H;
             g.enableScissor(panelX + 4, chromeTop, panelX + panelW - 4, Math.max(chromeTop, contentBottom));
-            if (this.view == View.CATEGORY) drawSidebar(g, mx, my);
+            if (browsing()) {
+                drawStyleFilter(g, mx, my);
+                g.enableScissor(panelX + 4, chromeTop + FILTER_H, panelX + PAD + SIDEBAR_W + SIDEBAR_GAP,
+                        Math.max(chromeTop + FILTER_H, contentBottom));
+                drawSidebar(g, mx, my);
+                g.disableScissor();
+            }
             // Switching category or view cross-fades the content pane and nudges it up into place.
             float content = this.contentChangeStart == 0L ? 1F
                 : ModernStyle.easeOut((now - this.contentChangeStart) / 1_000_000_000F / 0.22F);
             g.pose().pushMatrix();
             try (var contentFade = ModernStyle.alphaScope(content)) {
                 g.pose().translate(0F, (1F - content) * 7F);
-                if (this.view == View.CATEGORY) drawSectionHeading(g);
+                if (browsing()) drawSectionHeading(g);
                 else if (this.view == View.LANGUAGE) drawLanguageHeading(g);
             } finally {
                 g.pose().popMatrix();
@@ -369,6 +444,22 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         return this.music.isTyping();
     }
 
+    /** Centres of the actual filter controls for the screen interaction smoke test. */
+    public int[] styleCenter(ModuleStyleFilter choice) {
+        Hit h = styleHit(choice);
+        return new int[] {h.x() + h.w() / 2, h.y() + h.h() / 2};
+    }
+
+    public int[] categoryCenter(@Nullable ModuleCategory category) {
+        int top = panelY() + HEADER_H + FILTER_H;
+        int index = category == null ? 0 : category.ordinal() + 1;
+        int height = sidebarItemHeight();
+        int viewport = targetPanelHeight() - HEADER_H - FILTER_H - FOOTER_H;
+        this.sidebarScroll = Math.clamp(this.sidebarScroll, Math.max(0, (index + 1) * height - viewport), index * height);
+        SidebarHit hit = sidebarItems().get(index);
+        return new int[] {hit.x() + hit.w() / 2, hit.y() + hit.h() / 2};
+    }
+
     /** Test seam for {@code GuiScreenInteractionSmoke}: a module's tile as {@code {x, y, w, h}}, or null when it isn't shown. */
     public int[] moduleBounds(Module module) {
         if (this.view != View.CATEGORY && this.view != View.SEARCH) return null;
@@ -394,7 +485,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     private void drawHeader(GuiGraphicsExtractor g, int x, int y, int w, int mx, int my) {
         if (this.view == View.DETAIL) {
-            ModernTypography.draw(g, "‹ " + ModernText.category(this.activeCategory), x + PAD, y + 16, ModernStyle.BLUE, false);
+            ModernTypography.draw(g, "‹ " + ModernText.category(this.detailModule.getCategory()), x + PAD, y + 16, ModernStyle.BLUE, false);
         } else {
             String label = ModernText.tr(switch (this.view) {
                 case SEARCH -> "clickgui.header.search";
@@ -449,7 +540,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     private void drawSidebar(GuiGraphicsExtractor g, int mx, int my) {
         List<SidebarHit> items = sidebarItems();
-        SidebarHit activeItem = items.get(this.activeCategory.ordinal());
+        SidebarHit activeItem = items.get(this.activeCategory == null ? 0 : this.activeCategory.ordinal() + 1);
         float pillY = animate("sidebar-pill-y", activeItem.y());
         int py = Math.round(pillY), ph = activeItem.h() - 4;
         // The active category reads as backlit ice - a soft glow, a faint tinted fill and a left accent
@@ -461,25 +552,28 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         for (SidebarHit s : items) {
             boolean active = s.category() == this.activeCategory;
             int color = active ? ModernStyle.INK : ModernStyle.INK_MUTED;
-            boolean anyEnabled = this.modules.byCategory(s.category()).stream().anyMatch(Module::isEnabled);
+            boolean anyEnabled = filteredModules(s.category()).stream().anyMatch(Module::isEnabled);
             // The category's icon, then its name.
-            ModernSvg.mask(g, ModernSvg.categoryIcon(s.category()), s.x() + 10, s.y() + (s.h() - 4 - 12) / 2F, 12, 12, color);
-            String name = ModernTypography.fit(ModernText.category(s.category()), s.w() - (anyEnabled ? 46 : 36));
+            int iconY = s.y() + (s.h() - 16) / 2;
+            if (s.category() == null) ModernIcons.draw(g, ModernIcons.Icon.LAYERS, s.x() + 10, iconY, 12, color);
+            else ModernSvg.mask(g, ModernSvg.categoryIcon(s.category()), s.x() + 10, iconY, 12, 12, color);
+            String name = ModernTypography.fit(categoryLabel(s.category()), s.w() - (anyEnabled ? 46 : 36));
             ModernTypography.draw(g, name, s.x() + 28, s.y() + (s.h() - 4 - 8) / 2, color, false);
             if (anyEnabled) ModernStyle.statusDot(g, s.x() + s.w() - 16, s.y() + (s.h() - 4) / 2 - 2, 5, ModernStyle.BLUE, true);
         }
         int dividerX = panelX() + PAD + SIDEBAR_W + SIDEBAR_GAP / 2;
-        ModernStyle.fill(g, dividerX, panelY() + HEADER_H, dividerX + 1, panelY() + HEADER_H + sidebarHeight(), 0x1EBFEEFF);
+        ModernStyle.fill(g, dividerX, panelY() + HEADER_H + FILTER_H, dividerX + 1, panelY() + HEADER_H + FILTER_H + sidebarHeight(), 0x1EBFEEFF);
     }
 
     private void drawSectionHeading(GuiGraphicsExtractor g) {
-        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + 4;
-        ModernTypography.draw(g, ModernStyle.spaced(ModernText.category(this.activeCategory).toUpperCase(Locale.ROOT)),
-            x, y, ModernStyle.INK_MUTED, false);
-        int enabledInCat = (int)this.modules.byCategory(this.activeCategory).stream().filter(Module::isEnabled).count();
-        int totalInCat = this.modules.byCategory(this.activeCategory).size();
-        String count = ModernText.tr("clickgui.section.enabled", enabledInCat, totalInCat);
-        ModernTypography.draw(g, count, x + w - ModernTypography.width(count), y, ModernStyle.INK_MUTED, false);
+        int x = rowContentX(), w = rowContentW(), y = panelY() + HEADER_H + FILTER_H + 4;
+        List<Module> shown = filteredModules(this.activeCategory);
+        long enabled = shown.stream().filter(Module::isEnabled).count();
+        String count = ModernText.tr("clickgui.section.enabled", enabled, shown.size());
+        int countX = x + w - ModernTypography.width(count);
+        String title = ModernStyle.spaced(categoryLabel(this.activeCategory).toUpperCase(Locale.ROOT));
+        ModernTypography.draw(g, ModernTypography.fit(title, Math.max(0, countX - x - 6)), x, y, ModernStyle.INK_MUTED, false);
+        ModernTypography.draw(g, count, countX, y, ModernStyle.INK_MUTED, false);
         ModernStyle.fill(g, x, y + 16, x + w, y + 17, 0x1EBFEEFF);
     }
 
@@ -586,6 +680,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         ModernTypography.draw(g, ModernTypography.fit(ModernText.text(m.getName()), right - x - 15), x + 11, y + 9, nameColor, false);
         boolean binding = this.interactions.isBinding(m);
         String state = binding ? ModernText.tr("clickgui.detail.binding") : tileState(m);
+        ModuleStyleFilter owner = ModuleStyleFilter.styleOf(m);
+        if (!binding && owner != ModuleStyleFilter.SHARED) state = styleLabel(owner) + " · " + state;
         ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.wrap(ModernTypography.Face.TEXT, state, 0.82F, w - 22, 1).getFirst(),
             x + 11, y + 25, 0.82F, binding ? ModernStyle.mix(ModernStyle.BLUE, 0xFFFFFFFF, on) : ModernStyle.mix(ModernStyle.INK_MUTED, 0xCCEAF6FF, on));
     }
@@ -857,7 +953,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             }
             return;
         }
-        int enabled = (int)this.modules.all().stream().filter(Module::isEnabled).count();
+        long enabled = filteredModules(this.activeCategory).stream().filter(Module::isEnabled).count();
         ModernStyle.statusDot(g, panelX + PAD, y + 9, 6, ModernStyle.BLUE, true);
         ModernTypography.draw(g, ModernText.tr("clickgui.footer.enabled", enabled), panelX + PAD + 12, y + 6, ModernStyle.INK_MUTED, false);
         if (panelW < 420) return;
@@ -983,7 +1079,18 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         }
         int chromeTop = panelY() + HEADER_H;
         int contentBottom = panelY() + targetPanelHeight() - FOOTER_H;
-        if (this.view == View.CATEGORY && e.y() >= chromeTop && e.y() < contentBottom) {
+        if (browsing() && e.y() >= chromeTop && e.y() < chromeTop + FILTER_H) {
+            for (ModuleStyleFilter choice : ModuleStyleFilter.values()) {
+                Hit h = styleHit(choice);
+                if (e.button() == 0 && ModernStyle.inside(e.x(), e.y(), h.x(), h.y(), h.w(), h.h())) {
+                    this.style = choice;
+                    this.scroll = 0;
+                    markContentChanged();
+                    return true;
+                }
+            }
+        }
+        if (browsing() && e.y() >= chromeTop + FILTER_H && e.y() < contentBottom) {
             for (SidebarHit s : sidebarItems()) {
                 if (ModernStyle.inside(e.x(), e.y(), s.x(), s.y(), s.w(), s.h())) {
                     if (s.category() != this.activeCategory) { this.activeCategory = s.category(); this.scroll = 0; markContentChanged(); }
@@ -1131,9 +1238,9 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     }
 
     private void closeSearchOrDetail() {
-        this.search = "";
+        if (this.view == View.SEARCH) this.search = "";
         this.searchFocused = false;
-        this.view = View.CATEGORY;
+        this.view = this.search.isEmpty() ? View.CATEGORY : View.SEARCH;
         this.scroll = 0;
         markContentChanged();
     }
@@ -1147,6 +1254,11 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     @Override public boolean mouseScrolled(double x, double y, double sx, double sy) {
         placeMusic();
         if (this.music.mouseScrolled(x, y, sy)) return true;
+        if (browsing() && ModernStyle.inside(x, y, panelX() + PAD, panelY() + HEADER_H + FILTER_H,
+                SIDEBAR_W, targetPanelHeight() - HEADER_H - FILTER_H - FOOTER_H)) {
+            this.sidebarScroll -= (int)(sy * sidebarItemHeight());
+            return true;
+        }
         if (this.popover != null || stepControlUnder(x, y, sy)) return true;
         int targetHeight = targetPanelHeight();
         int viewport = targetHeight - HEADER_H - subheaderHeight() - FOOTER_H;

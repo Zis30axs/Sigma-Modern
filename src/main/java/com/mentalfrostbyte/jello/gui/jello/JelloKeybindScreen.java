@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyScroll;
@@ -358,6 +359,7 @@ public final class JelloKeybindScreen extends Screen implements ModernBlurredBac
         List<Module> starts = new ArrayList<>();
         List<Module> contains = new ArrayList<>();
         for (Module module : Client.getInstance().getModuleManager().all()) {
+            if (!ModuleStyleFilter.JELLO.includes(module)) continue;
             String name = module.getName().toLowerCase(Locale.ROOT);
             if (query.isEmpty() || name.startsWith(query)) {
                 starts.add(module);

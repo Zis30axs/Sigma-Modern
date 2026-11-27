@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.modern;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.gui.ModuleArrayList;
@@ -77,7 +78,7 @@ final class ModernArrayList {
 
         float scale = list.getFontSize() / ModernFontRenderer.SIZE;
         int rowH = Math.round(ModernFontRenderer.SIZE * scale) + list.getSpacing();
-        List<Module> listed = list.listed(Client.getInstance().getModuleManager().all(),
+        List<Module> listed = list.listed(ModuleStyleFilter.MODERN.select(Client.getInstance().getModuleManager().all(), null),
             module -> ModernTypography.width(label(module.getName(), list.suffixOf(module))));
 
         for (Row row : ROWS.values()) row.listed = false;

@@ -1,5 +1,6 @@
 package com.mentalfrostbyte.jello.gui.legacy.hud;
 
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
 import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
@@ -24,7 +25,7 @@ final class JelloTabGui {
     /** Jello's categories, in its order: no Exploit and no Interface. */
     static final TabGui.Layout LAYOUT = new TabGui.Layout(List.of(
             ModuleCategory.MOVEMENT, ModuleCategory.PLAYER, ModuleCategory.COMBAT, ModuleCategory.ITEM,
-            ModuleCategory.RENDER, ModuleCategory.WORLD, ModuleCategory.MISC), false);
+            ModuleCategory.RENDER, ModuleCategory.WORLD, ModuleCategory.MISC), false, ModuleStyleFilter.JELLO);
 
     private static final int X = 10;
     private static final int WIDTH = 150;
@@ -61,9 +62,7 @@ final class JelloTabGui {
      * keys move it: not while a screen has them.
      */
     static int render(final LegacyCanvas c, final TabGui tab, final int top, final float dt, final boolean interactive) {
-        if (interactive) {
-            tab.markShown(LAYOUT);
-        }
+        tab.showLayout(LAYOUT, interactive);
         List<ModuleCategory> categories = tab.categories();
         if (categories.isEmpty()) {
             return top;
