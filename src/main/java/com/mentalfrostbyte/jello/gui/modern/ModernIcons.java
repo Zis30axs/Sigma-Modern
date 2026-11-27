@@ -30,7 +30,8 @@ final class ModernIcons {
         BACK, PLAY, PLUS, EDIT, TRASH, REFRESH, ENTER, SEARCH, CHEVRON_UP, CHEVRON_DOWN, DUPLICATE, CHECK,
         MOUNTAIN, SERVER, WARNING, LOCK, LAN, BRANCH,
         MONITOR, SPEAKER, KEYBOARD, GLOBE, CHAT, LAYERS, ACCESSIBILITY, SHIRT, CLOUD, CHART, HEART, EYE,
-        PAUSE, SKIP_PREV, SKIP_NEXT, NOTE
+        PAUSE, SKIP_PREV, SKIP_NEXT, NOTE,
+        PETAL, SPARKLE
     }
 
     private static final int[] BUCKETS = {8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96, 128, 160, 192, 256, 384, 512};
@@ -132,6 +133,31 @@ final class ModernIcons {
                         c.restore();
                     }
                     c.drawCircle(32, 32, 4.2F, core);
+                }
+            }
+            case PETAL -> {
+                // A cherry petal: a rounded teardrop with the little notch at its broad end.
+                try (Paint p = fill(0xFFFFFFFF);
+                     PathBuilder b = new PathBuilder().moveTo(32, 60)
+                         .cubicTo(12, 46, 8, 20, 22, 8).lineTo(32, 15).lineTo(42, 8)
+                         .cubicTo(56, 20, 52, 46, 32, 60).closePath();
+                     Path path = b.detach();
+                     // Icons are white coverage masks tinted at blit time: the vein thins the coverage instead.
+                     Paint vein = stroke(2.4F).setColor(0x59FFFFFF).setBlendMode(io.github.humbleui.skija.BlendMode.DST_OUT)) {
+                    c.drawPath(path, p);
+                    c.drawLine(32, 52, 32, 22, vein);
+                }
+            }
+            case SPARKLE -> {
+                // A four-point star with a soft glow behind it.
+                try (Shader shader = Shader.makeRadialGradient(32, 32, 22, new int[]{0x90FFFFFF, 0x00FFFFFF});
+                     Paint glow = new Paint().setAntiAlias(true).setShader(shader);
+                     Paint p = fill(0xFFFFFFFF);
+                     PathBuilder b = new PathBuilder().moveTo(32, 2).quadTo(35, 29, 62, 32).quadTo(35, 35, 32, 62)
+                         .quadTo(29, 35, 2, 32).quadTo(29, 29, 32, 2).closePath();
+                     Path path = b.detach()) {
+                    c.drawCircle(32, 32, 22, glow);
+                    c.drawPath(path, p);
                 }
             }
             case SIGMA -> paintSigma(c);

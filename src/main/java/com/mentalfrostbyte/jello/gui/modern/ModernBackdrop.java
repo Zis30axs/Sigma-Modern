@@ -45,7 +45,8 @@ final class ModernBackdrop {
             g.nextStratum();
         }
         g.blurBeforeThisStratum();
-        ModernStyle.fillGradient(g, 0, 0, width, height, world ? 0x66050F1A : 0x4D050F1A, world ? 0x99050F1A : 0x8C050F1A);
+        int ink = world ? 0x050F1A : ModernScene.shared().ink();
+        ModernStyle.fillGradient(g, 0, 0, width, height, (world ? 0x66000000 : 0x4D000000) | ink, (world ? 0x99000000 : 0x8C000000) | ink);
         this.snow.update(width, height, this.dt, 5F + this.parallaxX * 6F);
         this.snow.render(g, this.parallaxX * 6F, world ? 0.4F : 0.65F);
     }

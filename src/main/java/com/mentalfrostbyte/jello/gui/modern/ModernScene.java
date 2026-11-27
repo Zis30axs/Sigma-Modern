@@ -22,48 +22,159 @@ import org.jspecify.annotations.Nullable;
 /**
  * SigmaModern's flat-illustration backdrop: a gradient sky with stars, a moon and the odd shooting star,
  * two slowly drifting aurora ribbons, two low-poly mountain ranges (lit and shadowed faces, jagged snowcaps)
- * and a snowfield with pines - or, with {@code -Dsigma.scene=sunrise}, the same machinery repainted as a
- * golden sunrise: violet-to-orange sky, a low sun instead of the moon, dawn-cloud ribbons, warm ridges and
- * sunlit snow.
+ * and a snowfield with pines - or the same machinery repainted as one of the other
+ * {@link ModernSceneTheme themes}: a golden sunrise, a violet twilight under a crescent, a bright arctic day,
+ * a pink sakura evening with drifting petals, an alien nebula with glowing crystal ridges, or a blood moon
+ * with rising embers. The theme comes from {@link ModernSceneSettings} (the main menu's Scene button), with
+ * {@code -Dsigma.scene=<theme>} as a launch-time override.
  *
  * <p>Everything that isn't animated per-star is painted by Skia into textures once per window size - never
  * per frame - each a little wider than the screen so the layers can slide apart for mouse parallax.
  * Rasters are capped at 4096×2048 and simply upscaled past that. Painting takes the better part of a second
  * at large sizes, so it runs on a background thread: until a new size's layers are ready, the previous ones
  * are drawn zoomed to cover it, then the new set crossfades in (a maximize or restore used to freeze the
- * window while Windows stretched the last frame). Shared by every SigmaModern screen that
- * shows no world, so the main menu and ClickGUI never paint the same scene twice.</p>
+ * window while Windows stretched the last frame). A theme change goes through the same path: the new theme's
+ * layers paint off-thread and, once they land, the whole scene - sky, celestial body and layers together -
+ * crossfades from the old theme to the new one. Shared by every SigmaModern screen that shows no world, so
+ * the main menu and ClickGUI never paint the same scene twice.</p>
  */
 final class ModernScene {
     private static final ModernScene SHARED = new ModernScene();
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("Sigma/ModernScene");
 
+    /** What drifts in front of the scene; read by {@link ModernSnow}. */
+    enum Particles {
+        /** Soft flakes, roughly one in eight near ones a slowly spinning crystal. */
+        SNOW(1F, ModernIcons.Icon.CRYSTAL, 0.55F, 0.13F, 1F, false, 1F),
+        /** Slow, tumbling cherry petals - nearly every flake past the farthest few is a petal. */
+        PETALS(0.5F, ModernIcons.Icon.PETAL, 0.08F, 0.9F, 1.15F, false, 3.2F),
+        /** Small glowing sparks rising from below, flickering. */
+        EMBERS(-0.55F, null, 1F, 0F, 0.7F, true, 0F),
+        /** Barely falling motes, some of them four-point sparkles, twinkling. */
+        STARDUST(0.16F, ModernIcons.Icon.SPARKLE, 0.35F, 0.3F, 0.85F, true, 0.4F);
+
+        /** Fall speed multiplier; negative rises. */
+        final float fall;
+        /** The sprite some particles use instead of a soft dot, or null for dots only. */
+        final ModernIcons.@Nullable Icon shape;
+        /** Only particles at least this near (depth 0..1) can use {@link #shape}... */
+        final float shapeMinDepth;
+        /** ...and of those, this share does. */
+        final float shapeShare;
+        final float size;
+        final boolean twinkle;
+        final float spin;
+
+        Particles(float fall, ModernIcons.@Nullable Icon shape, float shapeMinDepth, float shapeShare, float size, boolean twinkle, float spin) {
+            this.fall = fall;
+            this.shape = shape;
+            this.shapeMinDepth = shapeMinDepth;
+            this.shapeShare = shapeShare;
+            this.size = size;
+            this.twinkle = twinkle;
+            this.spin = spin;
+        }
+    }
+
+    private enum Body { MOON, CRESCENT, SUN }
+
+    /** The moon or sun: where it sits (fractions of the screen), how big relative to the default, and its colors. */
+    private record Celestial(Body body, float x, float y, float scale, int disc, int haloOuter, int haloInner, int craterRgb) {}
+
     /**
-     * One full palette for a scene theme: sky, horizon glow, star strength, moon-vs-sun, the two mountain
-     * ranges (rock, rock shade, snow, snow shade each), the snowfield's two drift bands, and the two
-     * aurora/dawn-cloud ribbons.
+     * One full palette for a scene theme: sky, horizon glow, stars, the moon or sun, the two mountain ranges
+     * (rock, rock shade, snow, snow shade each), the field's two drift bands, the two aurora/cloud ribbons,
+     * the trees (lit, shade, trunk, snow), what drifts in front and in what color, the dark "ink" menus
+     * darken toward over this scene, and a seed that reshapes the ranges (0 keeps the original silhouettes).
      */
     private record Palette(int skyTop, int skyMid, int skyHorizon, int glowTop, int glowBottom,
-                           float starAlpha, boolean sun, float auroraOpacity,
+                           float starAlpha, int starRgb, Celestial celestial, float auroraOpacity,
                            int[] far, int[] mid, int snowTop1, int snowBottom1, int snowTop2, int snowBottom2,
-                           int[] auroraA, int[] auroraB) {}
+                           int[] auroraA, int[] auroraB, int[] trees, Particles particles, int particleRgb,
+                           int inkRgb, long shapeSeed) {}
+
+    private static final int[] PINES = {0xFF15384C, 0xFF0D2839, 0xFF0B2230, 0xFFDDEDF6};
     private static final Palette NIGHT = new Palette(
-            0xFF050F1A, 0xFF0C2438, 0xFF356A8F, 0x0086C8E8, 0x4486C8E8, 1F, false, 1F,
+            0xFF050F1A, 0xFF0C2438, 0xFF356A8F, 0x0086C8E8, 0x4486C8E8, 1F, 0xE8F4FF,
+            new Celestial(Body.MOON, 0.86F, 0.31F, 1F, 0xFFEEF6FB, 0x2EBFE8FF, 0x40DDF2FF, 0x3B6A8C), 1F,
             new int[]{0xFF4E7D9D, 0xFF3F6C8B, 0xFFD2E6F3, 0xFFA9C7DB},
             new int[]{0xFF28506F, 0xFF1D4058, 0xFFE4F2FA, 0xFFB3D0E3},
             0xFFE9F4FA, 0xFFBBD4E4, 0xFFD9EAF4, 0xFFA7C4D8,
             new int[]{0x0060F0D0, 0xA860F0D0, 0xB070D8FF, 0x98A48CFF, 0x0060F0D0},
-            new int[]{0x0078C8FF, 0x7078C8FF, 0x8850F0C8, 0x0050F0C8});
+            new int[]{0x0078C8FF, 0x7078C8FF, 0x8850F0C8, 0x0050F0C8},
+            PINES, Particles.SNOW, 0xF2FAFF, 0x050F1A, 0L);
     private static final Palette SUNRISE = new Palette(
-            0xFF1B1440, 0xFF6B3A5E, 0xFFE8915A, 0x00FFB35C, 0x66FFB35C, 0.3F, true, 0.55F,
+            0xFF1B1440, 0xFF6B3A5E, 0xFFE8915A, 0x00FFB35C, 0x66FFB35C, 0.3F, 0xE8F4FF,
+            new Celestial(Body.SUN, 0.80F, 0.48F, 1F, 0xFFFFE9B0, 0x30FFD98A, 0x50FFC46E, 0), 0.55F,
             new int[]{0xFF8A6A8C, 0xFF77587A, 0xFFF5DCC8, 0xFFE8BFA8},
             new int[]{0xFF5E4266, 0xFF4C3454, 0xFFF2D7C2, 0xFFDDB894},
             0xFFF6E3D0, 0xFFE0BFA8, 0xFFEED9C0, 0xFFD0A890,
             new int[]{0x00FF9E6E, 0xA8FF9E6E, 0xB0FFB35C, 0x98FF8FB0, 0x00FF9E6E},
-            new int[]{0x00FFB35C, 0x70FFB35C, 0x88FF7E9E, 0x00FFB35C});
-    /** Picked once at startup: {@code -Dsigma.scene=sunrise} paints the sunrise, anything else the night. */
-    private static final Palette THEME =
-            "sunrise".equalsIgnoreCase(System.getProperty("sigma.scene", "night")) ? SUNRISE : NIGHT;
+            new int[]{0x00FFB35C, 0x70FFB35C, 0x88FF7E9E, 0x00FFB35C},
+            PINES, Particles.SNOW, 0xF2FAFF, 0x1B1440, 0L);
+    /** Violet-to-rose afterglow, a crescent moon, magenta ribbons and lilac snow. */
+    private static final Palette DUSK = new Palette(
+            0xFF120A2E, 0xFF46245E, 0xFFC2577A, 0x00FF7A8A, 0x55FF7A8A, 0.7F, 0xFFF0FA,
+            new Celestial(Body.CRESCENT, 0.84F, 0.27F, 1.1F, 0xFFFFF1E0, 0x30FFB0C8, 0x40FFD8E0, 0), 0.5F,
+            new int[]{0xFF5B3F78, 0xFF4A3266, 0xFFD9C3E8, 0xFFB79FD0},
+            new int[]{0xFF3A2752, 0xFF2C1D42, 0xFFE6D3EE, 0xFFBFA6D6},
+            0xFFEADCF2, 0xFFC3AED6, 0xFFDCC8EA, 0xFFAE93C6,
+            new int[]{0x00C86CFF, 0x90C86CFF, 0xA0FF7AB8, 0x806C7CFF, 0x00C86CFF},
+            new int[]{0x00FF9AAE, 0x60FF9AAE, 0x78A070FF, 0x00A070FF},
+            new int[]{0xFF2A1E44, 0xFF1E1534, 0xFF181028, 0xFFE3D5F0}, Particles.SNOW, 0xF6EEFF, 0x120A2E, 0x2D5CL);
+    /** Clear noon over the ice: blue sky, a high white sun, wisps of cloud, blinding snow and green pines. */
+    private static final Palette ARCTIC_DAY = new Palette(
+            0xFF2F7FC4, 0xFF6FB2E3, 0xFFCDE9F7, 0x00FFFFFF, 0x66FFFFFF, 0F, 0xFFFFFF,
+            new Celestial(Body.SUN, 0.84F, 0.17F, 0.9F, 0xFFFFFDF2, 0x40FFFFFF, 0x60FFF6D8, 0), 0.45F,
+            new int[]{0xFF8FB4CF, 0xFF7AA2BF, 0xFFF4FAFE, 0xFFD3E4F0},
+            new int[]{0xFF5E8AAD, 0xFF4B7698, 0xFFFFFFFF, 0xFFD6E6F2},
+            0xFFFFFFFF, 0xFFDCEBF5, 0xFFF7FBFE, 0xFFCFE2EF,
+            new int[]{0x00FFFFFF, 0x90FFFFFF, 0xA0F4FAFF, 0x80FFFFFF, 0x00FFFFFF},
+            new int[]{0x00FFFFFF, 0x60FFFFFF, 0x78EAF4FF, 0x00EAF4FF},
+            new int[]{0xFF2E5E4E, 0xFF214A3D, 0xFF3A2C22, 0xFFF4FAFE}, Particles.SNOW, 0xFFFFFF, 0x0B2A45, 0x0A1CL);
+    /** A spring evening: plum-to-pink sky, a low rosy sun, blossom trees on a petal-strewn meadow. */
+    private static final Palette SAKURA = new Palette(
+            0xFF2B1D4A, 0xFF8E5A8F, 0xFFF4B6C2, 0x00FFD1DC, 0x66FFD1DC, 0.25F, 0xFFF0F6,
+            new Celestial(Body.SUN, 0.82F, 0.42F, 1F, 0xFFFFE6EC, 0x38FFC0D0, 0x50FFD6E0, 0), 0.45F,
+            new int[]{0xFF9C7FA6, 0xFF866A92, 0xFFF6E6EE, 0xFFE2C8D8},
+            new int[]{0xFF6E5482, 0xFF5A4470, 0xFFF3DDE8, 0xFFD7BACB},
+            0xFFF7DCE6, 0xFFE3B9CB, 0xFFEFCFDC, 0xFFD49CB4,
+            new int[]{0x00FFB7D0, 0x90FFB7D0, 0xA0FFD0E0, 0x80E8A8FF, 0x00FFB7D0},
+            new int[]{0x00FFC8DC, 0x60FFC8DC, 0x78FFA8C8, 0x00FFA8C8},
+            new int[]{0xFFE89AB8, 0xFFC97A9A, 0xFF4A2E3A, 0xFFFFE4EE}, Particles.PETALS, 0xFFC6D8, 0x2A1530, 0x5A6BL);
+    /** Deep space: near-black violet sky, a pale moon, vivid nebula ribbons over dark ridges with glowing crystal caps. */
+    private static final Palette NEBULA = new Palette(
+            0xFF04030C, 0xFF140E33, 0xFF3A2470, 0x00B07CFF, 0x50B07CFF, 1F, 0xF0E8FF,
+            new Celestial(Body.MOON, 0.80F, 0.26F, 1.25F, 0xFFE9DEFF, 0x30B48CFF, 0x45D2BEFF, 0x6A4FB0), 1F,
+            new int[]{0xFF2A2350, 0xFF201A42, 0xFF8C7BD6, 0xFF6E5FB8},
+            new int[]{0xFF17122F, 0xFF100C24, 0xFFB59CFF, 0xFF8A73E0},
+            0xFF2A2152, 0xFF15102E, 0xFF1E1840, 0xFF0C0920,
+            new int[]{0x00FF5FD2, 0xA0FF5FD2, 0xB08A6CFF, 0x9850D8FF, 0x00FF5FD2},
+            new int[]{0x0050E0FF, 0x7050E0FF, 0x88B070FF, 0x00B070FF},
+            new int[]{0xFF3C2F78, 0xFF2A2058, 0xFF140F2A, 0xFFC8B6FF}, Particles.STARDUST, 0xDCCBFF, 0x05040F, 0x7B1DL);
+    /** A huge red moon over crimson ridges, dark pines and ash-pale snow, with embers rising. */
+    private static final Palette BLOOD_MOON = new Palette(
+            0xFF12040A, 0xFF3A0B19, 0xFF8A2A2E, 0x00FF5A4A, 0x55FF5A4A, 0.5F, 0xFFE4E0,
+            new Celestial(Body.MOON, 0.80F, 0.30F, 1.6F, 0xFFE0634A, 0x40FF3A2A, 0x58FF6A4A, 0x6A1A10), 0.4F,
+            new int[]{0xFF4A2030, 0xFF3B1826, 0xFFC9A3AA, 0xFFA87E88},
+            new int[]{0xFF2E1018, 0xFF220B12, 0xFFD7B3B8, 0xFFB08890},
+            0xFFD8BFC2, 0xFFA88A90, 0xFFC6A9AE, 0xFF93757C,
+            new int[]{0x00FF4A3A, 0x90FF4A3A, 0xA0FF7A4A, 0x80C02A50, 0x00FF4A3A},
+            new int[]{0x00FF6A4A, 0x60FF6A4A, 0x78D03A3A, 0x00D03A3A},
+            new int[]{0xFF2A0F17, 0xFF1C0910, 0xFF14060B, 0xFFD9BDC1}, Particles.EMBERS, 0xFFA060, 0x14040A, 0x0B1EL);
+
+    private static Palette palette(ModernSceneTheme theme) {
+        return switch (theme) {
+            case NIGHT -> NIGHT;
+            case SUNRISE -> SUNRISE;
+            case DUSK -> DUSK;
+            case ARCTIC_DAY -> ARCTIC_DAY;
+            case SAKURA -> SAKURA;
+            case NEBULA -> NEBULA;
+            case BLOOD_MOON -> BLOOD_MOON;
+        };
+    }
+
     private static final int FAR = 0, MID = 1, NEAR = 2, AURORA_A = 3, AURORA_B = 4;
     private static final int[] MARGIN = {6, 13, 24, 90, 90};
     // Painted below each layer's nominal bottom, so vertical mouse parallax (up to MARGIN / 4 = 6px for the
@@ -81,14 +192,16 @@ final class ModernScene {
     private volatile @Nullable Key failed;
     private Layer @Nullable [] previous;
     private int previousW, previousH;
+    private @Nullable ModernSceneTheme previousTheme;
     private long installedAt;
     private boolean firstInstall;
     private final float[] starX = new float[90], starY = new float[90], starPhase = new float[90], starSize = new float[90];
     private int builtW = -1, builtH = -1, builtScale = -1;
+    private @Nullable ModernSceneTheme builtTheme;
     private long serial;
 
     private record Layer(Identifier id, int top, int w, int h, int texW, int texH) {}
-    private record Key(int w, int h, int scale) {}
+    private record Key(int w, int h, int scale, ModernSceneTheme theme) {}
     /** A layer painted off-thread, waiting for its texture to be registered on the render thread. */
     private record Prepared(int index, String name, int top, int w, int h, int texW, int texH, NativeImage pixels) {}
     private record Built(Key key, Prepared[] layers) {}
@@ -107,6 +220,48 @@ final class ModernScene {
         return SHARED;
     }
 
+    /** The theme the user picked - what the scene is painting or about to crossfade to. */
+    private static ModernSceneTheme requested() {
+        return com.mentalfrostbyte.Client.getInstance().getModernSceneSettings().get();
+    }
+
+    /** The theme on screen right now: the installed layer set's, or - before anything is installed - the requested one. */
+    private Palette shown() {
+        return palette(this.builtTheme != null ? this.builtTheme : requested());
+    }
+
+    /** 0..1 progress of the crossfade from {@link #previousTheme}, or 1 when no theme change is fading. */
+    private float themeFade() {
+        if (this.previous == null || this.previousTheme == null || this.previousTheme == this.builtTheme) return 1F;
+        return Math.min(1F, (System.nanoTime() - this.installedAt) / 1_000_000_000F / 0.35F);
+    }
+
+    /** What should drift in front of the scene right now. */
+    Particles particles() {
+        return shown().particles();
+    }
+
+    /** The particles' color (RGB, no alpha), following the theme crossfade. */
+    int particleRgb() {
+        float t = themeFade();
+        int rgb = shown().particleRgb();
+        return t >= 1F ? rgb : ModernStyle.mix(0xFF000000 | palette(this.previousTheme).particleRgb(), 0xFF000000 | rgb, t) & 0xFFFFFF;
+    }
+
+    /** The dark color menus darken toward over this scene (RGB, no alpha), following the theme crossfade. */
+    int ink() {
+        float t = themeFade();
+        int rgb = shown().inkRgb();
+        return t >= 1F ? rgb : ModernStyle.mix(0xFF000000 | palette(this.previousTheme).inkRgb(), 0xFF000000 | rgb, t) & 0xFFFFFF;
+    }
+
+    /** Whether the near field is light (snow) rather than dark, so ink drawn on it should be dark. */
+    boolean groundIsLight() {
+        int c = shown().snowTop2();
+        float luminance = 0.2126F * (c >> 16 & 0xFF) + 0.7152F * (c >> 8 & 0xFF) + 0.0722F * (c & 0xFF);
+        return luminance > 128F;
+    }
+
     /**
      * @param parallaxX -1..1, from the mouse's horizontal position
      * @param parallaxY -1..1, from the mouse's vertical position
@@ -114,20 +269,37 @@ final class ModernScene {
      */
     void render(GuiGraphicsExtractor g, int w, int h, float parallaxX, float parallaxY, float time) {
         ensure(w, h);
+        Palette theme = shown();
+        float themeT = themeFade();
+        Palette from = themeT < 1F ? palette(this.previousTheme) : theme;
         int horizon = horizon(h);
-        ModernStyle.fillGradient(g, 0, 0, w, Math.round(horizon * 0.55F), THEME.skyTop(), THEME.skyMid());
-        ModernStyle.fillGradient(g, 0, Math.round(horizon * 0.55F), w, horizon + h / 12, THEME.skyMid(), THEME.skyHorizon());
-        ModernStyle.fill(g, 0, horizon + h / 12, w, h, THEME.skyHorizon());
+        int skyTop = ModernStyle.mix(from.skyTop(), theme.skyTop(), themeT);
+        int skyMid = ModernStyle.mix(from.skyMid(), theme.skyMid(), themeT);
+        int skyHorizon = ModernStyle.mix(from.skyHorizon(), theme.skyHorizon(), themeT);
+        ModernStyle.fillGradient(g, 0, 0, w, Math.round(horizon * 0.55F), skyTop, skyMid);
+        ModernStyle.fillGradient(g, 0, Math.round(horizon * 0.55F), w, horizon + h / 12, skyMid, skyHorizon);
+        ModernStyle.fill(g, 0, horizon + h / 12, w, h, skyHorizon);
 
-        for (int i = 0; i < this.starX.length; i++) {
-            float twinkle = 0.5F + 0.5F * (float)Math.sin(time * (0.8F + (i % 7) * 0.23F) + this.starPhase[i]);
-            float depthFade = 1F - this.starY[i] / 0.6F;
-            int alpha = Math.round(255 * (0.18F + 0.62F * twinkle * twinkle) * depthFade * THEME.starAlpha());
-            float sx = this.starX[i] * w - parallaxX * 2F, sy = this.starY[i] * h - parallaxY;
-            ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, sx, sy, this.starSize[i], alpha << 24 | 0xE8F4FF);
+        float starAlpha = from.starAlpha() + (theme.starAlpha() - from.starAlpha()) * themeT;
+        int starRgb = ModernStyle.mix(0xFF000000 | from.starRgb(), 0xFF000000 | theme.starRgb(), themeT) & 0xFFFFFF;
+        if (starAlpha > 0.001F) {
+            for (int i = 0; i < this.starX.length; i++) {
+                float twinkle = 0.5F + 0.5F * (float)Math.sin(time * (0.8F + (i % 7) * 0.23F) + this.starPhase[i]);
+                float depthFade = 1F - this.starY[i] / 0.6F;
+                int alpha = Math.round(255 * (0.18F + 0.62F * twinkle * twinkle) * depthFade * starAlpha);
+                float sx = this.starX[i] * w - parallaxX * 2F, sy = this.starY[i] * h - parallaxY;
+                ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, sx, sy, this.starSize[i], alpha << 24 | starRgb);
+            }
         }
-        if (!THEME.sun()) drawShootingStar(g, w, h, time);
-        if (THEME.sun()) drawSun(g, w, h, parallaxX, parallaxY); else drawMoon(g, w, h, parallaxX, parallaxY);
+        // The outgoing theme's moon or sun fades out while the incoming one fades in.
+        if (themeT < 1F) {
+            try (var out = ModernStyle.alphaScope(1F - themeT)) {
+                drawSky(g, from, w, h, parallaxX, parallaxY, time, horizon);
+            }
+        }
+        try (var in = ModernStyle.alphaScope(themeT)) {
+            drawSky(g, theme, w, h, parallaxX, parallaxY, time, horizon);
+        }
 
         // A new layer set fades in over the old one (or, the first time, over the bare sky); the old one is
         // released once it has faded out.
@@ -135,26 +307,36 @@ final class ModernScene {
         if (fade >= 1F && this.previous != null) {
             for (Layer layer : this.previous) if (layer != null) ModernSkiaRaster.release(layer.id());
             this.previous = null;
+            this.previousTheme = null;
         }
         float currentAlpha = this.previous == null && this.firstInstall ? fade : 1F;
 
         float drift = (float)Math.sin(time * 0.045F) * 70F;
-        float auroraA = (0.55F + 0.25F * (float)Math.sin(time * 0.31F)) * THEME.auroraOpacity(),
-              auroraB = (0.4F + 0.25F * (float)Math.sin(time * 0.23F + 1.7F)) * THEME.auroraOpacity();
-        drawLayer(g, AURORA_A, w, h, -MARGIN[AURORA_A] + drift, 0F, auroraA, currentAlpha, fade);
-        drawLayer(g, AURORA_B, w, h, -MARGIN[AURORA_B] - drift * 0.7F, 0F, auroraB, currentAlpha, fade);
+        float auroraA = 0.55F + 0.25F * (float)Math.sin(time * 0.31F),
+              auroraB = 0.4F + 0.25F * (float)Math.sin(time * 0.23F + 1.7F);
+        drawLayer(g, AURORA_A, w, h, -MARGIN[AURORA_A] + drift, 0F, auroraA * theme.auroraOpacity(), auroraA * from.auroraOpacity(), currentAlpha, fade);
+        drawLayer(g, AURORA_B, w, h, -MARGIN[AURORA_B] - drift * 0.7F, 0F, auroraB * theme.auroraOpacity(), auroraB * from.auroraOpacity(), currentAlpha, fade);
 
-        ModernStyle.fillGradient(g, 0, horizon - h / 5, w, horizon + h / 40, THEME.glowTop(), THEME.glowBottom());
+        ModernStyle.fillGradient(g, 0, horizon - h / 5, w, horizon + h / 40,
+            ModernStyle.mix(from.glowTop(), theme.glowTop(), themeT), ModernStyle.mix(from.glowBottom(), theme.glowBottom(), themeT));
         for (int layer = FAR; layer <= NEAR; layer++) {
             float m = MARGIN[layer];
-            drawLayer(g, layer, w, h, -m + parallaxX * m, parallaxY * m * 0.25F, 1F, currentAlpha, fade);
+            drawLayer(g, layer, w, h, -m + parallaxX * m, parallaxY * m * 0.25F, 1F, 1F, currentAlpha, fade);
         }
     }
 
+    /** One theme's moon or sun, and - at night - its shooting star. */
+    private void drawSky(GuiGraphicsExtractor g, Palette theme, int w, int h, float parallaxX, float parallaxY, float time, int horizon) {
+        Celestial body = theme.celestial();
+        if (body.body() != Body.SUN && theme.starAlpha() > 0.5F) drawShootingStar(g, w, h, time);
+        if (body.body() == Body.SUN) drawSun(g, body, w, h, parallaxX, parallaxY);
+        else drawMoon(g, theme, body, w, h, parallaxX, parallaxY, horizon);
+    }
+
     /** One layer from the current set, then - while it fades out - the same layer from the previous set on top. */
-    private void drawLayer(GuiGraphicsExtractor g, int index, int w, int h, float x, float y, float opacity, float currentAlpha, float fade) {
+    private void drawLayer(GuiGraphicsExtractor g, int index, int w, int h, float x, float y, float opacity, float previousOpacity, float currentAlpha, float fade) {
         drawFitted(g, this.layers[index], this.builtW, this.builtH, w, h, x, y, opacity * currentAlpha);
-        if (this.previous != null) drawFitted(g, this.previous[index], this.previousW, this.previousH, w, h, x, y, opacity * (1F - fade));
+        if (this.previous != null) drawFitted(g, this.previous[index], this.previousW, this.previousH, w, h, x, y, previousOpacity * (1F - fade));
     }
 
     /**
@@ -184,25 +366,33 @@ final class ModernScene {
         return Math.round(h * 0.62F);
     }
 
-    private void drawMoon(GuiGraphicsExtractor g, int w, int h, float parallaxX, float parallaxY) {
-        float r = Math.max(9F, Math.min(22F, h * 0.034F));
-        float cx = w * 0.86F - parallaxX * 3F, cy = h * 0.31F - parallaxY * 1.5F;
-        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 4.2F, cy - r * 4.2F, r * 8.4F, 0x2EBFE8FF);
-        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 1.9F, cy - r * 1.9F, r * 3.8F, 0x40DDF2FF);
+    private void drawMoon(GuiGraphicsExtractor g, Palette theme, Celestial body, int w, int h, float parallaxX, float parallaxY, int horizon) {
+        float r = Math.max(9F, Math.min(22F, h * 0.034F)) * body.scale();
+        float cx = w * body.x() - parallaxX * 3F, cy = h * body.y() - parallaxY * 1.5F;
+        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 4.2F, cy - r * 4.2F, r * 8.4F, body.haloOuter());
+        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 1.9F, cy - r * 1.9F, r * 3.8F, body.haloInner());
         int ir = Math.round(r);
-        ModernStyle.rounded(g, Math.round(cx) - ir, Math.round(cy) - ir, ir * 2, ir * 2, ir, 0xFFEEF6FB);
-        ModernStyle.rounded(g, Math.round(cx - r * 0.35F), Math.round(cy - r * 0.2F), Math.round(r * 0.42F), Math.round(r * 0.42F), Math.round(r * 0.21F), 0x1A3B6A8C);
-        ModernStyle.rounded(g, Math.round(cx + r * 0.18F), Math.round(cy + r * 0.25F), Math.round(r * 0.3F), Math.round(r * 0.3F), Math.round(r * 0.15F), 0x143B6A8C);
+        ModernStyle.rounded(g, Math.round(cx) - ir, Math.round(cy) - ir, ir * 2, ir * 2, ir, body.disc());
+        if (body.body() == Body.CRESCENT) {
+            // Bite the disc with a slightly smaller one in the sky's own color at that height.
+            float bx = cx + r * 0.42F, by = cy - r * 0.22F;
+            int br = Math.round(r * 0.9F);
+            float skyT = by / Math.max(1F, horizon * 0.55F);
+            ModernStyle.rounded(g, Math.round(bx) - br, Math.round(by) - br, br * 2, br * 2, br, ModernStyle.mix(theme.skyTop(), theme.skyMid(), skyT));
+            return;
+        }
+        ModernStyle.rounded(g, Math.round(cx - r * 0.35F), Math.round(cy - r * 0.2F), Math.round(r * 0.42F), Math.round(r * 0.42F), Math.round(r * 0.21F), 0x1A000000 | body.craterRgb());
+        ModernStyle.rounded(g, Math.round(cx + r * 0.18F), Math.round(cy + r * 0.25F), Math.round(r * 0.3F), Math.round(r * 0.3F), Math.round(r * 0.15F), 0x14000000 | body.craterRgb());
     }
 
-    /** The sunrise's low sun: a big warm disc with a soft halo, sitting just above the horizon. */
-    private void drawSun(GuiGraphicsExtractor g, int w, int h, float parallaxX, float parallaxY) {
-        float r = Math.max(14F, Math.min(38F, h * 0.055F));
-        float cx = w * 0.80F - parallaxX * 3F, cy = h * 0.48F - parallaxY * 1.5F;
-        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 4.2F, cy - r * 4.2F, r * 8.4F, 0x30FFD98A);
-        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 1.9F, cy - r * 1.9F, r * 3.8F, 0x50FFC46E);
+    /** A big warm disc with a soft halo: low over the horizon for the sunrise and sakura, high for the arctic day. */
+    private void drawSun(GuiGraphicsExtractor g, Celestial body, int w, int h, float parallaxX, float parallaxY) {
+        float r = Math.max(14F, Math.min(38F, h * 0.055F)) * body.scale();
+        float cx = w * body.x() - parallaxX * 3F, cy = h * body.y() - parallaxY * 1.5F;
+        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 4.2F, cy - r * 4.2F, r * 8.4F, body.haloOuter());
+        ModernIcons.draw(g, ModernIcons.Icon.SOFT_DOT, cx - r * 1.9F, cy - r * 1.9F, r * 3.8F, body.haloInner());
         int ir = Math.round(r);
-        ModernStyle.rounded(g, Math.round(cx) - ir, Math.round(cy) - ir, ir * 2, ir * 2, ir, 0xFFFFE9B0);
+        ModernStyle.rounded(g, Math.round(cx) - ir, Math.round(cy) - ir, ir * 2, ir * 2, ir, body.disc());
     }
 
     /** One streak every ~11s, crossing a random stretch of the upper sky in under a second. */
@@ -254,10 +444,11 @@ final class ModernScene {
                 LOGGER.error("SigmaModern scene painting failed", failure);
             }
         }
-        Key key = new Key(w, h, scale);
-        if (key.equals(new Key(this.builtW, this.builtH, this.builtScale)) || this.pending != null || key.equals(this.failed)) return;
-        // One build at a time: a size that changes again mid-build (dragging the window edge) is picked up when
-        // this one lands, so a drag never queues a painting per frame.
+        Key key = new Key(w, h, scale, requested());
+        boolean upToDate = this.builtTheme != null && key.equals(new Key(this.builtW, this.builtH, this.builtScale, this.builtTheme));
+        if (upToDate || this.pending != null || key.equals(this.failed)) return;
+        // One build at a time: a size (or theme) that changes again mid-build (dragging the window edge, clicking
+        // through themes) is picked up when this one lands, so a drag never queues a painting per frame.
         this.pending = CompletableFuture.supplyAsync(() -> build(key), PAINTER);
         this.pending.whenComplete((built, failure) -> {
             if (failure != null) this.failed = key;
@@ -271,6 +462,7 @@ final class ModernScene {
         this.previous = hadLayers ? this.layers.clone() : null;
         this.previousW = this.builtW;
         this.previousH = this.builtH;
+        this.previousTheme = hadLayers ? this.builtTheme : null;
         this.firstInstall = !hadLayers;
         this.installedAt = System.nanoTime();
         for (Prepared prepared : built.layers()) {
@@ -281,8 +473,9 @@ final class ModernScene {
         this.builtW = built.key().w();
         this.builtH = built.key().h();
         this.builtScale = built.key().scale();
+        this.builtTheme = built.key().theme();
         if (Boolean.getBoolean("sigma.debug.frameTiming")) {
-            LOGGER.info("Sigma debug: scene layers installed for {}x{} @{}", this.builtW, this.builtH, this.builtScale);
+            LOGGER.info("Sigma debug: scene layers installed for {}x{} @{} ({})", this.builtW, this.builtH, this.builtScale, this.builtTheme);
         }
     }
 
@@ -290,25 +483,27 @@ final class ModernScene {
     private static Built build(Key key) {
         long start = System.nanoTime();
         int w = key.w(), h = key.h(), scale = key.scale();
+        Palette theme = palette(key.theme());
+        long seed = theme.shapeSeed();
         int horizon = horizon(h);
         Prepared[] prepared = new Prepared[5];
         int farTop = horizon - Math.round(h * 0.33F);
         prepared[0] = paint(FAR, "far", farTop, w + MARGIN[FAR] * 2, h - farTop, scale, (c, lw, lh) ->
-            mountains(c, lw, lh, 0xF1A, 10, horizon - farTop + h * 0.05F, h * 0.02F, h * 0.17F,
-                THEME.far()[0], THEME.far()[1], THEME.far()[2], THEME.far()[3]));
+            mountains(c, lw, lh, 0xF1A ^ seed, 10, horizon - farTop + h * 0.05F, h * 0.02F, h * 0.17F,
+                theme.far()[0], theme.far()[1], theme.far()[2], theme.far()[3]));
         int midTop = horizon - Math.round(h * 0.25F);
         prepared[1] = paint(MID, "mid", midTop, w + MARGIN[MID] * 2, h - midTop, scale, (c, lw, lh) ->
-            mountains(c, lw, lh, 0x3D7, 6, horizon - midTop + h * 0.13F, h * 0.01F, h * 0.14F,
-                THEME.mid()[0], THEME.mid()[1], THEME.mid()[2], THEME.mid()[3]));
+            mountains(c, lw, lh, 0x3D7 ^ seed * 31, 6, horizon - midTop + h * 0.13F, h * 0.01F, h * 0.14F,
+                theme.mid()[0], theme.mid()[1], theme.mid()[2], theme.mid()[3]));
         prepared[2] = paint(NEAR, "near", horizon, w + MARGIN[NEAR] * 2, h - horizon, scale, (c, lw, lh) ->
-            snowfield(c, lw, lh, THEME.snowTop1(), THEME.snowBottom1(), THEME.snowTop2(), THEME.snowBottom2()));
+            snowfield(c, lw, lh, theme.snowTop1(), theme.snowBottom1(), theme.snowTop2(), theme.snowBottom2(), theme.trees(), 0x7EE5 ^ seed * 17));
         int auroraTop = Math.round(h * 0.02F), auroraH = Math.round(h * 0.42F);
         prepared[3] = paint(AURORA_A, "aurora_a", auroraTop, w + MARGIN[AURORA_A] * 2, auroraH, scale, (c, lw, lh) ->
-            aurora(c, lw, lh, 0.42F, 0.0042F, 1.3F, THEME.auroraA()));
+            aurora(c, lw, lh, 0.42F, 0.0042F, 1.3F, theme.auroraA()));
         prepared[4] = paint(AURORA_B, "aurora_b", auroraTop, w + MARGIN[AURORA_B] * 2, auroraH, scale, (c, lw, lh) ->
-            aurora(c, lw, lh, 0.62F, 0.0061F, 4.1F, THEME.auroraB()));
+            aurora(c, lw, lh, 0.62F, 0.0061F, 4.1F, theme.auroraB()));
         if (Boolean.getBoolean("sigma.debug.frameTiming")) {
-            LOGGER.info("Sigma debug: scene painted for {}x{} @{} in {} ms (off-thread)", w, h, scale, (System.nanoTime() - start) / 1_000_000);
+            LOGGER.info("Sigma debug: scene painted for {}x{} @{} ({}) in {} ms (off-thread)", w, h, scale, key.theme(), (System.nanoTime() - start) / 1_000_000);
         }
         return new Built(key, prepared);
     }
@@ -389,14 +584,14 @@ final class ModernScene {
         return lh * level + (float)Math.sin(x * 0.011F + phase) * lh * 0.05F + (float)Math.sin(x * 0.027F + phase * 2.3F) * lh * 0.025F;
     }
 
-    private static void snowfield(Canvas c, float lw, float lh, int bandTop1, int bandBottom1, int bandTop2, int bandBottom2) {
+    private static void snowfield(Canvas c, float lw, float lh, int bandTop1, int bandBottom1, int bandTop2, int bandBottom2, int[] trees, long seed) {
         fieldBand(c, lw, lh, 0.5F, 0.44F, bandTop1, bandBottom1);
-        Random r = new Random(0x7EE5);
+        Random r = new Random(seed);
         for (int i = 0; i < 26; i++) {
             float side = r.nextFloat();
             float x = side < 0.55F ? lw * (0.02F + r.nextFloat() * 0.26F) : lw * (0.70F + r.nextFloat() * 0.28F);
             float height = lh * (0.2F + r.nextFloat() * 0.26F);
-            pine(c, x, drift(x, lh, 0.5F, 0.44F) + lh * 0.02F, height);
+            pine(c, x, drift(x, lh, 0.5F, 0.44F) + lh * 0.02F, height, trees);
         }
         fieldBand(c, lw, lh, 2.1F, 0.72F, bandTop2, bandBottom2);
     }
@@ -419,18 +614,21 @@ final class ModernScene {
         }
     }
 
-    /** A three-tier flat pine: a lit left half, a shaded right half, and a snow sliver on each tier. */
-    private static void pine(Canvas c, float x, float groundY, float height) {
+    /**
+     * A three-tier flat pine: a lit left half, a shaded right half, and a snow sliver on each tier.
+     * {@code colors} is {lit, shade, trunk, snow}.
+     */
+    private static void pine(Canvas c, float x, float groundY, float height, int[] colors) {
         float width = height * 0.46F;
-        polygon(c, 0xFF0B2230, x - width * 0.05F, groundY, x + width * 0.05F, groundY, x + width * 0.05F, groundY - height * 0.16F, x - width * 0.05F, groundY - height * 0.16F);
+        polygon(c, colors[2], x - width * 0.05F, groundY, x + width * 0.05F, groundY, x + width * 0.05F, groundY - height * 0.16F, x - width * 0.05F, groundY - height * 0.16F);
         for (int tier = 0; tier < 3; tier++) {
             float tierBottom = groundY - height * (0.12F + tier * 0.27F);
             float tierTop = tierBottom - height * (0.5F - tier * 0.08F);
             float half = width * (0.5F - tier * 0.12F);
-            polygon(c, 0xFF15384C, x, tierTop, x - half, tierBottom, x, tierBottom);
-            polygon(c, 0xFF0D2839, x, tierTop, x, tierBottom, x + half, tierBottom);
+            polygon(c, colors[0], x, tierTop, x - half, tierBottom, x, tierBottom);
+            polygon(c, colors[1], x, tierTop, x, tierBottom, x + half, tierBottom);
             float sy = tierTop + (tierBottom - tierTop) * 0.28F;
-            polygon(c, 0xFFDDEDF6, x, tierTop, x - half * 0.3F, sy, x - half * 0.08F, sy - (sy - tierTop) * 0.2F, x + half * 0.12F, sy + (sy - tierTop) * 0.05F, x + half * 0.28F, sy);
+            polygon(c, colors[3], x, tierTop, x - half * 0.3F, sy, x - half * 0.08F, sy - (sy - tierTop) * 0.2F, x + half * 0.12F, sy + (sy - tierTop) * 0.05F, x + half * 0.28F, sy);
         }
     }
 

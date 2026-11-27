@@ -95,8 +95,9 @@ public final class ModernSkin {
         g.nextStratum();
     }
 
-    /** The cold tint that replaces vanilla's menu background texture over the (blurred) scene or world. */
+    /** The tint that replaces vanilla's menu background texture over the (blurred) scene or world. */
     public static void menuBackground(GuiGraphicsExtractor g, int x, int y, int w, int h, boolean inWorld) {
-        ModernStyle.fillGradient(g, x, y, x + w, y + h, inWorld ? 0x66050F1A : 0x52050F1A, inWorld ? 0x99050F1A : 0x8C050F1A);
+        int ink = inWorld ? 0x050F1A : ModernScene.shared().ink();
+        ModernStyle.fillGradient(g, x, y, x + w, y + h, (inWorld ? 0x66000000 : 0x52000000) | ink, (inWorld ? 0x99000000 : 0x8C000000) | ink);
     }
 }

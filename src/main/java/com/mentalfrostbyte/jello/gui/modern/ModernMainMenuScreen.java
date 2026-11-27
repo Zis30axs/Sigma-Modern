@@ -15,7 +15,8 @@ import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * SigmaModern's title screen: a painted winter night ({@link ModernScene}) under falling snow, a faceted Σ
+ * SigmaModern's title screen: a painted scene ({@link ModernScene} - a winter night under falling snow by
+ * default, or any other {@link ModernSceneTheme}, switched with the dock's Scene button), a faceted Σ
  * with a serif wordmark, two primary destinations as flat serif rows, and a dock of secondary actions that
  * stays tucked below the bottom edge - only its grip showing - until the pointer comes near it.
  *
@@ -32,7 +33,7 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
     private static final float EXIT_SECONDS = 0.28F;
     private static final int DOCK_H = 50;
     private static final int DOCK_BUTTON_W = 72;
-    private static final int NIGHT = 0x050F1A;
+    private static final float SCENE_TOAST_SECONDS = 2.2F;
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH);
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.ENGLISH);
 
@@ -53,6 +54,9 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
     private long exitStart;
     private long returnStart;
     private boolean navigated;
+    // The Scene dock button names the theme it switched to in a small pill above the dock for a moment.
+    private @org.jspecify.annotations.Nullable ModernSceneTheme sceneToast;
+    private long sceneToastStart;
 
     public ModernMainMenuScreen() {
         super(Component.literal("SigmaModern"));
@@ -92,6 +96,8 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
 
         this.dockButtons.clear();
         this.dockButtons.add(this.addRenderableWidget(new DockButton("Settings", ModernIcons.Icon.GEAR, () -> leave(this::openOptions))));
+        // Switches the painted backdrop right here; the new scene crossfades in once it has painted.
+        this.dockButtons.add(this.addRenderableWidget(new DockButton("Scene", ModernIcons.Icon.MOUNTAIN, this::cycleScene)));
         this.dockButtons.add(this.addRenderableWidget(new DockButton("Accounts", ModernIcons.Icon.PERSON,
             () -> leave(() -> this.minecraft.gui.setScreen(new SigmaAccountScreen(this, SigmaAccountScreen.Style.JELLO))))));
         this.dockButtons.add(this.addRenderableWidget(new DockButton("Modes", ModernIcons.Icon.MODES, () -> leave(this::openModeSelect))));
@@ -105,6 +111,14 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
         if (this.exitAction != null) return;
         this.exitAction = action;
         this.exitStart = System.nanoTime();
+    }
+
+    /** Moves to the next backdrop theme, saves the choice, and names it above the dock. */
+    private void cycleScene() {
+        if (this.exitAction != null) return;
+        this.sceneToast = Client.getInstance().getModernSceneSettings().cycle(1);
+        this.sceneToastStart = System.nanoTime();
+        Client.getInstance().saveConfig();
     }
 
     /** Runs the pending destination once the fade-out has finished. Called from {@link #tick()}, never mid-render. */
@@ -176,6 +190,7 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
             drawHero(g, l);
             drawClock(g, l);
             drawDock(g);
+            drawSceneToast(g);
             // Registered widgets keep mouse, Tab, Enter and narration on the same geometry they're drawn at.
             super.extractRenderState(g, mx, my, tick);
             drawFooter(g, l);
@@ -189,18 +204,47 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
         float overlay = Math.max(exit, Math.max(introOverlay, returnOverlay));
         if (overlay > 0.004F) {
             g.nextStratum();
-            g.fill(0, 0, this.width, this.height, Math.round(255 * overlay) << 24 | NIGHT);
+            g.fill(0, 0, this.width, this.height, Math.round(255 * overlay) << 24 | ModernScene.shared().ink());
         }
     }
 
     /** A soft darkening toward the left edge, so the hero and menu read over any part of the scene. */
     private void drawScrim(GuiGraphicsExtractor g) {
+        int ink = ModernScene.shared().ink();
         // Two-pixel strips: wider ones band visibly over the bright snowfield.
         int reach = Math.round(this.width * 0.6F);
         for (int x = 0; x < reach; x += 2) {
             float t = x / (float)reach;
             int alpha = Math.round(140 * (1F - t) * (1F - t));
-            if (alpha > 0) ModernStyle.fill(g, x, 0, x + 2, this.height, alpha << 24 | NIGHT);
+            if (alpha > 0) ModernStyle.fill(g, x, 0, x + 2, this.height, alpha << 24 | ink);
+        }
+    }
+
+    /** The theme the Scene button just switched to, in a glass pill above the dock, for a couple of seconds. */
+    private void drawSceneToast(GuiGraphicsExtractor g) {
+        ModernSceneTheme theme = this.sceneToast;
+        if (theme == null) return;
+        float s = seconds(this.sceneToastStart);
+        if (s >= SCENE_TOAST_SECONDS) {
+            this.sceneToast = null;
+            return;
+        }
+        float show = ModernStyle.easeOut(s / 0.22F) * Math.min(1F, (SCENE_TOAST_SECONDS - s) / 0.45F);
+        String name = theme.displayName();
+        String counter = (theme.ordinal() + 1) + " / " + ModernSceneTheme.values().length;
+        float nameScale = 1.25F;
+        int nameW = Math.round(ModernTypography.width(ModernTypography.Face.TEXT, name, nameScale));
+        int counterW = ModernTypography.width(counter);
+        int w = 14 + 16 + 8 + nameW + 10 + counterW + 14, h = 28;
+        int x = (this.width - w) / 2;
+        int y = Math.round(Math.min(dockTop(), this.height - 12) - h - 14 + (1F - show) * 6F);
+        try (var a = ModernStyle.alphaScope(show)) {
+            ModernStyle.darkGlass(g, x, y, w, h, 14, 0xD20A1B29);
+            ModernStyle.fill(g, x + 14, y + 1, x + w - 14, y + 2, 0x33DDF3FF);
+            ModernIcons.draw(g, ModernIcons.Icon.MOUNTAIN, x + 14F, y + 6F, 16F, 0xFFBFE8FF);
+            float textX = x + 14F + 16F + 8F;
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, name, textX, y + h / 2F - 4.5F * nameScale - 1F, nameScale, 0xFFF2F8FC);
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, counter, textX + nameW + 10F, y + h / 2F - 5.5F, 1F, 0xFF8CB2C8);
         }
     }
 
@@ -384,15 +428,17 @@ public final class ModernMainMenuScreen extends SigmaMainMenuScreen implements c
             float pulse = this.dock > 0.02F ? 0F : 0.18F * (0.5F + 0.5F * (float)Math.sin(this.time * 2.4F));
             int gripAlpha = Math.round(255 * (0.42F + pulse) * (1F - this.dock * 0.55F));
             int gripY = Math.min(top - 9, this.height - 7);
-            // The grip sits on the bright snowfield, so it's navy ink; once the dock is up it's on dark glass.
-            int gripColor = this.dock > 0.5F ? 0xCDEFFF : 0x1E3F57;
+            // The grip sits on the bright snowfield, so it's navy ink; once the dock is up it's on dark glass. A
+            // dark field (the nebula's) gets light ink instead.
+            boolean lightGround = ModernScene.shared().groundIsLight();
+            int gripColor = this.dock > 0.5F || !lightGround ? 0xCDEFFF : 0x1E3F57;
             ModernStyle.rounded(g, this.width / 2 - 20, gripY, 40, 4, 2, gripAlpha << 24 | gripColor);
             float hint = 1F - Math.min(1F, this.dock * 3F);
             if (hint > 0.01F && this.height >= 260) {
                 try (var h = ModernStyle.alphaScope(hint * 0.8F)) {
                     String label = ModernStyle.spaced("MENU");
                     ModernTypography.draw(g, ModernTypography.Face.TEXT, label, this.width / 2F - ModernTypography.width(label) / 2F,
-                        gripY - 13F, 1F, 0xFF3F5F75);
+                        gripY - 13F, 1F, lightGround ? 0xFF3F5F75 : 0xFFA9C8DC);
                 }
             }
         }

@@ -4,13 +4,13 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
  * Cross-screen fade. A SigmaModern screen that fades itself out before navigating calls
- * {@link #fadeInNextScreen()}; the next screen - even a vanilla one - then fades in from the same night-sky
- * color instead of appearing abruptly. The fade's clock starts on that screen's first rendered frame, so a
+ * {@link #fadeInNextScreen()}; the next screen - even a vanilla one - then fades in from the same color the
+ * scene's menus darken toward (the {@linkplain ModernScene#ink() theme's ink} - night-sky navy by default)
+ * instead of appearing abruptly. The fade's clock starts on that screen's first rendered frame, so a
  * slow first frame (loading a world list, say) doesn't eat the animation.
  */
 public final class ModernTransitions {
     private static final float DURATION = 0.34F;
-    private static final int COLOR = 0x050F1A;
     private static boolean pending;
     private static long start;
 
@@ -35,6 +35,6 @@ public final class ModernTransitions {
         }
         int alpha = Math.round(255 * (1F - ModernStyle.easeOut(t)));
         g.nextStratum();
-        g.fill(0, 0, g.guiWidth(), g.guiHeight(), alpha << 24 | COLOR);
+        g.fill(0, 0, g.guiWidth(), g.guiHeight(), alpha << 24 | ModernScene.shared().ink());
     }
 }

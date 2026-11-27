@@ -45,6 +45,9 @@ public class Client implements MinecraftInstance {
     private final KeybindHandler keybindHandler = new KeybindHandler(this.moduleManager);
     private final MainMenuRedirectHandler mainMenuRedirectHandler = new MainMenuRedirectHandler();
     private final ClientModeManager clientModeManager = new ClientModeManager();
+    // Which painted backdrop SigmaModern's menus show (night, sunrise, twilight, ...).
+    private final com.mentalfrostbyte.jello.gui.modern.ModernSceneSettings modernSceneSettings =
+        new com.mentalfrostbyte.jello.gui.modern.ModernSceneSettings();
     // The language of the client's own text; the game's keeps following its own setting.
     private final com.mentalfrostbyte.jello.lang.Translations translations = new com.mentalfrostbyte.jello.lang.Translations();
     private final PresentationManager presentationManager = new PresentationManager(this.clientModeManager);
@@ -142,6 +145,7 @@ public class Client implements MinecraftInstance {
             this.accountManager.load();
             boolean hasClientMode = this.config.has("clientMode");
             this.clientModeManager.read(this.config);
+            this.modernSceneSettings.read(this.config);
             this.translations.read(this.config);
             this.commandManager.registerDefaults();
             this.commandManager.read(this.config);
@@ -647,6 +651,7 @@ public class Client implements MinecraftInstance {
         ModuleConfig.write(this.config, this.moduleManager);
         this.keepDebugOverridesOutOf(this.config);
         this.clientModeManager.write(this.config);
+        this.modernSceneSettings.write(this.config);
         this.translations.write(this.config);
         this.commandManager.write(this.config);
         this.musicPlayer.write(this.config);
@@ -711,6 +716,10 @@ public class Client implements MinecraftInstance {
 
     public ClientModeManager getClientModeManager() {
         return this.clientModeManager;
+    }
+
+    public com.mentalfrostbyte.jello.gui.modern.ModernSceneSettings getModernSceneSettings() {
+        return this.modernSceneSettings;
     }
 
     public PresentationManager getPresentationManager() {
