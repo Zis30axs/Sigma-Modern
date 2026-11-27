@@ -56,7 +56,18 @@ public final class BlockFlyLCustomMode extends BlockFlyCustomBase {
     }
 
     @Override
+    protected @Nullable BlockPos currentAnchorPos() {
+        return this.navenPos == null ? null : this.navenPos.position();
+    }
+
+    @Override
     protected boolean updatePlan(final LocalPlayer player, final Vec3 eyes) {
+        return this.updatePlanForGrimSprint(player, eyes, null);
+    }
+
+    @Override
+    protected boolean updatePlanForGrimSprint(final LocalPlayer player, final Vec3 eyes,
+                                              final @Nullable Rotation storedAim) {
         if (this.navenPos != null && (BlockFlyLegacyMode.isReplaceable(mc.level, this.navenPos.position())
                 || !BlockFlyLegacyMode.isReplaceable(mc.level, this.navenPos.placedPos()))) {
             this.navenPos = null;
@@ -70,12 +81,24 @@ public final class BlockFlyLCustomMode extends BlockFlyCustomBase {
         if (canStandOnUp(mc.level, base)) {
             return this.navenPos != null;
         }
+        double range = player.blockInteractionRange();
+        AnchorFace fallback = null;
         for (BlockPos placed : pyramid(base)) {
             AnchorFace candidate = findNavenAnchor(mc.level, baseVec, placed);
-            if (candidate != null) {
+            if (candidate == null) {
+                continue;
+            }
+            if (storedAim == null || grimRayHitsSupport(eyes, storedAim, candidate.position(), range)) {
                 this.navenPos = candidate;
                 return true;
             }
+            if (fallback == null) {
+                fallback = candidate;
+            }
+        }
+        if (fallback != null) {
+            this.navenPos = fallback;
+            return true;
         }
         return this.navenPos != null;
     }
@@ -119,7 +142,7 @@ public final class BlockFlyLCustomMode extends BlockFlyCustomBase {
         boolean moving = BlockFlyLegacyMode.isMoving(BlockFlyLegacyMode.physicalInput());
         boolean holdingJump = mc.options.keyJump.isDown();
         boolean upGate = face != Direction.UP || event.isOnGround() || !moving || holdingJump
-                || this.bridgeMode.is(BridgeMode.NORMAL);
+                || this.bridgeMode.is(BridgeMode.NORMAL) || this.bridgeMode.is(BridgeMode.GRIM_SPRINT);
         if (!upGate || !this.shouldBuild(player, event.getX(), event.getY(), event.getZ())) return null;
 
         BlockHitResult rayHit = BlockFlyPlacement.raycast(player, eyes, currentLook);
@@ -130,6 +153,25 @@ public final class BlockFlyLCustomMode extends BlockFlyCustomBase {
         }
         BlockHitResult directHit = new BlockHitResult(navenHitVec(anchor, face), face, anchor, false);
         return new BlockFlyPlacement.Target(placed, directHit, currentLook, eyes, false);
+    }
+
+    @Override
+    protected @Nullable Target resolveGrimSprintPlacement(final LocalPlayer player, final EventMotion event,
+                                                          final Vec3 eyes, final Rotation storedAim) {
+        // Prefer an exact outline-ray hit onto pyramid support blocks intersected by storedAim;
+        // fall back to Naven's visible-face placement when also intersected by storedAim.
+        Vec3 baseVec = new Vec3(event.getX(), event.getY(), event.getZ()).add(player.getDeltaMovement().scale(1.5));
+        BlockPos base = BlockPos.containing(baseVec.x, this.baseY + 0.1, baseVec.z);
+        double range = player.blockInteractionRange();
+        for (BlockPos placed : pyramid(base)) {
+            Target candidate = BlockFlyPlacement.find(player, eyes, placed, storedAim);
+            if (candidate != null && candidate.hit().getDirection() != Direction.DOWN
+                    && eyes.distanceToSqr(candidate.hit().getLocation()) <= 20.25
+                    && grimRayHitsSupport(eyes, storedAim, candidate.hit().getBlockPos(), range)) {
+                return candidate;
+            }
+        }
+        return this.resolveMotionPlacement(player, event, eyes, storedAim);
     }
 
     @Override

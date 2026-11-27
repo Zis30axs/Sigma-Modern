@@ -113,6 +113,42 @@ class BlockFlyModeAlgorithmsTest {
         assertEquals(64.9216, predictedY, 1.0E-6);
     }
 
+    @Test
+    void grimSprintStoredBackwardAimIntersectsSupportCubeAcrossConsecutiveStraightAndDiagonalBlocks() {
+        com.mentalfrostbyte.jello.util.math.Rotations.Rotation straightAim =
+                new com.mentalfrostbyte.jello.util.math.Rotations.Rotation(180.0F, 78.0F);
+        for (int blockZ = 0; blockZ < 5; blockZ++) {
+            BlockPos support = new BlockPos(0, 63, blockZ);
+            assertTrue(BlockFlyCustomBase.grimRayHitsSupport(
+                    new Vec3(0.5, 65.62, blockZ + 1.05), straightAim, support, 4.5));
+            assertTrue(BlockFlyCustomBase.grimRayHitsSupport(
+                    new Vec3(0.5, 65.62, blockZ + 1.25), straightAim, support, 4.5));
+        }
+
+        com.mentalfrostbyte.jello.util.math.Rotations.Rotation diagAim =
+                new com.mentalfrostbyte.jello.util.math.Rotations.Rotation(135.0F, 78.0F);
+        assertTrue(BlockFlyCustomBase.grimRayHitsSupport(
+                new Vec3(1.08, 65.62, 0.88), diagAim, new BlockPos(0, 63, 0), 4.5));
+        assertTrue(BlockFlyCustomBase.grimRayHitsSupport(
+                new Vec3(1.28, 65.62, 1.08), diagAim, new BlockPos(1, 63, 0), 4.5));
+
+        com.mentalfrostbyte.jello.util.math.Rotations.Rotation forwardLook =
+                new com.mentalfrostbyte.jello.util.math.Rotations.Rotation(0.0F, 78.0F);
+        assertFalse(BlockFlyCustomBase.grimRayHitsSupport(
+                new Vec3(0.5, 65.62, 1.15), forwardLook, new BlockPos(0, 63, 0), 4.5));
+    }
+
+    @Test
+    void grimSprintYawStepPatternNeverRepeatsConsecutiveDeltaForDuplicateRotPlace() {
+        float mouseStep = 0.15F;
+        for (int i = 0; i < 20; i++) {
+            float deltaA = Math.abs(180.0F - BlockFlyCustomBase.grimYawStepOffset(i) * mouseStep);
+            float deltaB = Math.abs(180.0F - BlockFlyCustomBase.grimYawStepOffset(i + 1) * mouseStep);
+            assertTrue(Math.abs(deltaA - deltaB) >= 0.1F,
+                    "Consecutive aim snaps must differ by >> 0.0001 deg to avoid Grim DuplicateRotPlace");
+        }
+    }
+
     private static Input keys(final boolean forward, final boolean backward, final boolean left, final boolean right) {
         return new Input(forward, backward, left, right, false, false, false);
     }

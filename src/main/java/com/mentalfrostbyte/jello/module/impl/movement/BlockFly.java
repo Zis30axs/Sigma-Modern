@@ -87,9 +87,13 @@ public final class BlockFly extends Module {
     private LocalPlayer sessionPlayer;
     private Object sessionLevel;
     private BlockFlyPlacement.Target pending;
+    private Runnable pendingOnPlaced;
     private BlockFlyPlacement.Target deferredTarget;
     private Rotation deferredSent;
+    private Runnable deferredOnPlaced;
     private Rotation requestedRotation;
+    private Rotation lastSentRotation;
+    private volatile boolean forceNextRotation = true;
     private MovementCorrection correction = MovementCorrection.OFF;
     private boolean silentRotation = true;
     private int lastExecutedPlaceTick = Integer.MIN_VALUE;
@@ -171,8 +175,12 @@ public final class BlockFly extends Module {
             } finally {
                 clearRotation();
                 this.pending = null;
+                this.pendingOnPlaced = null;
                 this.deferredTarget = null;
                 this.deferredSent = null;
+                this.deferredOnPlaced = null;
+                this.lastSentRotation = null;
+                this.forceNextRotation = true;
                 this.motionEvent = null;
                 this.lastExecutedPlaceTick = Integer.MIN_VALUE;
                 this.lastQueuedPlaceTick = Integer.MIN_VALUE;
@@ -203,13 +211,16 @@ public final class BlockFly extends Module {
             if (this.deferredTarget != null && this.deferredSent != null) {
                 BlockFlyPlacement.Target deferred = this.deferredTarget;
                 Rotation sent = this.deferredSent;
+                Runnable onPlaced = this.deferredOnPlaced;
                 this.deferredTarget = null;
                 this.deferredSent = null;
+                this.deferredOnPlaced = null;
                 if (mc.player.getEyePosition().distanceToSqr(deferred.eyes()) <= 1.0E-4) {
-                    placeAt(deferred, deferred.eyes(), sent, false);
+                    placeAt(deferred, deferred.eyes(), sent, onPlaced, false);
                 }
             }
             this.pending = null;
+            this.pendingOnPlaced = null;
         }
         this.active.tick(event);
         if (event.isPre() && this.requestedRotation != null) requestCorrection();
@@ -234,8 +245,10 @@ public final class BlockFly extends Module {
             this.active.motion(event);
             if (event.isPost()) {
                 BlockFlyPlacement.Target target = this.pending;
+                Runnable onPlaced = this.pendingOnPlaced;
                 this.pending = null;
-                if (!event.isCancelled() && target != null) place(target);
+                this.pendingOnPlaced = null;
+                if (!event.isCancelled() && target != null) place(target, onPlaced);
             }
         } finally {
             this.motionEvent = null;
@@ -314,9 +327,18 @@ public final class BlockFly extends Module {
             event.setPacket(new ServerboundSetCarriedItemPacket(this.liteSlot));
         }
         if (this.active != null) this.active.sendPacket(event);
+        if (!event.isCancelled()
+                && event.getPacket() instanceof net.minecraft.network.protocol.game.ServerboundMovePlayerPacket move
+                && move.hasRotation()) {
+            this.lastSentRotation = new Rotation(move.getYRot(0), move.getXRot(0));
+            this.forceNextRotation = false;
+        }
     }
 
     @EventTarget public void onReceivePacket(final EventReceivePacket event) {
+        if (event.getPacket() instanceof net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket) {
+            this.forceNextRotation = true;
+        }
         // Modes may inspect immutable packet data; they must schedule world changes on the client thread.
         if (this.active != null) this.active.receivePacket(event);
     }
@@ -343,7 +365,9 @@ public final class BlockFly extends Module {
         if (event.isPre() && this.requestedRotation != null) {
             event.setYaw(this.requestedRotation.yaw());
             event.setPitch(this.requestedRotation.pitch());
-            event.forceRotation();
+            if (this.forceNextRotation || !this.requestedRotation.equals(this.lastSentRotation)) {
+                event.forceRotation();
+            }
         }
     }
 
@@ -358,22 +382,37 @@ public final class BlockFly extends Module {
                 : mc.player == null ? new Rotation(0, 0) : new Rotation(mc.player.getYRot(), mc.player.getXRot());
     }
 
-    public void queuePlacement(final BlockFlyPlacement.Target target) { this.pending = target; }
+    public boolean hasDeferredPlacement() {
+        return this.deferredTarget != null;
+    }
+
+    public void queuePlacement(final BlockFlyPlacement.Target target) {
+        queuePlacement(target, null);
+    }
+
+    public void queuePlacement(final BlockFlyPlacement.Target target, final Runnable onPlaced) {
+        this.pending = target;
+        this.pendingOnPlaced = target == null ? null : onPlaced;
+    }
 
     /** Called after the movement packet; on 1.21.2+ defers the interaction to the next tick's pre-movement window. */
     public boolean place(final BlockFlyPlacement.Target target) {
+        return place(target, null);
+    }
+
+    public boolean place(final BlockFlyPlacement.Target target, final Runnable onPlaced) {
         if (!ready() || target == null || this.motionEvent == null || !this.motionEvent.isPost()
                 || this.motionEvent.isCancelled() || this.lastQueuedPlaceTick == mc.player.tickCount) return false;
         Vec3 eyes = new Vec3(this.motionEvent.getX(), this.motionEvent.getY() + mc.player.getEyeHeight(), this.motionEvent.getZ());
         Rotation sent = new Rotation(this.motionEvent.getYaw(), this.motionEvent.getPitch());
         boolean deferForTickEnd = ProtocolTranslator.getTargetVersion().newerThanOrEqualTo(ProtocolVersion.v1_21_2);
-        boolean queuedOrPlaced = placeAt(target, eyes, sent, deferForTickEnd);
+        boolean queuedOrPlaced = placeAt(target, eyes, sent, onPlaced, deferForTickEnd);
         if (queuedOrPlaced) this.lastQueuedPlaceTick = mc.player.tickCount;
         return queuedOrPlaced;
     }
 
     private boolean placeAt(final BlockFlyPlacement.Target target, final Vec3 eyes,
-                            final Rotation sent, final boolean deferOnly) {
+                            final Rotation sent, final Runnable onPlaced, final boolean deferOnly) {
         if (!ready() || target == null || (!deferOnly && this.lastExecutedPlaceTick == mc.player.tickCount)) return false;
         final BlockHitResult hit;
         if (target.strictRaycast()) {
@@ -407,6 +446,7 @@ public final class BlockFly extends Module {
                 // execute at the start of the very next tick before movement or mode re-selection runs.
                 this.deferredTarget = new BlockFlyPlacement.Target(target.placedPos(), hit, sent, eyes, target.strictRaycast());
                 this.deferredSent = sent;
+                this.deferredOnPlaced = onPlaced;
                 this.actedThisTick = true;
                 return true;
             }
@@ -423,7 +463,10 @@ public final class BlockFly extends Module {
                 this.lastExecutedPlaceTick = mc.player.tickCount;
                 boolean success = mc.gameMode.useItemOn(mc.player, hand, hit).consumesAction();
                 interacted = true;
-                if (success) swing(hand);
+                if (success) {
+                    swing(hand);
+                    if (onPlaced != null) onPlaced.run();
+                }
                 return success;
             } finally {
                 if (!interacted) this.liteSlot = previousLiteSlot;

@@ -62,9 +62,30 @@ public final class BlockFlyCustomMode extends BlockFlyCustomBase {
     }
 
     @Override
+    protected @Nullable BlockPos currentAnchorPos() {
+        return this.anchorPos;
+    }
+
+    @Override
     protected boolean updatePlan(final LocalPlayer player, final Vec3 eyes) {
         this.anchorPos = this.findAnchorPos(player, player.getX(), player.getY(), player.getZ());
         return this.anchorPos != null;
+    }
+
+    @Override
+    protected @Nullable Target resolveGrimSprintPlacement(final LocalPlayer player, final EventMotion event,
+                                                          final Vec3 eyes, final Rotation storedAim) {
+        BlockPos base = BlockPos.containing(event.getX(), this.baseY, event.getZ());
+        int radius = this.advanced.get() ? 2 : 1;
+        double range = player.blockInteractionRange();
+        for (BlockPos pos : BlockFlyPlacement.positionsAround(base, radius)) {
+            Target candidate = BlockFlyPlacement.find(player, eyes, pos, storedAim);
+            if (candidate != null && candidate.hit().getDirection() != Direction.DOWN
+                    && grimRayHitsSupport(eyes, storedAim, candidate.hit().getBlockPos(), range)) {
+                return candidate;
+            }
+        }
+        return this.resolveMotionPlacement(player, event, eyes, storedAim);
     }
 
     @Override
