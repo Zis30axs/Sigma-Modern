@@ -58,6 +58,7 @@ import com.mentalfrostbyte.jello.util.movement.MovementCorrector;
 import com.mentalfrostbyte.jello.module.impl.render.BlockAnimation;
 import com.mentalfrostbyte.jello.module.impl.render.BlockEsp;
 import com.mentalfrostbyte.jello.module.impl.render.CameraNoClip;
+import com.mentalfrostbyte.jello.module.impl.render.Cape;
 import com.mentalfrostbyte.jello.module.impl.render.Freecam;
 import com.mentalfrostbyte.jello.module.impl.render.Fullbright;
 import com.mentalfrostbyte.jello.module.impl.render.Esp;
@@ -141,6 +142,7 @@ public final class ModuleManager {
         this.register(new ChestSteal());
         this.register(new InvManager());
         this.register(new LowFire());
+        this.register(new Cape());
         this.register(new Maps());
         this.register(new MiniMap());
         this.register(new ModernChat());

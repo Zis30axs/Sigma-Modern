@@ -8,6 +8,7 @@ import com.mentalfrostbyte.jello.lang.Translations;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
+import com.mentalfrostbyte.jello.module.impl.render.Cape;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
@@ -79,6 +80,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     private final ModernSnow snow = new ModernSnow(140, 5400F);
     // The music player lives in its own window, pulled out from the right edge; the card makes room for it.
     private final ModernMusicDrawer music = new ModernMusicDrawer(282);
+    // The Cape module's wardrobe: a window beside the card while the Cape page is open.
+    private final ModernCapePanel capePanel = new ModernCapePanel();
 
     private record Hit(int x, int y, int w, int h, Object key, Module module, Setting<?> setting) {}
     private record SidebarHit(int x, int y, int w, int h, ModuleCategory category) {}
@@ -93,8 +96,10 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     // --- geometry -----------------------------------------------------------------------------------
 
     // With the music window out, the card narrows and moves over (down to 300 wide; past that the window overlaps it).
-    public int panelWidth() { return Math.max(300, Math.min(this.width - PAD * 2 - Math.round(this.music.reserve()), 620)); }
-    public int panelX() { return Math.max(PAD, (this.width - Math.round(this.music.reserve()) - panelWidth()) / 2); }
+    // The Cape page's wardrobe window takes its room the same way, between the card and the music window.
+    private int rightReserve() { return Math.round(this.music.reserve() + this.capePanel.reserve()); }
+    public int panelWidth() { return Math.max(300, Math.min(this.width - PAD * 2 - rightReserve(), 620)); }
+    public int panelX() { return Math.max(PAD, (this.width - rightReserve() - panelWidth()) / 2); }
     // Tall enough that the compass sits below the custom window caption (ModernWindowFrame.CAPTION_H).
     private int topbarH() { return this.height < 260 ? 0 : 46; }
     public int panelY() { return topbarH() + (topbarH() > 0 ? 14 : 10); }
@@ -260,6 +265,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         this.seconds = this.lastFrame == 0 ? 0 : Math.min(0.05F, (now - this.lastFrame) / 1_000_000_000F);
         this.lastFrame = now;
         this.time += this.seconds;
+        this.capePanel.update(capeShown(), this.width, this.seconds);
         float open = ModernStyle.easeOut((now - this.openStart) / 1_000_000_000F / 0.32F);
 
         try (var fade = ModernStyle.alphaScope(open)) {
@@ -325,6 +331,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         } finally {
             g.pose().popMatrix();
         }
+        if (this.capePanel.visible()) {
+            placeCape();
+            try (var fade = ModernStyle.alphaScope(open * this.capePanel.openness())) {
+                this.capePanel.render(g, mx, my, capeModule());
+            }
+        }
         if (topbarH() > 0) {
             try (var fade = ModernStyle.alphaScope(open)) {
                 drawGlobalHints(g);
@@ -334,6 +346,20 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
             placeMusic();
             this.music.render(g, mouseX, mouseY);
         }
+    }
+
+    /** The Cape module's page is open: its wardrobe window shows beside the card. */
+    private boolean capeShown() {
+        return this.view == View.DETAIL && this.detailModule instanceof Cape;
+    }
+
+    private Cape capeModule() {
+        return this.modules.get(Cape.class);
+    }
+
+    /** The wardrobe window sits right of the card, as tall as the card may grow. */
+    private void placeCape() {
+        this.capePanel.place(panelX() + panelWidth() + ModernCapePanel.GAP, panelY(), maxPanelHeight(), this.width);
     }
 
     /** The music window's band: level with the card's top (clear of the window caption), down to above the hints. */
@@ -960,6 +986,11 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
         if (this.interactions.mouseClickedBinding(e)) return true;
         placeMusic();
         if (this.music.mouseClicked(e.x(), e.y(), e.button())) return true;
+        placeCape();
+        if (this.capePanel.contains(e.x(), e.y()) && this.capePanel.mouseClicked(e.x(), e.y(), e.button(), capeModule())) {
+            this.music.blur();
+            return true;
+        }
         if (this.popover != null) return handlePopoverClick(e);
         Hit bar = searchBarHit();
         if (ModernStyle.inside(e.x(), e.y(), bar.x(), bar.y(), bar.w(), bar.h())) {
@@ -1147,6 +1178,8 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
     @Override public boolean mouseScrolled(double x, double y, double sx, double sy) {
         placeMusic();
         if (this.music.mouseScrolled(x, y, sy)) return true;
+        placeCape();
+        if (this.capePanel.mouseScrolled(x, y, sy)) return true;
         if (this.popover != null || stepControlUnder(x, y, sy)) return true;
         int targetHeight = targetPanelHeight();
         int viewport = targetHeight - HEADER_H - subheaderHeight() - FOOTER_H;
@@ -1157,11 +1190,13 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     @Override public boolean mouseDragged(MouseButtonEvent e, double dx, double dy) {
         if (this.music.mouseDragged(e.x(), e.y())) return true;
+        if (this.capePanel.mouseDragged(e.x(), e.y())) return true;
         return this.interactions.mouseDragged(e) || super.mouseDragged(e, dx, dy);
     }
     @Override public boolean mouseReleased(MouseButtonEvent e) {
         this.interactions.mouseReleased();
         if (this.music.mouseReleased()) return true;
+        if (this.capePanel.mouseReleased()) return true;
         return super.mouseReleased(e);
     }
 

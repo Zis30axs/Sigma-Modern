@@ -212,6 +212,8 @@ public class AvatarRenderer<AvatarlikeEntity extends Avatar & ClientAvatarEntity
         state.showLeftSleeve = entity.isModelPartShown(PlayerModelPart.LEFT_SLEEVE);
         state.showRightSleeve = entity.isModelPartShown(PlayerModelPart.RIGHT_SLEEVE);
         state.showCape = entity.isModelPartShown(PlayerModelPart.CAPE);
+        // Sigma hook: the Cape module dresses the local player in the chosen client-side cape.
+        com.mentalfrostbyte.jello.module.impl.render.Cape.apply(entity, state);
         this.extractFlightData(entity, state, partialTicks);
         this.extractCapeState(entity, state, partialTicks);
         state.parrotOnLeftShoulder = entity.getParrotVariantOnShoulder(true);
