@@ -1,9 +1,6 @@
 package com.mentalfrostbyte.jello.gui;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
-import com.mentalfrostbyte.jello.gui.modern.ModernStyle;
-import com.mentalfrostbyte.jello.gui.modern.ModernTypography;
 import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.ItemListSetting;
 import com.mentalfrostbyte.jello.util.game.InventoryRole;
@@ -22,7 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import org.jspecify.annotations.Nullable;
 
 /** Select a destination in the inventory grid, then a category or exact item in the palette. */
-public final class InventoryLayoutScreen extends Screen implements ModernBlurredBackdrop, TextEntryScreen {
+public final class InventoryLayoutScreen extends ModuleEditorScreen implements TextEntryScreen {
     private final @Nullable Screen parent;
     private final InventoryLayoutSetting layout;
     private final Map<String, Choice> choices = new HashMap<>();
@@ -51,15 +48,15 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
     }
 
     public InventoryLayoutScreen(@Nullable Screen parent, InventoryLayoutSetting layout) {
-        super(Component.literal("Inventory slot layout"));
+        super(Component.literal(ModuleScreenStyle.tr("slot_layout")));
         this.parent = parent;
         this.layout = layout;
     }
 
     private void addChoice(String key, String id, @Nullable String label) {
         var icon = InventoryItemIcons.get(id);
-        String name = label == null ? icon.getHoverName().getString() : label;
-        var choice = new Choice(key, name, icon, (key + " " + name).toLowerCase(Locale.ROOT));
+        String name = label == null ? icon.getHoverName().getString() : Client.getInstance().getTranslations().text(label);
+        var choice = new Choice(key, name, icon, (key + " " + name + (label == null ? "" : " " + label)).toLowerCase(Locale.ROOT));
         choices.put(key, choice);
         catalogue.add(choice);
     }
@@ -78,9 +75,9 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
                     () -> { selected = destination; refresh(); })));
         }
         String query = search == null ? "" : search.getValue();
-        search = addRenderableWidget(new EditBox(font, geometry.left(), geometry.searchY(), geometry.width(), 18,
-                Component.literal("Search slot rules")));
-        search.setHint(Component.literal("Choose a category or search for an item"));
+        search = addRenderableWidget(style.search(font, geometry.left(), geometry.searchY(), geometry.width(), 18,
+                Component.literal(ModuleScreenStyle.tr("search_slots"))));
+        search.setHint(Component.literal(ModuleScreenStyle.tr("slot_hint")));
         for (int i = 0; i < geometry.rows() * geometry.columns(); i++) {
             int index = i;
             palette.add(addRenderableWidget(new Cell(geometry.left() + i % geometry.columns() * geometry.step(),
@@ -92,14 +89,14 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
         int x = geometry.left(), y = height - 24;
         previous = button(x, y, 26, "<", () -> page(-1));
         next = button(x + 30, y, 26, ">", () -> page(1));
-        button(x + geometry.width() - 56, y, 56, "Done", this::onClose);
+        button(x + geometry.width() - 56, y, 56, ModuleScreenStyle.tr("done"), this::onClose);
         search.setResponder(this::filter);
         search.setValue(query);
         filter(query);
     }
 
     private Button button(int x, int y, int w, String name, Runnable action) {
-        return addRenderableWidget(Button.builder(Component.literal(name), b -> action.run()).bounds(x, y, w, 18).build());
+        return addRenderableWidget(style.button(x, y, w, 18, Component.literal(name), b -> action.run()));
     }
 
     private void filter(String query) {
@@ -110,9 +107,9 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
     }
 
     private static String slotName(int i) {
-        if (i == 45) return "Offhand";
-        if (i >= 36) return "Hotbar " + (i - 35);
-        return "Backpack " + ((i - 9) / 9 + 1) + " / " + ((i - 9) % 9 + 1);
+        if (i == 45) return ModuleScreenStyle.tr("offhand");
+        if (i >= 36) return ModuleScreenStyle.tr("hotbar_slot", i - 35);
+        return ModuleScreenStyle.tr("backpack_slot", (i - 9) / 9 + 1, (i - 9) % 9 + 1);
     }
 
     private void refresh() {
@@ -124,7 +121,7 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
             if (minecraft.player != null && i < minecraft.player.inventoryMenu.slots.size()) {
                 var actual = minecraft.player.inventoryMenu.getSlot(i).getItem();
                 if (!actual.isEmpty()) {
-                    label += "\nHolding " + actual.getHoverName().getString() + " ×" + actual.getCount();
+                    label += "\n" + ModuleScreenStyle.tr("holding", actual.getHoverName().getString(), actual.getCount());
                     if (icon.isEmpty()) icon = actual;
                 }
             }
@@ -138,7 +135,7 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
             if (cell.visible) {
                 var choice = filtered.get(pos);
                 boolean role = InventoryRole.byKey(choice.key()) != null;
-                String type = role ? "Slot rule" : choice.key();
+                String type = role ? ModuleScreenStyle.tr("slot_rule") : choice.key();
                 cell.show(choice.icon(), choice.label() + "\n" + type,
                         choice.key().equals(layout.get().getOrDefault(selected, "NONE")), role);
             }
@@ -157,7 +154,7 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
         return super.mouseScrolled(x, y, sx, sy);
     }
 
-    private static final class Cell extends Button {
+    private final class Cell extends Button {
         private ItemStack stack = ItemStack.EMPTY;
         private boolean selected, assigned;
         Cell(int x, int y, int step, Runnable press) {
@@ -173,25 +170,27 @@ public final class InventoryLayoutScreen extends Screen implements ModernBlurred
         }
         @Override protected void extractContents(GuiGraphicsExtractor g, int mx, int my, float tick) {
             int x = getX(), y = getY(), w = getWidth();
-            ModernStyle.rounded(g, x, y, w, w, 3, selected ? 0xFF8EDFFF : isHoveredOrFocused() ? 0xFFCEE7F6 : 0xDF526577);
+            style.control(g, x, y, w, w, selected, isHoveredOrFocused());
             if (!stack.isEmpty()) g.item(stack, x + (w - 16) / 2, y + (w - 16) / 2);
-            if (assigned) g.fill(x + 2, y + w - 2, x + w - 2, y + w - 1, ModernStyle.GLOW);
+            if (assigned) g.fill(x + 2, y + w - 2, x + w - 2, y + w - 1, style.accent);
         }
     }
 
     @Override public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float tick) {
+        int panelTop = geometry.top() - 16;
+        style.panel(g, geometry.left() - 4, panelTop, geometry.width() + 8, height - panelTop - 2);
         var active = choices.get(layout.get().getOrDefault(selected, "NONE"));
         String heading = slotName(selected) + "  ·  " + active.label();
-        ModernTypography.draw(g, ModernTypography.fit(heading, geometry.width()), geometry.left(), geometry.top() - 13, ModernStyle.TEXT, false);
+        style.label(g, heading, geometry.left(), geometry.top() - 14, geometry.width(), style.ink);
         int labels = geometry.slotX(45) + geometry.step() + 9;
         if (labels + 68 <= geometry.left() + geometry.width()) {
-            ModernTypography.draw(g, "Backpack", labels, geometry.top() + 4, ModernStyle.MUTED, false);
-            ModernTypography.draw(g, "Hotbar + offhand", labels, geometry.slotY(45) + 4, ModernStyle.MUTED, false);
+            style.label(g, ModuleScreenStyle.tr("backpack"), labels, geometry.top() + 4, geometry.left() + geometry.width() - labels, style.muted);
+            style.label(g, ModuleScreenStyle.tr("hotbar_offhand"), labels, geometry.slotY(45) + 4, geometry.left() + geometry.width() - labels, style.muted);
         }
         super.extractRenderState(g, mx, my, tick);
         int pages = Math.max(1, Math.ceilDiv(filtered.size(), palette.size()));
-        ModernTypography.draw(g, filtered.isEmpty() ? "No matches" : (page + 1) + " / " + pages,
-                geometry.left() + 64, height - 18, ModernStyle.MUTED, false);
+        style.label(g, filtered.isEmpty() ? ModuleScreenStyle.tr("no_matches") : (page + 1) + " / " + pages,
+                geometry.left() + 64, height - 21, geometry.width() - 124, style.muted);
     }
 
     @Override public boolean isTypingText() { return search != null && search.isFocused(); }

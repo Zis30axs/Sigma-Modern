@@ -1,16 +1,12 @@
 package com.mentalfrostbyte.jello.gui;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
-import com.mentalfrostbyte.jello.gui.modern.ModernStyle;
-import com.mentalfrostbyte.jello.gui.modern.ModernTypography;
 import com.mentalfrostbyte.jello.setting.ItemListSetting;
-import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
 import java.util.List;
 import java.util.Locale;
-import net.minecraft.client.gui.components.EditBox;
 import java.util.Objects;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -20,7 +16,7 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
 /** A shared item picker: click a row, or carry it between the catalogue and whitelist. */
-public final class ProjectileWhitelistScreen extends Screen implements ModernBlurredBackdrop, TextEntryScreen {
+public final class ProjectileWhitelistScreen extends ModuleEditorScreen implements TextEntryScreen {
     private static final int ROW_H = 30;
     private static final int HEADING_H = 28;
     private final @Nullable Screen parent;
@@ -44,7 +40,7 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
     record Layout(Box catalogue, Box selected, Box done, int left, int top, int width, int footer) {}
 
     public ProjectileWhitelistScreen(final @Nullable Screen parent, final ItemListSetting setting) {
-        super(Component.literal(setting.getName()));
+        super(Component.literal(Client.getInstance().getTranslations().text(setting.getName())));
         this.parent = parent;
         this.setting = Objects.requireNonNull(setting, "setting");
     }
@@ -61,9 +57,9 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
         this.shownSelection = null;
         Layout l = layout(this.width, this.height);
         String previous = this.search == null ? "" : this.search.getValue();
-        this.search = this.addRenderableWidget(new EditBox(this.font, l.left(), l.top() + 17, l.width(), 18,
-                Component.literal("Search items")));
-        this.search.setHint(Component.literal("Search by item name or ID"));
+        this.search = this.addRenderableWidget(this.style.search(this.font, l.left(), l.top() + 17, l.width(), 18,
+                Component.literal(ModuleScreenStyle.tr("search"))));
+        this.search.setHint(Component.literal(ModuleScreenStyle.tr("search_hint")));
         this.search.setResponder(this::filter);
         this.search.setValue(previous);
         this.filter(previous);
@@ -123,46 +119,37 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
     @Override public boolean isPauseScreen() { return false; }
 
     @Override public void extractBackground(GuiGraphicsExtractor g, int mx, int my, float partialTick) {
-        if (this.minecraft.level == null) {
-            this.extractPanorama(g, partialTick);
-            g.nextStratum();
-        }
-        GuiVisuals.blurBackground(g);
-        g.fill(0, 0, this.width, this.height, 0xB00B1925);
-        this.minecraft.gui.hud.extractDeferredSubtitles();
+        super.extractBackground(g, mx, my, partialTick);
+        g.fill(0, 0, this.width, this.height, this.style == ModuleScreenStyle.MODERN ? 0xB00B1925 : 0x9A151515);
     }
 
     @Override public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float partialTick) {
         this.clampScroll();
         Layout l = layout(this.width, this.height);
-        ModernTypography.draw(g, this.setting.getName(), l.left(), l.top(), 1.3F, ModernStyle.TEXT, false);
+        style.label(g, getTitle().getString(), l.left(), l.top(), l.width(), 0xFFFFFFFF);
         super.extractRenderState(g, mx, my, partialTick);
         this.drawList(g, l.catalogue(), this.entries, false, mx, my);
         this.drawList(g, l.selected(), this.selectedEntries(), true, mx, my);
-        String hint = this.width >= 500 ? "Click to add/remove. Drag between lists." : "Click or drag to select";
-        ModernTypography.draw(g, ModernTypography.fit(hint, l.width() - 72), l.left(), l.footer() + 7, ModernStyle.MUTED, false);
-        ModernStyle.rounded(g, l.done().x(), l.done().y(), l.done().w(), l.done().h(), 6,
-                l.done().contains(mx, my) ? 0xFF7DD3FF : 0xFF4EAFE2);
-        ModernTypography.draw(g, "Done", l.done().x() + 16, l.done().y() + 7, ModernStyle.INK, false);
+        String hint = ModuleScreenStyle.tr(this.width >= 500 ? "move_hint" : "move_hint_short");
+        style.label(g, hint, l.left(), l.footer() + 6, l.width() - 72, 0xFFF1F1F1);
+        Box done = l.done();
+        style.button(g, done.x(), done.y(), done.w(), done.h(), ModuleScreenStyle.tr("done"), false, done.contains(mx, my), true);
         if (this.dragged && this.pressed != null) {
             g.nextStratum();
             int x = Math.max(0, Math.min(this.width - 130, mx + 9));
             int y = Math.max(0, Math.min(this.height - 27, my - 13));
-            ModernStyle.rounded(g, x, y, Math.min(130, this.width), 26, 6, 0xF0E8F3FA);
+            style.panel(g, x, y, Math.min(130, this.width), 26);
             g.item(this.pressed.stack(), x + 5, y + 5);
-            ModernTypography.draw(g, ModernTypography.fit(this.name(this.pressed), 98), x + 25, y + 9, ModernStyle.INK, false);
+            style.label(g, this.pressed.name(), x + 25, y + 7, Math.min(98, this.width - x - 28), style.ink);
         }
-    }
-
-    private String name(Entry entry) {
-        return entry.name();
     }
 
     private void drawList(GuiGraphicsExtractor g, Box box, List<Entry> list, boolean selected, int mx, int my) {
         boolean drop = this.dragged && this.pressed != null && box.contains(mx, my) && this.pressedSelected != selected;
-        ModernStyle.rounded(g, box.x(), box.y(), box.w(), box.h(), 9, drop ? 0xFAE1F5FF : ModernStyle.PANEL_SURFACE);
-        String heading = (selected ? "Selected" : "Items") + "  ·  " + list.size();
-        ModernTypography.draw(g, ModernTypography.fit(heading, box.w() - 20), box.x() + 10, box.y() + 10, ModernStyle.INK, false);
+        style.panel(g, box.x(), box.y(), box.w(), box.h());
+        if (drop) g.outline(box.x(), box.y(), box.w(), box.h(), style.accent);
+        String heading = ModuleScreenStyle.tr(selected ? "selected_list" : "catalogue", list.size());
+        style.label(g, heading, box.x() + 10, box.y() + 8, box.w() - 20, style.ink);
         int scroll = Math.round(selected ? this.selectedScroll : this.catalogueScroll);
         g.enableScissor(box.x() + 3, box.viewTop(), box.x() + box.w() - 3, box.viewTop() + box.viewHeight());
         try {
@@ -173,17 +160,15 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
                 boolean over = box.contains(mx, my) && my >= box.viewTop() && my >= y && my < y + ROW_H;
                 boolean focus = this.keyboardIndex == i && this.keyboardSelected == selected;
                 boolean included = this.setting.contains(entry.id());
-                ModernStyle.rounded(g, box.x() + 5, y + 1, box.w() - 14, ROW_H - 3, 5,
-                        over || focus ? 0x453BAEE6 : included ? 0x242E9BD6 : 0x18FFFFFF);
+                style.control(g, box.x() + 5, y + 1, box.w() - 14, ROW_H - 3, included, over || focus);
                 g.item(entry.stack(), box.x() + 10, y + 6);
-                ModernTypography.draw(g, ModernTypography.fit(this.name(entry), Math.max(1, box.w() - 69)),
-                        box.x() + 32, y + 10, ModernStyle.INK, false);
-                ModernTypography.draw(g, selected ? "−" : included ? "✓" : "+", box.x() + box.w() - 27, y + 10,
-                        included ? ModernStyle.BLUE : ModernStyle.INK_MUTED, false);
+                style.label(g, entry.name(), box.x() + 32, y + 9, box.w() - 69, style.ink);
+                style.label(g, selected ? "−" : included ? "✓" : "+", box.x() + box.w() - 27, y + 9,
+                        included ? style.accent : style.muted);
             }
             if (list.isEmpty()) {
-                ModernTypography.draw(g, ModernTypography.fit(selected ? "Drop items here" : "No matching items", box.w() - 24), box.x() + 12,
-                        box.viewTop() + 10, ModernStyle.INK_MUTED, false);
+                style.label(g, ModuleScreenStyle.tr(selected ? "drop_here" : "no_matches"), box.x() + 12,
+                        box.viewTop() + 9, box.w() - 24, style.muted);
             }
         } finally {
             g.disableScissor();
@@ -192,7 +177,7 @@ public final class ProjectileWhitelistScreen extends Screen implements ModernBlu
         if (content > box.viewHeight()) {
             int barH = Math.max(12, box.viewHeight() * box.viewHeight() / content);
             int barY = box.viewTop() + Math.round(scroll * (box.viewHeight() - barH) / (float) (content - box.viewHeight()));
-            ModernStyle.rounded(g, box.x() + box.w() - 5, barY, 2, barH, 1, 0x8057798D);
+            style.shape(g, box.x() + box.w() - 5, barY, 2, barH, 1, style.muted);
         }
     }
 

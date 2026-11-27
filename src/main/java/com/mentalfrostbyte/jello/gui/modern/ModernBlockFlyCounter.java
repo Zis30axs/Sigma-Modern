@@ -1,5 +1,7 @@
 package com.mentalfrostbyte.jello.gui.modern;
 
+import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.ClientMode;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.awt.Color;
@@ -178,6 +180,31 @@ public final class ModernBlockFlyCounter {
         lastKnownStack = null;
     }
 
+    private static void drawSimpleCounter(GuiGraphicsExtractor g, ClientMode mode, int count,
+                                          @Nullable ItemStack stack, float centerX, float topY) {
+        String text = Client.getInstance().getTranslations().get(count == 1 ? "module.editor.block" : "module.editor.blocks", Math.max(0, count));
+        int y = Math.round(topY);
+        boolean hasIcon = stack != null && !stack.isEmpty();
+        if (mode == ClientMode.NO_ADDONS) {
+            var font = Minecraft.getInstance().font;
+            int x = Math.round(centerX - (font.width(text) + (hasIcon ? 19 : 0)) / 2F);
+            if (hasIcon) g.item(stack, x, y);
+            g.text(font, text, x + (hasIcon ? 19 : 0), y + 4, 0xFFFFFFFF, true);
+            return;
+        }
+
+        boolean jello = mode == ClientMode.JELLO;
+        var face = jello ? LegacyFonts.Face.JELLO_MEDIUM : LegacyFonts.Face.CLASSIC_BOLD;
+        int w = (int) Math.ceil(LegacyFonts.width(face, text, 11)) + (hasIcon ? 28 : 11);
+        int x = Math.round(centerX - w / 2F);
+        g.nextStratum();
+        ModernStyle.rounded(g, x, y, w, 22, jello ? 4 : 0, jello ? 0xE6FAFAFA : 0xCB111111);
+        if (hasIcon) g.item(stack, x + 3, y + 3);
+        LegacyFonts.draw(g, face, text, x + (hasIcon ? 22 : 5), y + (22 - LegacyFonts.height(face, 11)) / 2,
+                11, jello ? 0xFF171717 : 0xFFFAFAFA);
+        g.nextStratum();
+    }
+
     /** Renders the centered liquid-glass floating block counter pill at {@code (centerX, topY)}. */
     public static void render(
         final GuiGraphicsExtractor g,
@@ -187,6 +214,11 @@ public final class ModernBlockFlyCounter {
         final float topY
     ) {
         if (g == null) return;
+        ClientMode mode = Client.getInstance().getClientModeManager().get();
+        if (mode != ClientMode.SIGMA_MODERN) {
+            drawSimpleCounter(g, mode, count, activeStack, centerX, topY);
+            return;
+        }
         long now = System.nanoTime();
         boolean gap = lastDrawNanos == 0L || now - lastDrawNanos > 250_000_000L;
         if (gap) appearStartNanos = now;

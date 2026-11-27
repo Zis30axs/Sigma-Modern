@@ -6,4 +6,5 @@ package com.mentalfrostbyte.jello.gui.modern;
  * user's "menu background blurriness" slider - the same treatment the ClickGUI has always had.
  */
 public interface ModernBlurredBackdrop {
+    default boolean usesStrongBackdropBlur() { return true; }
 }

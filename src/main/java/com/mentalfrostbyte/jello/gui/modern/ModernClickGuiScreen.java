@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.gui.modern;
 import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
 import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
+import com.mentalfrostbyte.jello.gui.SettingEditor;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
 import com.mentalfrostbyte.jello.lang.ClientLanguage;
 import com.mentalfrostbyte.jello.lang.Translations;
@@ -12,8 +13,6 @@ import com.mentalfrostbyte.jello.module.ModuleManager;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
-import com.mentalfrostbyte.jello.setting.ItemListSetting;
-import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -828,7 +827,12 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
                 ModernStyle.rounded(g, sx - 1, mid - 8, 16, 16, 5, 0x3315303E);
                 ModernStyle.rounded(g, sx, mid - 7, 14, 14, 4, SWATCHES[i]);
             }
-        } else if (s instanceof TextSetting || s instanceof KeySetting || s instanceof ItemListSetting || s instanceof InventoryLayoutSetting) {
+        } else if (SettingEditor.forSetting(s) != null) {
+            ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, over ? PILL_EDITING : PILL);
+            String value = ModernTypography.fit(this.interactions.displayValue(s), (int) ((controlW - 27) / VALUE_SCALE));
+            ModernTypography.draw(g, ModernTypography.Face.TEXT, value, cx + 8, mid - 4.6F, VALUE_SCALE, ModernStyle.INK);
+            ModernTypography.draw(g, "›", cx + controlW - 13, mid - 6, ModernStyle.BLUE, false);
+        } else if (s instanceof TextSetting || s instanceof KeySetting) {
             boolean editing = this.interactions.isEditing(s)
                 || s instanceof KeySetting key && this.interactions.isBinding(key);
             ModernStyle.rounded(g, cx, mid - 9, controlW, 18, 6, editing ? PILL_EDITING : PILL);
@@ -1328,7 +1332,7 @@ public final class ModernClickGuiScreen extends Screen implements SigmaClickGui,
 
     @Override public void removed() { this.searchFocused = false; this.interactions.mouseReleased(); this.music.blur(); Client.getInstance().saveConfig(); super.removed(); }
 
-    @Override public boolean isTypingText() { return this.music.isTyping() || this.searchFocused || this.interactions.isCapturingKey(); }
+    @Override public boolean isTypingText() { return this.music.isTyping() || this.searchFocused || this.interactions.isEnteringInput(); }
 
     @Override public boolean preeditUpdated(net.minecraft.client.input.@org.jspecify.annotations.Nullable PreeditEvent e) {
         return this.music.preeditUpdated(e) || super.preeditUpdated(e);

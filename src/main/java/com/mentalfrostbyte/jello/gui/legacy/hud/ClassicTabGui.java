@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.legacy.hud;
 
 import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
+import com.mentalfrostbyte.jello.gui.SettingEditor;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.modern.LegacyFonts.Face;
 import com.mentalfrostbyte.jello.module.Module;
@@ -8,6 +9,7 @@ import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.impl.gui.TabGui;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
+import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.util.math.Easing;
@@ -241,6 +243,9 @@ final class ClassicTabGui {
         if (setting instanceof ColorSetting color) {
             return String.format("#%06X", color.get() & 0xFFFFFF);
         }
+        if (setting instanceof KeySetting key) return key.displayLabel();
+        SettingEditor editor = SettingEditor.forSetting(setting);
+        if (editor != null) return editor.summary(setting);
         Object value = setting.get();
         return value instanceof Enum<?> choice ? com.mentalfrostbyte.jello.setting.EnumSetting.label(choice) : String.valueOf(value);
     }

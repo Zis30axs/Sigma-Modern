@@ -59,6 +59,11 @@ public final class LegacyFonts {
         return face.renderer().measure(text) * size / ModernFontRenderer.SIZE;
     }
 
+    /** Fitted text at the renderer's native GUI size. Uses the same shaped clusters as drawing. */
+    public static String fit(Face face, String text, int width) {
+        return face.renderer().fit(text, width);
+    }
+
     /** The height of a line: the face's ascent plus descent at {@code size}. */
     public static float height(Face face, float size) {
         FontMetrics metrics = face.renderer().metrics();

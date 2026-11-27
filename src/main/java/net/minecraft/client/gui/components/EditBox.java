@@ -433,13 +433,7 @@ public class EditBox extends AbstractWidget implements IEditBox {
 
         if (this.isVisible()) {
             if (this.isBordered()) {
-                // MODIFIED for porting: SigmaModern draws bordered text fields as its own glass.
-                if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
-                    com.mentalfrostbyte.jello.gui.modern.ModernSkin.field(graphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.isActive(), this.isFocused());
-                } else {
-                Identifier sprite = SPRITES.get(this.isActive(), this.isFocused());
-                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, this.getX(), this.getY(), this.getWidth(), this.getHeight());
-                }
+                this.extractBorder(graphics);
             }
 
             int color = this.isEditable ? this.textColor : this.textColorUneditable;
@@ -540,6 +534,16 @@ public class EditBox extends AbstractWidget implements IEditBox {
 
     public int getCursorPosition() {
         return this.cursorPos;
+    }
+
+    protected void extractBorder(final GuiGraphicsExtractor graphics) {
+        // MODIFIED for porting: SigmaModern draws bordered text fields as its own glass.
+        if (com.mentalfrostbyte.jello.gui.modern.ModernSkin.active()) {
+            com.mentalfrostbyte.jello.gui.modern.ModernSkin.field(graphics, this.getX(), this.getY(), this.getWidth(), this.getHeight(), this.isActive(), this.isFocused());
+        } else {
+            Identifier sprite = SPRITES.get(this.isActive(), this.isFocused());
+            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, this.getX(), this.getY(), this.getWidth(), this.getHeight());
+        }
     }
 
     public boolean isBordered() {
