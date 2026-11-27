@@ -30,9 +30,15 @@ public class EventMovementInput extends Event {
     }
 
     public void setInput(final Input input) {
+        this.setInput(input, true);
+    }
+
+    public void setInput(final Input input, final boolean normalizeDiagonals) {
         this.input = input;
-        this.moveVector = new Vec2((input.left() ? 1 : 0) - (input.right() ? 1 : 0),
-                (input.forward() ? 1 : 0) - (input.backward() ? 1 : 0)).normalized();
+        float strafe = (input.left() ? 1 : 0) - (input.right() ? 1 : 0);
+        float forward = (input.forward() ? 1 : 0) - (input.backward() ? 1 : 0);
+        Vec2 raw = new Vec2(strafe, forward);
+        this.moveVector = normalizeDiagonals ? raw.normalized() : raw;
     }
 
     public Vec2 getMoveVector() { return this.moveVector; }

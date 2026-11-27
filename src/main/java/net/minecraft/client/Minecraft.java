@@ -2226,7 +2226,8 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
                 // MODIFIED for porting: was VFP networking/open_inventory_packet
                 // MixinMinecraft#sendOpenInventoryPacket (@Inject after Tutorial#onOpenInventory).
                 // <= 1.11.1 reported opening the inventory to the server for the achievement.
-                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)) {
+                if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_11_1)
+                    && !com.mentalfrostbyte.jello.module.impl.movement.InvMove.shouldSuppressOpenInventoryAchievement()) {
                     final PacketWrapper clientCommand = PacketWrapper.create(
                         ServerboundPackets1_9_3.CLIENT_COMMAND, ProtocolTranslator.getPlayNetworkUserConnection()
                     );

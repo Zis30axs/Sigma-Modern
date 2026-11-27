@@ -38,4 +38,16 @@ public final class Sprint extends Module {
             event.setSprint(true);
         }
     }
+
+    public boolean shouldAutoSprint(final boolean forward, final boolean backward, final boolean movingInput, final boolean sneaking) {
+        if (mc.player == null || mc.level == null || !mc.player.isAlive() || mc.player.isSpectator()) {
+            return false;
+        }
+        if (this.stopOnHit.get() && mc.player.didAttackStopSprintThisTick()) {
+            return false;
+        }
+        MovementCorrector corrector = MovementCorrector.current();
+        boolean turnsKeys = corrector != null && corrector.turnsKeys() && !mc.player.isPassenger();
+        return (turnsKeys ? movingInput : (forward && !backward)) && !sneaking;
+    }
 }

@@ -718,7 +718,7 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
         AbstractContainerMenu containerMenu = player.containerMenu;
         if (containerId != containerMenu.containerId) {
             LOGGER.warn("Ignoring click in mismatching container. Click in {}, player has {}.", containerId, containerMenu.containerId);
-        } else {
+        } else if (!com.mentalfrostbyte.jello.module.impl.movement.InvMove.shouldBlockContainerClick()) {
             NonNullList<Slot> slots = containerMenu.slots;
             int slotCount = slots.size();
             List<ItemStack> itemsBeforeClick = Lists.newArrayListWithCapacity(slotCount);
@@ -758,13 +758,17 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
             // (@WrapWithCondition on ClientPacketListener#send in handleContainerInput). <= 1.16.4 sends the item
             // as it was before the click plus an action id, <= 1.21.4 sends the whole items instead of hashes, and
             // only 1.21.5 and newer take the vanilla hashed-stack packet.
+            final Runnable sendClick;
             if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_16_4)) {
-                this.vfpClickSlot1_16_5(clickPacket);
+                final PacketWrapper wrapper = this.vfpBuildClickSlot1_16_5(clickPacket);
+                sendClick = () -> wrapper.scheduleSendToServer(Protocol1_16_4To1_17.class);
             } else if (ProtocolTranslator.getTargetVersion().olderThanOrEqualTo(ProtocolVersion.v1_21_4)) {
-                this.vfpClickSlot1_21_4(clickPacket);
+                final PacketWrapper wrapper = this.vfpBuildClickSlot1_21_4(clickPacket);
+                sendClick = () -> wrapper.scheduleSendToServer(Protocol1_21_4To1_21_5.class);
             } else {
-                this.connection.send(clickPacket);
+                sendClick = () -> this.connection.send(clickPacket);
             }
+            com.mentalfrostbyte.jello.module.impl.movement.InvMove.dispatchContainerClick(containerId, containerInput, sendClick);
         }
     }
 
@@ -880,7 +884,7 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
 
     // MODIFIED for porting: was VFP container_clicking MixinMultiPlayerGameMode#viaFabricPlus$clickSlot1_21_4 (@Unique).
     // <= 1.21.4 carries the full item of every changed slot instead of the 1.21.5 hash, read back from the live menu.
-    private void vfpClickSlot1_21_4(final ServerboundContainerClickPacket packet) {
+    private PacketWrapper vfpBuildClickSlot1_21_4(final ServerboundContainerClickPacket packet) {
         final PacketWrapper containerClick = PacketWrapper.create(ServerboundPackets1_21_4.CONTAINER_CLICK, ProtocolTranslator.getPlayNetworkUserConnection());
         containerClick.write(Types.VAR_INT, packet.containerId());
         containerClick.write(Types.VAR_INT, packet.stateId());
@@ -899,12 +903,12 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
 
         final ItemStack cursorStack = this.minecraft.player.containerMenu.getCarried();
         containerClick.write(VersionedTypes.V1_21_4.item, ItemTranslator.mcToVia(cursorStack, ProtocolVersion.v1_21_4));
-        containerClick.scheduleSendToServer(Protocol1_21_4To1_21_5.class);
+        return containerClick;
     }
 
     // MODIFIED for porting: was VFP container_clicking MixinMultiPlayerGameMode#viaFabricPlus$clickSlot1_16_5 (@Unique).
     // <= 1.16.4 carries a client action id plus the ONE slot item as it was before the click, for verification.
-    private void vfpClickSlot1_16_5(final ServerboundContainerClickPacket packet) {
+    private PacketWrapper vfpBuildClickSlot1_16_5(final ServerboundContainerClickPacket packet) {
         ItemStack slotItemBeforeModification;
         if (this.vfpShouldBeEmpty(packet.containerInput(), packet.slotNum())) {
             slotItemBeforeModification = ItemStack.EMPTY;
@@ -921,10 +925,10 @@ public class MultiPlayerGameMode implements IMultiPlayerGameMode { // MODIFIED f
         containerClick.write(Types.SHORT, ((IAbstractContainerMenu)this.minecraft.player.containerMenu).viaFabricPlus$incrementAndGetActionId());
         containerClick.write(Types.VAR_INT, packet.containerInput().ordinal());
         containerClick.write(Types.ITEM1_13_2, ItemTranslator.mcToVia(slotItemBeforeModification, ProtocolVersion.v1_16_4));
-        containerClick.scheduleSendToServer(Protocol1_16_4To1_17.class);
 
         this.vfpOldCursorStack = null;
         this.vfpOldItems = null;
+        return containerClick;
     }
 
     // MODIFIED for porting: was VFP container_clicking MixinMultiPlayerGameMode#viaFabricPlus$shouldBeEmpty (@Unique)

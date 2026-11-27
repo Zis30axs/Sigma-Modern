@@ -1802,6 +1802,10 @@ public class LocalPlayer extends AbstractClientPlayer
         return this.lastSentInput;
     }
 
+    public boolean vfpWasSneaking() {
+        return this.vfpLastSneaking;
+    }
+
     public HitResult raycastHitResult(final float a, final Entity cameraEntity) {
         ItemStack itemStack = this.getActiveItem();
         AttackRange itemAttackRange = itemStack.get(DataComponents.ATTACK_RANGE);
