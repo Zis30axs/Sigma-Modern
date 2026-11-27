@@ -105,6 +105,17 @@ public class SynchedEntityData {
         return result;
     }
 
+    // Sigma hook: pack all synced entity values for Relay world reconstruction.
+    public List<SynchedEntityData.DataValue<?>> packAll() {
+        List<SynchedEntityData.DataValue<?>> result = new ArrayList<>(this.itemsById.length);
+        for (SynchedEntityData.DataItem<?> dataItem : this.itemsById) {
+            if (dataItem != null) {
+                result.add(dataItem.value());
+            }
+        }
+        return result;
+    }
+
     public void assignValues(final List<SynchedEntityData.DataValue<?>> items) {
         for (SynchedEntityData.DataValue<?> item : items) {
             SynchedEntityData.DataItem<?> dataItem = this.itemsById[item.id];

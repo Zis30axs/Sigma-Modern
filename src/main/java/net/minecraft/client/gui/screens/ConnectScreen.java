@@ -146,6 +146,20 @@ public class ConnectScreen extends Screen {
                     }
 
                     address = resolvedAddress.get();
+                    // Sigma hook: even if the user typed 127.0.0.1:<port> in Direct Connect with VFP set to another
+                    // version, auto-detect a running local MC-Relay / Sigma Relay proxy and lock onto Host A's version.
+                    if (!server.sigma$isRelayTakeover() && address.getAddress().isLoopbackAddress()) {
+                        com.mentalfrostbyte.jello.relay.RelayJvmInjector.ProbeStatus sigma$probe =
+                            com.mentalfrostbyte.jello.relay.RelayJvmInjector.probeRelayStatus(
+                                address.getHostString(), address.getPort(), 250);
+                        if (sigma$probe != null
+                            && (com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isSigmaRelayMotd(sigma$probe.description())
+                                || com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isInjectedAgentRelayMotd(sigma$probe.description()))) {
+                            server.sigma$setRelayTakeover(true);
+                            ((IServerData) server).viaFabricPlus$passDirectConnectScreen(false);
+                            ((IServerData) server).viaFabricPlus$forceVersion(sigma$probe.resolvedProtocolVersion());
+                        }
+                    }
                     // MODIFIED for porting: was VFP integration MixinConnectScreen_1#setServerInfoAndProtocolVersion
                     // (@WrapOperation on Optional#get). Picks the version this join translates to: a per-server
                     // forced version wins once (then the direct-connect latch is cleared), otherwise the global
@@ -172,9 +186,11 @@ public class ConnectScreen extends Screen {
                         }
                     }
                     ProtocolTranslator.setTargetVersion(vfp$targetVersion, true);
+                    final boolean sigma$relayTakeover = server.sigma$isRelayTakeover();
                     // MODIFIED for porting: was VFP integration MixinConnectScreen_1 @Unique viaFabricPlus$useClassiCubeAccount
                     // - latched here, read by the useClassiCubeUsername hook below.
-                    final boolean vfp$useClassiCubeAccount = AuthenticationSettings.INSTANCE.setSessionNameToClassiCubeNameInServerList.getValue()
+                    final boolean vfp$useClassiCubeAccount = !sigma$relayTakeover
+                        && AuthenticationSettings.INSTANCE.setSessionNameToClassiCubeNameInServerList.getValue()
                         && ViaFabricPlusClassicMPPassProvider.classicubeMPPass != null;
                     // MODIFIED for porting: was VFP srv_resolving MixinConnectScreen_1 getRealAddress/getRealPort (@Redirect <=1_17 uses raw host/port)
                     // Both un-ordinaled redirects also cover the error-message stripping in the catch block below.
@@ -188,6 +204,7 @@ public class ConnectScreen extends Screen {
                         }
 
                         pendingConnection = new Connection(PacketFlow.CLIENTBOUND);
+                        pendingConnection.sigma$setRelayTakeover(sigma$relayTakeover);
                         pendingConnection.setBandwidthLogger(minecraft.getDebugOverlay().getBandwidthLogger());
                         // MODIFIED for porting: was VFP bedrock MixinConnectScreen_1#markAsConnecting (@Redirect
                         // EventLoopGroupHolder#remote) - flags the holder as connecting so the bedrock transport
@@ -206,7 +223,7 @@ public class ConnectScreen extends Screen {
                     ConnectScreen.this.channelFuture.syncUninterruptibly();
                     // MODIFIED for porting: was VFP legacy_chat_signature MixinConnectScreen_1#setupChatSessions (@Inject AFTER syncUninterruptibly)
                     final UserConnection vfp$viaUser = ((com.viaversion.viafabricplus.injection.access.core.IConnection) pendingConnection).viaFabricPlus$getUserConnection();
-                    if (ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_19, ProtocolVersion.v1_19_1)) {
+                    if (!sigma$relayTakeover && ProtocolTranslator.getTargetVersion().betweenInclusive(ProtocolVersion.v1_19, ProtocolVersion.v1_19_1)) {
                         final ProfileKeyPair keyPair = minecraft.getProfileKeyPairManager().prepareKeyPair().join().orElse(null);
                         if (keyPair != null) {
                             final ProfilePublicKey.Data publicKeyData = keyPair.publicKey().data();

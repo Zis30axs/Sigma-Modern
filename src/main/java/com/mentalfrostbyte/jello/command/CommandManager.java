@@ -7,6 +7,7 @@ import com.mentalfrostbyte.jello.command.impl.ConfigCommand;
 import com.mentalfrostbyte.jello.command.impl.HelpCommand;
 import com.mentalfrostbyte.jello.command.impl.ModulesCommand;
 import com.mentalfrostbyte.jello.command.impl.PrefixCommand;
+import com.mentalfrostbyte.jello.command.impl.RelayCommand;
 import com.mentalfrostbyte.jello.command.impl.SayCommand;
 import com.mentalfrostbyte.jello.command.impl.SettingCommand;
 import com.mentalfrostbyte.jello.command.impl.SuspectsCommand;
@@ -53,6 +54,7 @@ public final class CommandManager {
         this.register(new SuspectsCommand());
         this.register(new VClipCommand());
         this.register(new SayCommand());
+        this.register(new RelayCommand());
     }
 
     public void register(final Command command) {

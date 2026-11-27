@@ -3144,10 +3144,16 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
     }
 
     public void prepareKeyPair() {
+        if (this.connection.sigma$isRelayTakeover()) {
+            return;
+        }
         this.keyPairFuture = this.minecraft.getProfileKeyPairManager().prepareKeyPair();
     }
 
     private void setKeyPair(final ProfileKeyPair keyPair) {
+        if (this.connection.sigma$isRelayTakeover()) {
+            return;
+        }
         if (this.minecraft.isLocalPlayer(this.localGameProfile.id())) {
             if (this.chatSession == null || !this.chatSession.keyPair().equals(keyPair)) {
                 this.chatSession = LocalChatSession.create(keyPair);
@@ -3229,6 +3235,19 @@ public class ClientPacketListener extends ClientCommonPacketListenerImpl impleme
 
     public ClientClockManager clockManager() {
         return this.clockManager;
+    }
+
+    // Sigma hook: direct Relay accessors for server chunk/simulation distances and signed chat availability.
+    public int serverChunkRadius() {
+        return this.serverChunkRadius;
+    }
+
+    public int serverSimulationDistance() {
+        return this.serverSimulationDistance;
+    }
+
+    public boolean hasVerifiableChatSession() {
+        return this.chatSession != null && this.signedMessageEncoder != null;
     }
 
     @OnlyIn(Dist.CLIENT)

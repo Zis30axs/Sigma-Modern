@@ -253,7 +253,18 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
         @Override
         public void join() {
-            this.screen.join(new ServerData(this.serverData.getMotd(), this.serverData.getAddress(), ServerData.Type.LAN));
+            ServerData data = new ServerData(this.serverData.getMotd(), this.serverData.getAddress(), ServerData.Type.LAN);
+            // Sigma hook: Sigma Relay speaks native 26.2; hot-injected external MC-Relay Proxy speaks Host A's version.
+            if (com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isSigmaRelayMotd(this.serverData.getMotd())) {
+                data.sigma$setRelayTakeover(true);
+                ((com.viaversion.viafabricplus.injection.access.core.IServerData) data)
+                    .viaFabricPlus$forceVersion(com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator.NATIVE_VERSION);
+            } else if (com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isInjectedAgentRelayMotd(this.serverData.getMotd())) {
+                data.sigma$setRelayTakeover(true);
+                ((com.viaversion.viafabricplus.injection.access.core.IServerData) data)
+                    .viaFabricPlus$forceVersion(com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator.AUTO_DETECT_PROTOCOL);
+            }
+            this.screen.join(data);
         }
 
         @Override

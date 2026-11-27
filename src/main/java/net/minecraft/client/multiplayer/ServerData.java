@@ -27,6 +27,15 @@ public class ServerData implements com.viaversion.viafabricplus.injection.access
     private ProtocolVersion viaFabricPlus$forcedVersion = null;
     private boolean viaFabricPlus$passedDirectConnectScreen;
     private ProtocolVersion viaFabricPlus$translatingVersion;
+    private boolean sigma$relayTakeover;
+
+    public boolean sigma$isRelayTakeover() {
+        return this.sigma$relayTakeover;
+    }
+
+    public void sigma$setRelayTakeover(final boolean relayTakeover) {
+        this.sigma$relayTakeover = relayTakeover;
+    }
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_ICON_SIZE = 1024;
     public String name;

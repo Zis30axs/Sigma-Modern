@@ -43,6 +43,7 @@ import com.mentalfrostbyte.jello.module.impl.misc.AutoReconnect;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiCheat;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleAntiExploit;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
+import com.mentalfrostbyte.jello.module.impl.misc.Relay;
 import com.mentalfrostbyte.jello.module.impl.movement.Speed;
 import com.mentalfrostbyte.jello.module.impl.movement.Sprint;
 import com.mentalfrostbyte.jello.module.impl.movement.NoJumpDelay;
@@ -173,6 +174,7 @@ public final class ModuleManager {
         this.register(new TargetHud());
         this.register(new Velocity());
         this.register(new AutoReconnect());
+        this.register(new Relay());
         this.register(new Fucker());
         this.register(new Weather());
     }

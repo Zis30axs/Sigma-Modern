@@ -40,6 +40,23 @@ public class ClientboundPlayerInfoUpdatePacket implements Packet<ClientGamePacke
         this.entries = List.of(new ClientboundPlayerInfoUpdatePacket.Entry(player));
     }
 
+    // Sigma hook: construct tab-list snapshots directly from client PlayerInfo entries for Relay.
+    private ClientboundPlayerInfoUpdatePacket(
+        final EnumSet<ClientboundPlayerInfoUpdatePacket.Action> actions,
+        final List<ClientboundPlayerInfoUpdatePacket.Entry> entries,
+        final boolean direct
+    ) {
+        this.actions = EnumSet.copyOf(actions);
+        this.entries = List.copyOf(entries);
+    }
+
+    public static ClientboundPlayerInfoUpdatePacket fromEntries(
+        final EnumSet<ClientboundPlayerInfoUpdatePacket.Action> actions,
+        final List<ClientboundPlayerInfoUpdatePacket.Entry> entries
+    ) {
+        return new ClientboundPlayerInfoUpdatePacket(actions, entries, true);
+    }
+
     public static ClientboundPlayerInfoUpdatePacket createPlayerInitializing(final Collection<ServerPlayer> players) {
         EnumSet<ClientboundPlayerInfoUpdatePacket.Action> actions = EnumSet.of(
             ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,

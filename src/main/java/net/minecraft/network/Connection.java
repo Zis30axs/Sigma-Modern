@@ -71,9 +71,11 @@ import com.mentalfrostbyte.jello.event.EventBus;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
 import com.mentalfrostbyte.jello.module.impl.world.Disabler;
-// Sigma: SelfDetection.
+// Sigma: SelfDetection & Relay.
 import com.mentalfrostbyte.jello.module.Modules;
 import com.mentalfrostbyte.jello.module.impl.misc.ModuleSelfDetection;
+import com.mentalfrostbyte.jello.module.impl.misc.Relay;
+import com.mentalfrostbyte.jello.relay.RelayChannelBridge;
 import com.mentalfrostbyte.jello.selfcheck.host.SelfCheckPipeline;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.network.protocol.handshake.ClientIntent;
@@ -101,6 +103,16 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
     private UserConnection viaFabricPlus$userConnection;
     private ProtocolVersion viaFabricPlus$serverVersion;
     private Cipher viaFabricPlus$decryptionCipher;
+    // Sigma hook: marks a Controller B -> Relay Proxy takeover session so B never overwrites Host A's AuthCl brand/keys.
+    private volatile boolean sigma$relayTakeover;
+
+    public boolean sigma$isRelayTakeover() {
+        return this.sigma$relayTakeover;
+    }
+
+    public void sigma$setRelayTakeover(final boolean relayTakeover) {
+        this.sigma$relayTakeover = relayTakeover;
+    }
     private static final float AVERAGE_PACKETS_SMOOTHING = 0.75F;
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final Marker ROOT_MARKER = MarkerFactory.getMarker("NETWORK");
@@ -143,6 +155,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
             && "COMPRESSION_ENABLED".equals(evt.toString())) {
             ViaChannelInitializer.reorderPipeline(ctx.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
             SelfCheckPipeline.reanchor(ctx.pipeline()); // Sigma hook: SelfDetection's taps stay on the wire side of Via
+            RelayChannelBridge.reanchor(ctx.pipeline()); // Sigma hook: Relay's taps stay on the native 26.2 side of Via
             ViaFabricPlusImpl.INSTANCE
                 .getLogger()
                 .warn(
@@ -385,6 +398,14 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
     }
 
     public void send(final Packet<?> packet, final @Nullable ChannelFutureListener listener, final boolean flush) {
+        // Sigma hook: on a Relay takeover connection, never send B's own CustomPayloads (Brand in CONFIGURATION/PLAY,
+        // ClientSpoof, ClientIdSpoofer, channel registrations) or B's ChatSessionUpdate key, preserving Host A's AuthCl identity.
+        if (this.receiving == PacketFlow.CLIENTBOUND
+            && this.sigma$relayTakeover
+            && (packet instanceof net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket
+                || packet instanceof net.minecraft.network.protocol.game.ServerboundChatSessionUpdatePacket)) {
+            return;
+        }
         // Sigma hook: outbound packets. Client side only, for the reason given in channelRead0. Every
         // send overload funnels through here, so this is the one choke point modules need.
         Packet<?> outgoing = packet;
@@ -605,6 +626,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                     if (selfDetection != null) {
                         selfDetection.attach(channel, sigma$targetVersion, address);
                     }
+                    Relay.onPlayChannelInit(channel);
                 }
             }
         });
@@ -733,6 +755,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
                 ChannelPipeline pipeline = channel.pipeline();
                 Connection.configureInMemoryPipeline(pipeline, PacketFlow.CLIENTBOUND);
                 connection.configurePacketHandler(pipeline);
+                Relay.onPlayChannelInit(channel);
             }
         }).channel(EventLoopGroupHolder.local().channelCls()).connect(address).syncUninterruptibly();
         return connection;
@@ -843,6 +866,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> implement
         // MODIFIED for porting: compression enabled and handlers placed, keep Via handlers ordered (was VFP MixinConnection#reorderCompression)
         ViaChannelInitializer.reorderPipeline(this.channel.pipeline(), HandlerNames.COMPRESS, HandlerNames.DECOMPRESS);
         SelfCheckPipeline.reanchor(this.channel.pipeline()); // Sigma hook: SelfDetection's taps stay on the wire side of Via
+        RelayChannelBridge.reanchor(this.channel.pipeline()); // Sigma hook: Relay's taps stay on the native 26.2 side of Via
     }
 
     public void handleDisconnection() {

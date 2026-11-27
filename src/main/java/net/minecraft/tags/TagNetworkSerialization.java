@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import net.minecraft.core.Holder;
 import net.minecraft.core.LayeredRegistryAccess;
 import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.RegistrySynchronization;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.Identifier;
@@ -25,6 +26,37 @@ public class TagNetworkSerialization {
             .map(e -> Pair.of(e.key(), serializeToNetwork(e.value())))
             .filter(e -> !e.getSecond().isEmpty())
             .collect(Collectors.toMap(Pair::getFirst, Pair::getSecond));
+    }
+
+    // Sigma hook: serialize client-known registry tags for Relay configuration snapshots.
+    public static Map<ResourceKey<? extends Registry<?>>, TagNetworkSerialization.NetworkPayload> serializeTagsToNetwork(
+        final RegistryAccess registries
+    ) {
+        Map<ResourceKey<? extends Registry<?>>, TagNetworkSerialization.NetworkPayload> result = new HashMap<>();
+        registries.registries().forEach(entry -> {
+            TagNetworkSerialization.NetworkPayload payload = serializeClientRegistry(entry.value());
+            if (!payload.isEmpty()) {
+                result.put(entry.key(), payload);
+            }
+        });
+        return result;
+    }
+
+    private static <T> TagNetworkSerialization.NetworkPayload serializeClientRegistry(final Registry<T> registry) {
+        Map<Identifier, IntList> result = new HashMap<>();
+        registry.getTags().forEach(tag -> {
+            IntList ids = new IntArrayList(tag.size());
+            for (Holder<T> holder : tag) {
+                if (holder.kind() == Holder.Kind.REFERENCE) {
+                    int id = registry.getId(holder.value());
+                    if (id >= 0) {
+                        ids.add(id);
+                    }
+                }
+            }
+            result.put(tag.key().location(), ids);
+        });
+        return new TagNetworkSerialization.NetworkPayload(result);
     }
 
     private static <T> TagNetworkSerialization.NetworkPayload serializeToNetwork(final Registry<T> registry) {

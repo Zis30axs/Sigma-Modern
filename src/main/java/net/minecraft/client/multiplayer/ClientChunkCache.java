@@ -178,6 +178,30 @@ public class ClientChunkCache extends ChunkSource {
         return this.storage.chunkCount;
     }
 
+    // Sigma hook: direct chunk snapshot accessors for Relay world reconstruction.
+    public java.util.List<LevelChunk> loadedChunks() {
+        ClientChunkCache.Storage snapshot = this.storage;
+        java.util.List<LevelChunk> out = new java.util.ArrayList<>(Math.max(16, snapshot.chunkCount));
+        for (int i = 0; i < snapshot.chunks.length(); i++) {
+            LevelChunk chunk = snapshot.chunks.get(i);
+            if (chunk != null) {
+                ChunkPos pos = chunk.getPos();
+                if (isValidChunk(chunk, pos.x(), pos.z())) {
+                    out.add(chunk);
+                }
+            }
+        }
+        return out;
+    }
+
+    public int viewCenterX() {
+        return this.storage.viewCenterX;
+    }
+
+    public int viewCenterZ() {
+        return this.storage.viewCenterZ;
+    }
+
     @Override
     public void onLightUpdate(final LightLayer layer, final SectionPos pos) {
         Minecraft.getInstance().levelExtractor.setSectionDirty(pos.x(), pos.y(), pos.z());

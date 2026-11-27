@@ -242,6 +242,45 @@ public final class ModernHud {
         if (pinnedTarget == pinned) ModernTargetHud.render(g);
         if (ModernHudEditor.hasPosition("radar") == pinned) ModernRadar.render(g);
         if (ModernHudEditor.hasPosition("rwr") == pinned) ModernRwr.render(g);
+        if (ModernHudEditor.hasPosition("relay_status") == pinned) drawRelayStatus(g);
+    }
+
+    private static void drawRelayStatus(GuiGraphicsExtractor g) {
+        com.mentalfrostbyte.jello.module.impl.misc.Relay relay = Modules.enabled(com.mentalfrostbyte.jello.module.impl.misc.Relay.class);
+        if (relay == null || !relay.showsHudStatus()) return;
+        Minecraft mc = Minecraft.getInstance();
+        if ((debugShowing() || mc.gui.hud.isHidden()) && !ModernHudEditor.isEditing()) return;
+
+        com.mentalfrostbyte.jello.relay.RelayCoordinator coord = com.mentalfrostbyte.jello.relay.RelayCoordinator.get();
+        String controller = coord.controllerName();
+        boolean controlled = controller != null;
+        int port = coord.isProxyRunning() ? coord.boundPort() : relay.parsedPort();
+        String label = controlled
+            ? "Relay · Controlled by " + controller
+            : "Relay · :" + port;
+
+        int textW = Math.round(ModernTypography.width(ModernTypography.Face.TEXT, label, 0.9F));
+        int w = textW + 28, h = 18;
+        int defaultX = (g.guiWidth() - w) / 2;
+        int defaultY = Math.max(BRAND_Y, ModernIsland.bottom() + 6);
+        var placement = ModernHudEditor.place(g, "relay_status", "Relay", defaultX, defaultY, w, h);
+
+        g.pose().pushMatrix();
+        try {
+            g.pose().translate(placement.x(), placement.y());
+            if (controlled) {
+                ModernStyle.halo(g, 0, 0, w, h, 9, 0x62E6B8, 0.38F);
+                ModernStyle.darkGlass(g, 0, 0, w, h, 9, 0xCC0D2824);
+                ModernIcons.draw(g, ModernIcons.Icon.LAN, 7F, 3.5F, 11F, 0xFF7CF5CC);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, label, 21F, 4.5F, 0.9F, 0xFFE6FFF6);
+            } else {
+                ModernStyle.darkGlass(g, 0, 0, w, h, 9, 0xB80E1D2B);
+                ModernIcons.draw(g, ModernIcons.Icon.LAN, 7F, 3.5F, 11F, 0xFF9BD8FA);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, label, 21F, 4.5F, 0.9F, 0xFFD9ECF7);
+            }
+        } finally {
+            g.pose().popMatrix();
+        }
     }
 
     private static void reserveVanillaHud(GuiGraphicsExtractor g, Minecraft mc) {

@@ -94,17 +94,28 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
         this.addRenderableWidget(new ModernButton(right, y, 22, 22, Component.translatable("selectServer.refresh"), ModernIcons.Icon.REFRESH,
             ModernButton.Kind.ICON, this::refreshServerList));
         Component add = Component.translatable("selectServer.add"), direct = Component.translatable("selectServer.direct");
+        Component relayLabel = Component.literal("Relay");
         if (l.wide()) {
-            int addW = labelWidth(add), directW = labelWidth(direct);
+            int addW = labelWidth(add), directW = labelWidth(direct), relayW = labelWidth(relayLabel);
             right -= 6 + addW;
             this.addRenderableWidget(new ModernButton(right, y, addW, 22, add, ModernIcons.Icon.PLUS, ModernButton.Kind.SECONDARY, this::openAddServer));
             right -= 6 + directW;
             this.addRenderableWidget(new ModernButton(right, y, directW, 22, direct, ModernIcons.Icon.ENTER, ModernButton.Kind.SECONDARY, this::openDirectJoin));
+            right -= 6 + relayW;
+            ModernButton relayBtn = new ModernButton(right, y, relayW, 22, relayLabel, ModernIcons.Icon.LAN, ModernButton.Kind.SECONDARY, this::openRelayScreen);
+            relayBtn.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                ModernVersions.text("Hot-inject into vanilla Minecraft & take over session", "扫描原版/启动器进程并一键热注入接管"))));
+            this.addRenderableWidget(relayBtn);
         } else {
             right -= 28;
             this.addRenderableWidget(new ModernButton(right, y, 22, 22, add, ModernIcons.Icon.PLUS, ModernButton.Kind.ICON, this::openAddServer));
             right -= 28;
             this.addRenderableWidget(new ModernButton(right, y, 22, 22, direct, ModernIcons.Icon.ENTER, ModernButton.Kind.ICON, this::openDirectJoin));
+            right -= 28;
+            ModernButton relayBtn = new ModernButton(right, y, 22, 22, relayLabel, ModernIcons.Icon.LAN, ModernButton.Kind.ICON, this::openRelayScreen);
+            relayBtn.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                ModernVersions.text("Hot-inject into vanilla Minecraft & take over session", "扫描原版/启动器进程并一键热注入接管"))));
+            this.addRenderableWidget(relayBtn);
         }
         // ViaFabricPlus's protocol picker, shown as the version it will translate to. Its "Off" orientation
         // setting hides the vanilla button; it hides this chip the same way.
@@ -331,6 +342,15 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
         ModernTypography.draw(g, ModernTypography.Face.DISPLAY, ModernTypography.ellipsize(lan.getMotd(), Math.round(tw / 1.45F)), tx, iy + 2F, 1.45F, 0xFFF2F8FC);
         String address = this.minecraft.options.hideServerAddress ? Component.translatable("selectServer.hiddenAddress").getString() : lan.getAddress();
         ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.ellipsize(address, tw), tx, iy + 22F, 1F, 0xFF7F9FB4);
-        ModernPage.chip(g, tx, iy + 40, Component.translatable("lanServer.title").getString(), 0xFFCFF7EF, 0x3326B8A0);
+        int chipX = tx + ModernPage.chip(g, tx, iy + 40, Component.translatable("lanServer.title").getString(), 0xFFCFF7EF, 0x3326B8A0) + 5;
+        if (com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isSigmaRelayMotd(lan.getMotd())) {
+            ModernPage.chip(g, chipX, iy + 40, "Sigma Relay · " + ProtocolTranslator.NATIVE_VERSION.getName(), 0xFFD6F1FF, 0x3D2E9BD6);
+        } else if (com.mentalfrostbyte.jello.relay.RelayLanBroadcast.isInjectedAgentRelayMotd(lan.getMotd())) {
+            ModernPage.chip(g, chipX, iy + 40, "MC-Relay · Auto Protocol", 0xFFD6F1FF, 0x3D2E9BD6);
+        }
+    }
+
+    private void openRelayScreen() {
+        this.minecraft.gui.setScreen(new ModernRelayScreen(this));
     }
 }

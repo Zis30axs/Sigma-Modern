@@ -2951,7 +2951,14 @@ public class Minecraft extends ReentrantBlockableEventLoop<Runnable>
     }
 
     public boolean isLocalPlayer(final UUID profileId) {
-        return profileId.equals(this.getUser().getProfileId());
+        if (profileId.equals(this.getUser().getProfileId())) {
+            return true;
+        }
+        // Sigma hook: when taking over a host via MC-Relay, recognize Host A's inherited AuthCl UUID as local.
+        ClientPacketListener listener = this.getConnection();
+        return listener != null
+            && listener.getConnection().sigma$isRelayTakeover()
+            && profileId.equals(listener.getLocalGameProfile().id());
     }
 
     public User getUser() {

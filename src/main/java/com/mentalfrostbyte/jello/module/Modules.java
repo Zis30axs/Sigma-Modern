@@ -33,6 +33,9 @@ public final class Modules {
      * otherwise. A module class that was never registered is still a programming error and still throws.
      */
     public static <T extends Module> @Nullable T enabled(final Class<T> type) {
+        if (net.minecraft.client.Minecraft.getInstance() == null) {
+            return null;
+        }
         Client client = Client.getInstance();
         if (!client.isStarted()) {
             return null;
