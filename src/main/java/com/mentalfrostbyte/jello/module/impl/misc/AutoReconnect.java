@@ -41,7 +41,7 @@ public class AutoReconnect extends Module {
     /** Called by {@code ConnectScreen#startConnecting} whenever the client joins a multiplayer server. */
     public static void remember(final ServerAddress address, final ServerData data) {
         if (address != null && data != null) {
-            lastTarget = new Target(address, data);
+            lastTarget = data.requiresFreshAdmission ? null : new Target(address, data);
         }
     }
 

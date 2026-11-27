@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.util.ExtraCodecs;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.util.Util;
@@ -51,7 +52,15 @@ public class QuickPlayLog {
     }
 
     public void log(final Minecraft minecraft) {
-        if (minecraft.gameMode != null && this.worldData != null) {
+        ServerData server = minecraft.getCurrentServer();
+        if (server != null && server.requiresFreshAdmission) {
+            return;
+        }
+        QuickPlayWorld world = this.worldData;
+        if (minecraft.gameMode != null && world != null) {
+            QuickPlayLog.QuickPlayEntry quickPlayEntry = new QuickPlayLog.QuickPlayEntry(
+                world, Instant.now(), minecraft.gameMode.getPlayerMode()
+            );
             Util.ioPool()
                 .execute(
                     () -> {
@@ -61,9 +70,6 @@ public class QuickPlayLog {
                             LOGGER.error("Failed to delete quickplay log file {}", this.path, e);
                         }
 
-                        QuickPlayLog.QuickPlayEntry quickPlayEntry = new QuickPlayLog.QuickPlayEntry(
-                            this.worldData, Instant.now(), minecraft.gameMode.getPlayerMode()
-                        );
                         Codec.list(QuickPlayLog.QuickPlayEntry.CODEC)
                             .encodeStart(JsonOps.INSTANCE, List.of(quickPlayEntry))
                             .resultOrPartial(Util.prefix("Quick Play: ", LOGGER::error))

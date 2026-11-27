@@ -40,6 +40,8 @@ public class ServerData implements com.viaversion.viafabricplus.injection.access
     private static final int MAX_ICON_SIZE = 1024;
     public String name;
     public String ip;
+    /** An operator admitted one role for this connection. Ask for a fresh admission on reconnect. */
+    public boolean requiresFreshAdmission;
     public Component status;
     public Component motd;
     public ServerStatus.@Nullable Players players;

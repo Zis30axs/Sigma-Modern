@@ -48,15 +48,16 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
 
     private Layout layout() {
         int margin = ModernPage.margin(this.width);
+        int bodyTop = BODY_TOP + (netEaseVisible() ? 23 : 0);
         boolean wide = this.width - 2 * margin - CARD_W - 12 >= 220 && this.height >= 250;
         if (wide) {
-            int cardH = this.height - BODY_TOP - 12;
+            int cardH = this.height - bodyTop - 12;
             int detailX = margin + CARD_W + 12;
-            return new Layout(true, margin, margin, BODY_TOP, CARD_W, cardH, detailX, this.width - margin - detailX);
+            return new Layout(true, margin, margin, bodyTop, CARD_W, cardH, detailX, this.width - margin - detailX);
         }
         int cardW = Math.min(this.width - 2 * margin, CARD_W);
-        int cardH = this.height - BODY_TOP - 12 - 34;
-        return new Layout(false, margin, (this.width - cardW) / 2, BODY_TOP, cardW, cardH, 0, 0);
+        int cardH = this.height - bodyTop - 12 - 34;
+        return new Layout(false, margin, (this.width - cardW) / 2, bodyTop, cardW, cardH, 0, 0);
     }
 
     @Override
@@ -138,6 +139,7 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
 
         this.serverSelectionList.updateSizeAndPosition(l.cardW() - 4, l.cardH() - 8, l.cardX() + 2, l.cardY() + 6);
         this.addRenderableWidget(this.serverSelectionList);
+        if (netEaseVisible()) addRenderableWidget(netEaseSearchField(l.cardX() + 4, l.cardY() - 21, l.cardW() - 8));
 
         Component joinLabel = Component.translatable("selectServer.select");
         if (l.wide()) {
@@ -175,7 +177,7 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
         if (this.join == null || this.edit == null || this.delete == null) return;
         ServerSelectionList.Entry entry = this.serverSelectionList == null ? null : this.serverSelectionList.getSelected();
         boolean saved = entry instanceof ServerSelectionList.OnlineServerEntry;
-        this.join.active = entry != null && !(entry instanceof ServerSelectionList.LANHeader);
+        this.join.active = entry != null && entry.canJoin();
         this.edit.active = saved;
         this.delete.active = saved;
     }
@@ -197,7 +199,7 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
         Layout l = layout();
         float open = ModernStyle.easeOut((System.nanoTime() - this.openStart) / 1_000_000_000F / 0.4F);
         ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
-        boolean chosen = entry instanceof ServerSelectionList.OnlineServerEntry || entry instanceof ServerSelectionList.NetworkServerEntry;
+        boolean chosen = entry != null && entry.canJoin();
         boolean show = !l.wide() || chosen;
         if (this.join != null) this.join.visible = show;
         if (this.edit != null) this.edit.visible = show && (!l.wide() || entry instanceof ServerSelectionList.OnlineServerEntry);
@@ -222,7 +224,7 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
 
     private void drawDetail(GuiGraphicsExtractor g, Layout l, ServerSelectionList.@Nullable Entry entry) {
         Object key = entry instanceof ServerSelectionList.OnlineServerEntry online ? online.getServerData()
-            : entry instanceof ServerSelectionList.NetworkServerEntry lan ? lan.getLanServer() : null;
+            : entry instanceof ServerSelectionList.NetworkServerEntry lan ? lan.getLanServer() : entry;
         if (!Objects.equals(key, this.shownKey)) {
             this.shownKey = key;
             this.detailStart = System.nanoTime();
@@ -236,6 +238,13 @@ public final class ModernServersScreen extends JoinMultiplayerScreen implements 
                 this.drawServerDetail(g, x, y, w, online);
             } else if (entry instanceof ServerSelectionList.NetworkServerEntry lan) {
                 this.drawLanDetail(g, x, y, w, lan.getLanServer());
+            } else if (entry instanceof ServerSelectionList.CatalogEntry catalog) {
+                int pad = 18;
+                ModernIcons.draw(g, ModernIcons.Icon.GLOBE, x + pad, y + pad, 25F, 0xFFBFE3F5);
+                ModernTypography.draw(g, ModernTypography.Face.DISPLAY, ModernTypography.ellipsize(catalog.title.getString(),
+                    Math.max(1, (int) ((w - 2 * pad - 33) / 1.3F))), x + pad + 33, y + pad + 4, 1.3F, 0xFFF2F8FC);
+                ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.ellipsize(catalog.detail.getString(),
+                    w - 2 * pad), x + pad, y + pad + 38, 1F, 0xFFD9E8F1);
             } else {
                 this.drawEmptyDetail(g, x, y, w, h);
             }

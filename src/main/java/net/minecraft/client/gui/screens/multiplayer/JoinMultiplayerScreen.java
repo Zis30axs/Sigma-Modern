@@ -1,5 +1,8 @@
 package net.minecraft.client.gui.screens.multiplayer;
 
+import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.account.NetEaseServers;
+import com.mentalfrostbyte.jello.gui.account.NetEaseText;
 import com.mojang.logging.LogUtils;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator; // MODIFIED for porting: ViaFabricPlus
 import com.viaversion.viafabricplus.screen.impl.ProtocolSelectionScreen; // MODIFIED for porting: ViaFabricPlus
@@ -8,6 +11,8 @@ import com.viaversion.viafabricplus.settings.impl.GeneralSettings; // MODIFIED f
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion; // MODIFIED for porting: ViaFabricPlus
 import java.util.List;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.client.gui.layouts.LinearLayout;
 import net.minecraft.client.gui.screens.ConfirmScreen;
@@ -39,6 +44,8 @@ public class JoinMultiplayerScreen extends Screen {
     private final ServerStatusPinger pinger = new ServerStatusPinger();
     private final Screen lastScreen;
     protected ServerSelectionList serverSelectionList;
+    private NetEaseServers netEaseServers;
+    private EditBox netEaseSearch;
     private ServerList servers;
     private Button editButton;
     private Button selectButton;
@@ -55,8 +62,15 @@ public class JoinMultiplayerScreen extends Screen {
 
     @Override
     protected void init() {
-        this.layout.addTitleHeader(this.title, this.font);
+        if (netEaseVisible()) this.layout.setHeaderHeight(52);
         this.initServerModel();
+        if (netEaseVisible()) {
+            this.layout.setHeaderHeight(52);
+            LinearLayout header = this.layout.addToHeader(LinearLayout.vertical().spacing(4));
+            header.defaultCellSetting().alignHorizontallyCenter();
+            header.addChild(new StringWidget(this.title, this.font));
+            header.addChild(netEaseSearchField(0, 0, 220));
+        } else this.layout.addTitleHeader(this.title, this.font);
         this.serverSelectionList = this.layout
             .addToContents(new ServerSelectionList(this, this.minecraft, this.width, this.layout.getContentHeight(), this.layout.getHeaderHeight(), 36));
         this.serverSelectionList.updateOnlineServers(this.servers);
@@ -82,6 +96,7 @@ public class JoinMultiplayerScreen extends Screen {
     // MODIFIED for porting: SigmaModern - the saved-server list and LAN discovery setup, split out of init()
     // so ModernServersScreen shares it exactly.
     protected final void initServerModel() {
+        this.netEaseServers = new NetEaseServers(this, Client.getInstance().getAccountManager().netEase(), this.minecraft);
         this.servers = new ServerList(this.minecraft);
         this.servers.load();
         this.lanServerList = new LanServerDetection.LanServerList();
@@ -99,6 +114,26 @@ public class JoinMultiplayerScreen extends Screen {
         if (entry != null) {
             entry.join();
         }
+    }
+
+    protected final boolean netEaseVisible() {
+        return Client.getInstance().getAccountManager().netEase().enabled();
+    }
+
+    protected final EditBox netEaseSearchField(int x, int y, int w) {
+        String draft = netEaseSearch == null ? netEaseServers.query() : netEaseSearch.getValue();
+        Component hint = NetEaseText.label("search_hint");
+        netEaseSearch = new EditBox(font, x, y, w, 17, hint);
+        netEaseSearch.setMaxLength(128);
+        netEaseSearch.setValue(draft);
+        netEaseSearch.setHint(hint.copy().withStyle(EditBox.SEARCH_HINT_STYLE));
+        return netEaseSearch;
+    }
+
+    public void setNetEaseRows(List<ServerSelectionList.CatalogEntry> rows) {
+        if (serverSelectionList == null) return;
+        serverSelectionList.updateNetEase(rows);
+        onSelectedChange();
     }
 
     protected void openDirectJoin() {
@@ -178,6 +213,7 @@ public class JoinMultiplayerScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
+        this.netEaseServers.tick();
         List<LanServer> lanServers = this.lanServerList.takeDirtyServers();
         if (lanServers != null) {
             this.serverSelectionList.updateNetworkServers(lanServers);
@@ -188,6 +224,7 @@ public class JoinMultiplayerScreen extends Screen {
 
     @Override
     public void removed() {
+        if (netEaseServers != null) netEaseServers.leave();
         if (this.lanServerDetector != null) {
             this.lanServerDetector.interrupt();
             this.lanServerDetector = null;
@@ -266,6 +303,10 @@ public class JoinMultiplayerScreen extends Screen {
 
     @Override
     public boolean keyPressed(final KeyEvent event) {
+        if (netEaseSearch != null && netEaseSearch.isFocused() && event.isConfirmation()) {
+            netEaseServers.search(netEaseSearch.getValue());
+            return true;
+        }
         if (super.keyPressed(event)) {
             return true;
         } else if (event.key() == 294) {
@@ -291,7 +332,7 @@ public class JoinMultiplayerScreen extends Screen {
         this.editButton.active = false;
         this.deleteButton.active = false;
         ServerSelectionList.Entry entry = this.serverSelectionList.getSelected();
-        if (entry != null && !(entry instanceof ServerSelectionList.LANHeader)) {
+        if (entry != null && entry.canJoin()) {
             this.selectButton.active = true;
             if (entry instanceof ServerSelectionList.OnlineServerEntry) {
                 this.editButton.active = true;

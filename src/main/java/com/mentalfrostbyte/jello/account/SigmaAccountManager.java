@@ -3,6 +3,7 @@ package com.mentalfrostbyte.jello.account;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.mentalfrostbyte.jello.account.netease.NetEaseSession;
 import com.mentalfrostbyte.jello.util.io.JsonFileUtil;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,11 +45,25 @@ public final class SigmaAccountManager {
     private static final int FILE_VERSION = 1;
 
     private final Path file;
+    private NetEaseSession netEase;
     private final List<AccountEntry> accounts = new ArrayList<>();
     private String selectedId;
 
     public SigmaAccountManager(final Path file) {
         this.file = file;
+    }
+
+    /** Platform login is independent of the active Minecraft Java identity and never goes into accounts.json. */
+    public synchronized NetEaseSession netEase() {
+        if (netEase == null) netEase = new NetEaseSession();
+        return netEase;
+    }
+
+    public synchronized void closeNetEase() {
+        if (netEase != null) {
+            netEase.close();
+            netEase = null;
+        }
     }
 
     public synchronized void load() {

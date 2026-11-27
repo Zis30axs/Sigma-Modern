@@ -4,12 +4,17 @@ import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.account.SigmaAccountManager;
 import com.mentalfrostbyte.jello.account.SigmaAccountManager.AccountEntry;
 import com.mentalfrostbyte.jello.account.SigmaAccountManager.AccountType;
+import com.mentalfrostbyte.jello.account.netease.NetEaseCredential;
+import com.mentalfrostbyte.jello.account.netease.NetEaseProvider;
+import com.mentalfrostbyte.jello.account.netease.NetEaseSession;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.ServiceConfigurationError;
 import net.minecraft.client.User;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -54,6 +59,9 @@ public final class SigmaAccountScreen extends Screen {
     private Button useButton;
     private Button deleteButton;
     private Button microsoftButton;
+    private Button netEaseButton;
+    private NetEaseProvider netEaseProvider;
+    private boolean netEaseDiscoveryFailed;
 
     private String selectedRowId;
     private int scroll;
@@ -84,11 +92,29 @@ public final class SigmaAccountScreen extends Screen {
 
         int detailX = layout.detailX + 12;
         int detailWidth = layout.detailWidth - 24;
+        int half = (detailWidth - 4) / 2;
         this.microsoftButton = this.addRenderableWidget(
             Button.builder(Component.literal("Microsoft Login"), button -> this.beginMicrosoftLogin())
-                .bounds(detailX, layout.top + 36, detailWidth, 20)
+                .bounds(detailX, layout.top + 36, half, 20)
                 .build()
         );
+        this.netEaseButton = this.addRenderableWidget(Button.builder(netEaseAction(), button -> this.useNetEase())
+            .bounds(detailX + half + 4, layout.top + 36, detailWidth - half - 4, 20).build());
+        try {
+            List<NetEaseProvider> providers = NetEaseSession.providers();
+            var previous = netEaseProvider;
+            netEaseProvider = providers.stream().filter(p -> previous != null && p.getClass() == previous.getClass())
+                .findFirst().orElse(providers.isEmpty() ? null : providers.getFirst());
+            netEaseDiscoveryFailed = false;
+            if (providers.size() > 1) {
+                addRenderableWidget(CycleButton.<NetEaseProvider>builder(p -> Component.literal(p.displayName()), netEaseProvider)
+                    .withValues(providers).create(detailX, layout.top + 228, detailWidth, 20,
+                        NetEaseText.label("provider"), (b, p) -> netEaseProvider = p));
+            }
+        } catch (ServiceConfigurationError | LinkageError error) {
+            netEaseProvider = null;
+            netEaseDiscoveryFailed = true;
+        }
 
         this.offlineNameBox = new EditBox(this.font, detailX, layout.top + 72, detailWidth, 20, Component.literal("Offline username"));
         this.offlineNameBox.setHint(Component.literal("Offline username..."));
@@ -248,6 +274,44 @@ public final class SigmaAccountScreen extends Screen {
         thread.start();
     }
 
+    private Component netEaseAction() {
+        return NetEaseText.label(accounts.netEase().enabled() ? "disconnect" : "import");
+    }
+
+    private void useNetEase() {
+        if (loginInProgress || switchInProgress) return;
+        NetEaseSession session = accounts.netEase();
+        java.util.concurrent.CompletableFuture<Void> operation;
+        boolean forget = session.enabled();
+        if (forget) {
+            operation = session.forget();
+        } else {
+            NetEaseCredential input;
+            try {
+                input = NetEaseCredential.parse(minecraft.keyboardHandler.getClipboard());
+            } catch (IllegalArgumentException invalid) {
+                status = NetEaseText.label("invalid").getString();
+                return;
+            }
+            if (netEaseDiscoveryFailed || netEaseProvider == null) {
+                session.enableDirectory();
+                status = NetEaseText.label(netEaseDiscoveryFailed ? "provider_error" : "format_only", input.kind()).getString();
+                updateControls();
+                return;
+            }
+            var player = minecraft.getUser();
+            operation = session.signIn(netEaseProvider, input, player.getProfileId(), player.getName());
+        }
+        loginInProgress = true;
+        status = NetEaseText.label(forget ? "disconnecting" : "signing_in").getString();
+        updateControls();
+        operation.whenComplete((ignored, failure) -> minecraft.execute(() -> {
+            loginInProgress = false;
+            status = NetEaseText.label(failure != null ? "login_error" : forget ? "disconnected" : "connected").getString();
+            updateControls();
+        }));
+    }
+
     private void addOffline() {
         if (this.switchInProgress) {
             return;
@@ -350,6 +414,10 @@ public final class SigmaAccountScreen extends Screen {
         if (this.microsoftButton != null) {
             this.microsoftButton.active = !this.loginInProgress && !this.switchInProgress;
         }
+        if (netEaseButton != null) {
+            netEaseButton.active = !loginInProgress && !switchInProgress;
+            netEaseButton.setMessage(netEaseAction());
+        }
     }
 
     private void drawAccountRows(
@@ -399,7 +467,7 @@ public final class SigmaAccountScreen extends Screen {
     private void drawDetail(final GuiGraphicsExtractor graphics, final Layout layout, final int textColor) {
         AccountEntry account = this.selectedRow();
         int x = layout.detailX + 12;
-        int y = layout.top + 244;
+        int y = layout.top + 254;
         graphics.text(this.font, "Selected account", x, y, TEXT_DIM, false);
         if (account == null) {
             graphics.text(this.font, "None", x, y + 16, textColor, false);

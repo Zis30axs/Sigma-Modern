@@ -213,6 +213,17 @@ public final class ModernRows {
 
     // --- LAN ----------------------------------------------------------------------------------------------
 
+    public static void catalog(GuiGraphicsExtractor g, Component title, Component detail, int x, int y, int w, int h, boolean hovered) {
+        if (hovered) ModernStyle.rounded(g, x - 8, y - 2, w + 12, h + 4, 7, 0x12FFFFFF);
+        ModernStyle.rounded(g, x, y, 32, 32, 4, 0xFF143044);
+        ModernIcons.draw(g, ModernIcons.Icon.GLOBE, x + 7F, y + 7F, 18F, 0xFFBFE3F5);
+        int textW = Math.max(1, w - 40);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.ellipsize(title.getString(), textW),
+            x + 40, y + 3, 1F, NAME);
+        ModernTypography.draw(g, ModernTypography.Face.TEXT, ModernTypography.ellipsize(detail.getString(), textW),
+            x + 40, y + 17, 1F, 0xFF9DB9CC);
+    }
+
     public static void lanServer(GuiGraphicsExtractor g, Component title, String motd, Component address,
                                  int x, int y, int w, int h, boolean hovered) {
         if (hovered) ModernStyle.rounded(g, x - 8, y - 2, w + 12, h + 4, 7, 0x12FFFFFF);

@@ -594,6 +594,7 @@ public class Client implements MinecraftInstance {
         }
 
         logger.info("Shutting down...");
+        this.accountManager.closeNetEase();
         RuntimeException failure = null;
         try {
             this.saveConfig();

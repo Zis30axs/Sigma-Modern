@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.logging.LogUtils;
+import com.mentalfrostbyte.jello.gui.modern.ModernRows;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -80,6 +81,7 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
     private static final Component ONLINE_STATUS = Component.translatable("multiplayer.status.online");
     private final JoinMultiplayerScreen screen;
     private final List<ServerSelectionList.OnlineServerEntry> onlineServers = Lists.newArrayList();
+    private List<CatalogEntry> netEaseEntries = List.of();
     private final ServerSelectionList.Entry lanHeader = new ServerSelectionList.LANHeader();
     private final List<ServerSelectionList.NetworkServerEntry> networkServers = Lists.newArrayList();
 
@@ -93,6 +95,7 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
     private void refreshEntries() {
         ServerSelectionList.Entry previouslySelected = this.getSelected();
         List<ServerSelectionList.Entry> entriesToAdd = new ArrayList<>(this.onlineServers);
+        entriesToAdd.addAll(this.netEaseEntries);
         entriesToAdd.add(this.lanHeader);
         entriesToAdd.addAll(this.networkServers);
         this.replaceEntries(entriesToAdd);
@@ -119,6 +122,12 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
         }
 
         this.refreshEntries();
+    }
+
+    public void updateNetEase(List<CatalogEntry> entries) {
+        this.netEaseEntries = List.copyOf(entries);
+        this.refreshEntries();
+        this.refreshScrollAmount();
     }
 
     public void updateNetworkServers(final List<LanServer> servers) {
@@ -158,11 +167,60 @@ public class ServerSelectionList extends ObjectSelectionList<ServerSelectionList
 
         protected abstract boolean matches(final ServerSelectionList.Entry other);
 
+        public boolean canJoin() { return true; }
+
         public abstract void join();
+    }
+
+    public static final class CatalogEntry extends Entry {
+        private final String key;
+        public final Component title;
+        public final Component detail;
+        private final @Nullable Runnable activate;
+
+        public CatalogEntry(String key, Component title, Component detail, @Nullable Runnable activate) {
+            this.key = key;
+            this.title = title;
+            this.detail = detail;
+            this.activate = activate;
+        }
+
+        @Override
+        public void extractContent(GuiGraphicsExtractor g, int mouseX, int mouseY, boolean hovered, float delta) {
+            if (ModernRows.active()) {
+                ModernRows.catalog(g, title, detail, getContentX(), getContentY(), getContentWidth(), getContentHeight(), hovered);
+                return;
+            }
+            var font = Minecraft.getInstance().font;
+            int w = Math.max(1, this.getContentWidth() - 12);
+            g.text(font, font.substrByWidth(title, w).getString(), getContentX() + 6, getContentY() + 5, -1);
+            g.text(font, font.substrByWidth(detail, w).getString(), getContentX() + 6, getContentY() + 18, 0xFF99B6C8);
+        }
+
+        @Override public Component getNarration() { return title.copy().append(". ").append(detail); }
+        @Override protected boolean matches(Entry other) { return other instanceof CatalogEntry e && key.equals(e.key); }
+        @Override public boolean canJoin() { return activate != null; }
+        @Override public void join() { if (activate != null) activate.run(); }
+
+        @Override
+        public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+            if (doubleClick && event.button() == 0) join();
+            return super.mouseClicked(event, doubleClick);
+        }
+
+        @Override
+        public boolean keyPressed(KeyEvent event) {
+            if (canJoin() && event.isSelection()) {
+                join();
+                return true;
+            }
+            return super.keyPressed(event);
+        }
     }
 
     @OnlyIn(Dist.CLIENT)
     public static class LANHeader extends ServerSelectionList.Entry {
+        @Override public boolean canJoin() { return false; }
         private final Minecraft minecraft = Minecraft.getInstance();
         private final LoadingDotsWidget loadingDotsWidget = new LoadingDotsWidget(this.minecraft.font, ServerSelectionList.SCANNING_LABEL);
 
