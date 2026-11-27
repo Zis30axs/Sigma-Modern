@@ -1,7 +1,8 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
+import com.mentalfrostbyte.Client;
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
-import com.mentalfrostbyte.jello.gui.AimAssistTrainingScreen;
+import com.mentalfrostbyte.jello.gui.SettingEditor;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyDropdown;
@@ -14,8 +15,6 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
-import com.mentalfrostbyte.jello.setting.ItemListSetting;
-import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -55,7 +54,7 @@ final class JelloSettingsPage {
     private static final int LIGHT_BLUE = 0xFF29A6FF;
 
     private enum Kind {
-        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR, KEY, ITEMS
+        BIND, BOOLEAN, NUMBER, ENUM, TEXT, COLOR, KEY, EDITOR
     }
 
     private record Row(Kind kind, Setting<?> setting, int top, int height) {
@@ -121,7 +120,7 @@ final class JelloSettingsPage {
                 return true;
             }
         }
-        return this.interactions.isBinding(this.module) || this.interactions.isCapturingKey();
+        return this.interactions.isEnteringInput();
     }
 
     // ------------------------------------------------------------------ layout
@@ -160,8 +159,8 @@ final class JelloSettingsPage {
             } else if (setting instanceof KeySetting) {
                 kind = Kind.KEY;
                 height = 27;
-            } else if (setting instanceof ItemListSetting || setting instanceof InventoryLayoutSetting || AimAssistTrainingScreen.isTrainingSetting(setting)) {
-                kind = Kind.ITEMS;
+            } else if (SettingEditor.forSetting(setting) != null) {
+                kind = Kind.EDITOR;
                 height = 27;
             } else {
                 kind = Kind.TEXT;
@@ -273,13 +272,13 @@ final class JelloSettingsPage {
                 c.textCentered(Face.JELLO_LIGHT, 18, c.fit(Face.JELLO_LIGHT, 18, this.interactions.displayValue(setting), pillW - 12),
                     pillX + pillW / 2.0F, top + row.height() / 2.0F, LegacyCanvas.alpha(binding ? LIGHT_BLUE : 0xFF010101, p * 0.85F));
             }
-            case ITEMS -> {
+            case EDITOR -> {
                 Setting<?> setting = row.setting();
-                this.label(c, setting.getName(), top, p);
+                this.label(c, Client.getInstance().getTranslations().text(setting.getName()), top, p);
                 int pillW = 170, pillX = this.right() - pillW;
                 boolean hover = mx >= pillX && mx < pillX + pillW && my >= top && my < top + row.height();
                 c.rounded(pillX, top, pillW, row.height(), 4, LegacyCanvas.alpha(hover ? 0xFFE6E6E6 : 0xFFF2F2F2, p));
-                c.textCentered(Face.JELLO_LIGHT, 18, this.interactions.displayValue(setting) + "  >", pillX + pillW / 2.0F,
+                c.textCentered(Face.JELLO_LIGHT, 18, c.fit(Face.JELLO_LIGHT, 18, this.interactions.displayValue(setting), pillW - 30) + "  ›", pillX + pillW / 2.0F,
                         top + row.height() / 2.0F, LegacyCanvas.alpha(LIGHT_BLUE, p * 0.85F));
             }
             case BOOLEAN -> {
@@ -497,7 +496,7 @@ final class JelloSettingsPage {
                         this.interactions.startBind((KeySetting) row.setting());
                     }
                 }
-                case ITEMS -> {
+                case EDITOR -> {
                     if (event.button() == 0 && mx >= this.right() - 170 && mx < this.right()) {
                         this.interactions.handleSettingClick(row.setting(), 0, 0, 1);
                     }

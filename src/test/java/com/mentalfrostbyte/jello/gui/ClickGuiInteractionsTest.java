@@ -45,6 +45,20 @@ class ClickGuiInteractionsTest {
     }
 
     @Test
+    void typingValuesAndBindingModuleKeysBothOwnKeyboardInput() {
+        assertFalse(this.interactions.isEnteringInput());
+        this.interactions.startEditing(this.size, "11");
+        assertTrue(this.interactions.isEnteringInput());
+        press(InputConstants.KEY_ESCAPE);
+        assertFalse(this.interactions.isEnteringInput());
+
+        this.interactions.startBind(new Module(ModuleCategory.PLAYER, "test", "") {});
+        assertTrue(this.interactions.isEnteringInput());
+        press(InputConstants.KEY_ESCAPE);
+        assertFalse(this.interactions.isEnteringInput());
+    }
+
+    @Test
     void aTypedValueIsClampedAndNonsenseIsIgnored() {
         type("99");
         press(InputConstants.KEY_RETURN);

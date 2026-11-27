@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.legacy.hud;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyTexture;
@@ -92,7 +93,7 @@ final class JelloActiveMods {
     private static List<Module> ordered(final LegacyCanvas c, final ModuleArrayList list) {
         List<Module> modules = new ArrayList<>();
         for (Module module : Client.getInstance().getModuleManager().all()) {
-            if (list.lists(module)) {
+            if (ModuleStyleFilter.JELLO.includes(module) && list.lists(module)) {
                 modules.add(module);
             }
         }

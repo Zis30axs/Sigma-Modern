@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
 import com.mentalfrostbyte.jello.gui.TextEntryScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
@@ -80,7 +81,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
         super(Component.literal("Jello ClickGUI"));
         this.modules = modules;
         for (ModuleCategory category : ModuleCategory.values()) {
-            List<Module> mods = modules.byCategory(category);
+            List<Module> mods = ModuleStyleFilter.JELLO.select(modules.all(), category);
             if (!mods.isEmpty()) {
                 this.panels.add(new Panel(category, mods));
             }
@@ -89,7 +90,7 @@ public class JelloClickGuiScreen extends Screen implements SigmaClickGui, Modern
         String debug = System.getProperty("sigma.debug.jelloSettings");
         if (debug != null) {
             for (Module module : modules.all()) {
-                if (module.getName().equalsIgnoreCase(debug)) {
+                if (ModuleStyleFilter.JELLO.includes(module) && module.getName().equalsIgnoreCase(debug)) {
                     this.page = new JelloSettingsPage(this, module, this.interactions);
                 }
             }

@@ -82,15 +82,28 @@ public final class GuiScreenInteractionSmoke {
         Module module = modules.all().stream().findFirst().orElseThrow();
         ModuleCategory category = module.getCategory();
 
-        int panelX = screen.panelX(), panelY = screen.panelY();
-        int sidebarX = panelX + ModernClickGuiScreen.PAD + ModernClickGuiScreen.SIDEBAR_W / 2;
-        int sidebarY = panelY + ModernClickGuiScreen.HEADER_H
-            + category.ordinal() * screen.sidebarItemHeight() + screen.sidebarItemHeight() / 2;
+        Module maps = modules.find("Maps").orElseThrow();
+        if (screen.moduleBounds(maps) != null) throw new IllegalStateException("Modern initially lists Jello Maps");
+        click(screen, screen.styleCenter(ModuleStyleFilter.JELLO));
+        click(screen, screen.categoryCenter(ModuleCategory.INTERFACE));
+        screen.keyPressed(new KeyEvent(InputConstants.KEY_SLASH, 0, 0));
+        for (char c : "Maps".toCharArray()) screen.charTyped(new net.minecraft.client.input.CharacterEvent(c));
+        int[] found = screen.moduleBounds(maps);
+        if (found == null) throw new IllegalStateException("Maps missing from Jello Interface search");
+        screen.mouseClicked(new MouseButtonEvent(found[0] + 10, found[1] + 8, new MouseButtonInfo(1, 0)), false);
+        screen.keyPressed(new KeyEvent(InputConstants.KEY_ESCAPE, 0, 0));
+        if (screen.isOnCategoryView() || screen.moduleBounds(maps) == null) throw new IllegalStateException("Lost Maps search on Back");
+        click(screen, screen.categoryCenter(ModuleCategory.RENDER));
+        if (screen.moduleBounds(maps) != null) throw new IllegalStateException("Search ignored the Render category");
+        click(screen, screen.categoryCenter(ModuleCategory.INTERFACE));
+        click(screen, screen.styleCenter(ModuleStyleFilter.MODERN));
+        if (screen.moduleBounds(maps) != null) throw new IllegalStateException("Search ignored the Modern style");
+        screen.keyPressed(new KeyEvent(InputConstants.KEY_ESCAPE, 0, 0));
 
         boolean original = module.isEnabled();
         try {
             // Switch to the module's own sidebar category, then toggle it from its tile.
-            screen.mouseClicked(new MouseButtonEvent(sidebarX, sidebarY, new MouseButtonInfo(0, 0)), false);
+            click(screen, screen.categoryCenter(category));
             int[] tile = screen.moduleBounds(module);
             if (tile == null) throw new IllegalStateException("Modern category view has no tile for " + module.getName());
             int rowX = tile[0], rowY = tile[1];
@@ -221,6 +234,10 @@ public final class GuiScreenInteractionSmoke {
             if (wasPlaying) music.play();
         }
         LOGGER.info("Sigma debug: Modern toggle/detail/bind-cancel/back-nav/resize/scroll/music smoke passed");
+    }
+
+    private static void click(Screen screen, int[] point) {
+        screen.mouseClicked(new MouseButtonEvent(point[0], point[1], new MouseButtonInfo(0, 0)), false);
     }
 
     /** Pulls the music window back out after a reset, the way the steps above leave it. */

@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.classic;
 
 import com.mentalfrostbyte.jello.gui.ClickGuiInteractions;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.SigmaClickGui;
 import com.mentalfrostbyte.jello.gui.TextEntryScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
@@ -128,7 +129,7 @@ public class ClassicClickGuiScreen extends Screen implements SigmaClickGui, Text
         this.group = group;
         List<Module> list = new ArrayList<>();
         for (ModuleCategory category : group.categories()) {
-            list.addAll(this.modules.byCategory(category));
+            list.addAll(ModuleStyleFilter.CLASSIC.select(this.modules.all(), category));
         }
         this.listed = list;
         this.scroll.setOffset(0);

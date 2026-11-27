@@ -48,12 +48,13 @@ final class ModernTabGui {
 
     static void render(GuiGraphicsExtractor g) {
         TabGui tab = Modules.enabled(TabGui.class);
-        List<ModuleCategory> categories = tab == null ? List.of() : tab.categories();
-        if (tab == null || !visible() || categories.isEmpty()) {
+        if (tab == null || !visible()) {
             lastDraw = 0L;
             return;
         }
         tab.markShown();
+        List<ModuleCategory> categories = tab.categories();
+        if (categories.isEmpty()) return;
 
         long now = System.nanoTime();
         float dt = lastDraw == 0L ? 0F : Math.min(0.05F, (now - lastDraw) / 1_000_000_000F);

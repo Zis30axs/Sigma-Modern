@@ -2,6 +2,7 @@ package com.mentalfrostbyte.jello.module.impl.gui;
 
 import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.action.EventKeyPress;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.module.ModuleManager;
@@ -41,9 +42,13 @@ public class TabGui extends Module {
      * Enter switches the module and Right steps into its settings, where Up and Down pick one, Right starts editing it
      * (Up and Down then change the value) and Left goes back.</p>
      */
-    public record Layout(List<ModuleCategory> categories, boolean settings) {
+    public record Layout(List<ModuleCategory> categories, boolean settings, ModuleStyleFilter style) {
         /** Every category, in their usual order, with no settings level: what SigmaModern draws. */
-        public static final Layout ALL = new Layout(List.of(ModuleCategory.values()), false);
+        public static final Layout ALL = new Layout(List.of(ModuleCategory.values()), false, ModuleStyleFilter.MODERN);
+
+        public Layout(List<ModuleCategory> categories, boolean settings) {
+            this(categories, settings, ModuleStyleFilter.ALL);
+        }
 
         public Layout {
             categories = List.copyOf(categories);
@@ -102,7 +107,7 @@ public class TabGui extends Module {
     /** {@code category}'s modules, minus this one: switching the menu off from inside it would only lose it. */
     public List<Module> modules(final ModuleCategory category) {
         List<Module> found = new ArrayList<>(this.modules.byCategory(category));
-        found.remove(this);
+        found.removeIf(module -> module == this || !this.layout.style().includes(module));
         return found;
     }
 
@@ -280,7 +285,12 @@ public class TabGui extends Module {
 
     /** {@link #markShown()} for a presentation that lays the menu out its own way. */
     public void markShown(final Layout layout) {
-        this.lastShown = System.nanoTime();
+        this.showLayout(layout, true);
+    }
+
+    /** A visible menu still uses its presentation's rows while another screen owns the keys. */
+    public void showLayout(final Layout layout, final boolean interactive) {
+        this.lastShown = interactive ? System.nanoTime() : Long.MIN_VALUE;
         this.layout = layout;
         if (!layout.settings()) {
             this.inSettings = false;
@@ -300,7 +310,7 @@ public class TabGui extends Module {
             return;
         }
 
-        if (System.nanoTime() - this.lastShown > SHOWN_NANOS || this.boundElsewhere(event.getKey())) {
+        if (this.lastShown == Long.MIN_VALUE || System.nanoTime() - this.lastShown > SHOWN_NANOS || this.boundElsewhere(event.getKey())) {
             return;
         }
 

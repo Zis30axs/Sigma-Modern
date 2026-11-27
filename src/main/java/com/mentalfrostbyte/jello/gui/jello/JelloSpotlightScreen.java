@@ -1,6 +1,7 @@
 package com.mentalfrostbyte.jello.gui.jello;
 
 import com.mentalfrostbyte.Client;
+import com.mentalfrostbyte.jello.gui.ModuleStyleFilter;
 import com.mentalfrostbyte.jello.gui.TextEntryScreen;
 import com.mentalfrostbyte.jello.gui.base.animations.Animation;
 import com.mentalfrostbyte.jello.gui.legacy.LegacyCanvas;
@@ -63,7 +64,7 @@ public final class JelloSpotlightScreen extends Screen implements TextEntryScree
 
         String wanted = typed.toLowerCase(Locale.ROOT);
         for (Module module : Client.getInstance().getModuleManager().all()) {
-            if (module.getName().toLowerCase(Locale.ROOT).startsWith(wanted)) {
+            if (ModuleStyleFilter.JELLO.includes(module) && module.getName().toLowerCase(Locale.ROOT).startsWith(wanted)) {
                 return module;
             }
         }

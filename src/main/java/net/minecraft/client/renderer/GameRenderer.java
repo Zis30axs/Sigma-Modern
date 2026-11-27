@@ -902,7 +902,7 @@ public class GameRenderer implements AutoCloseable, TrackedWaypoint.Projector,
         // MODIFIED for porting: SigmaModern's glass panels are drawn assuming a strong backdrop blur is
         // always present, the same way its reference design always ran with backdrop-filter active. Force
         // the real blur radius here rather than leaving it hostage to the user's own accessibility slider.
-        if (this.minecraft.gui.screen() instanceof com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop) {
+        if (this.minecraft.gui.screen() instanceof com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop backdrop && backdrop.usesStrongBackdropBlur()) {
             optionsState.menuBackgroundBlurriness = GameRenderer.MAX_BLUR_RADIUS;
         }
         optionsState.panoramaSpeed = options.panoramaSpeed().get();

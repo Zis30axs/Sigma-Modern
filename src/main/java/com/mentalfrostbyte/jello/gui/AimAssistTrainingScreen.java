@@ -1,17 +1,15 @@
 package com.mentalfrostbyte.jello.gui;
 
 import com.mentalfrostbyte.Client;
-import com.mentalfrostbyte.jello.gui.modern.ModernBlurredBackdrop;
 import com.mentalfrostbyte.jello.gui.modern.ModernStyle;
-import com.mentalfrostbyte.jello.gui.modern.ModernTypography;
 import com.mentalfrostbyte.jello.module.impl.combat.AimAssist;
 import com.mentalfrostbyte.jello.module.impl.combat.KillAura;
 import com.mentalfrostbyte.jello.module.impl.combat.aimassist.AimStyleModel;
 import com.mentalfrostbyte.jello.setting.Setting;
 import com.mentalfrostbyte.jello.setting.TextSetting;
-import com.mentalfrostbyte.jello.util.game.render.GuiVisuals;
 import java.io.IOException;
 import java.util.Objects;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -21,7 +19,7 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
 /** Mouse-operated local practice scene; never spawns entities or sends attacks to a server. */
-public final class AimAssistTrainingScreen extends Screen implements ModernBlurredBackdrop {
+public final class AimAssistTrainingScreen extends ModuleEditorScreen {
     private final @Nullable Screen parent;
     private final AimAssist module;
     private final AimStyleModel model;
@@ -54,7 +52,7 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
 
     /** Only the registered consumers' Training settings open this shared practice scene. */
     public static boolean isTrainingSetting(@Nullable Setting<?> setting) {
-        return setting instanceof TextSetting && Client.getInstance().isStarted()
+        return setting instanceof TextSetting && Minecraft.getInstance() != null && Client.getInstance().isStarted()
             && (Client.getInstance().getModuleManager().get(AimAssist.class).getTrainingSetting() == setting
                 || Client.getInstance().getModuleManager().get(KillAura.class).getTrainingSetting() == setting);
     }
@@ -87,11 +85,6 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
             new Box(x + 12 + (quarter + gap) * 3, footer, quarter, 23));
     }
 
-    @Override public void extractBackground(GuiGraphicsExtractor g, int x, int y, float partialTick) {
-        if (this.minecraft.level == null) { this.extractPanorama(g, partialTick); g.nextStratum(); }
-        GuiVisuals.blurBackground(g);
-    }
-
     @Override public void extractRenderState(GuiGraphicsExtractor g, int x, int y, float partialTick) {
         Layout l = this.layout();
         Box p = l.panel();
@@ -100,38 +93,36 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
         boolean dense = this.height < 340;
         if (compact) this.pause();
         this.advance(l.arena());
-        ModernStyle.dropShadow(g, p.x(), p.y(), p.width(), p.height(), 11, 0.85F);
-        ModernStyle.rounded(g, p.x(), p.y(), p.width(), p.height(), 11, 0xF5E8F3FA);
-        label(g, tr("title"), p.x() + 12, p.y() + 11, p.width() - 24, ModernStyle.INK);
-        if (!dense) label(g, tr("subtitle"), p.x() + 12, p.y() + 29, p.width() - 24, ModernStyle.INK_MUTED);
+        style.panel(g, p.x(), p.y(), p.width(), p.height());
+        style.label(g, tr("title"), p.x() + 12, p.y() + 11, p.width() - 24, style.ink);
+        if (!dense) style.label(g, tr("subtitle"), p.x() + 12, p.y() + 29, p.width() - 24, style.muted);
         if (compact) {
-            label(g, tr("small_window"), p.x() + 12, p.y() + 57, p.width() - 24, ModernStyle.INK_MUTED);
+            style.label(g, tr("small_window"), p.x() + 12, p.y() + 57, p.width() - 24, style.muted);
             button(g, l.back(), tr("back"), x, y, false);
             return;
         }
         for (int i = 0; i < 4; i++) {
             Box s = l.scenarios()[i];
             boolean selected = this.session.scenario() == i;
-            ModernStyle.rounded(g, s.x(), s.y(), s.width(), s.height(), 5,
-                selected ? 0x553BAEE6 : s.contains(x, y) ? 0x303BAEE6 : 0x17243746);
-            centered(g, tr("scenario." + i), s, s.y() + 4, selected ? ModernStyle.BLUE : ModernStyle.INK);
+            style.control(g, s.x(), s.y(), s.width(), s.height(), selected, s.contains(x, y));
+            centered(g, tr("scenario." + i), s, s.y() + 4, selected ? style.accent : style.ink);
             centered(g, tr("scenario_samples", this.model.scenarioSamples(i), AimStyleModel.MIN_SAMPLES_PER_SCENARIO),
-                s, s.y() + 19, ModernStyle.INK_MUTED);
+                s, s.y() + 19, style.muted);
         }
         this.drawArena(g, l.arena());
         int below = l.arena().y() + l.arena().height();
-        label(g, dense && !this.message.isEmpty() ? this.message : tr("controls"),
-            p.x() + 12, below + 7, p.width() - 24, dense && this.error ? 0xFFB34545 : ModernStyle.INK_MUTED);
-        label(g, tr(this.model.isReady() ? "ready" : "collecting", this.model.sampleCount(), AimStyleModel.MIN_SAMPLES),
-            p.x() + 12, below + 24, p.width() - 24, this.model.isReady() ? 0xFF287F64 : ModernStyle.BLUE);
+        style.label(g, dense && !this.message.isEmpty() ? this.message : tr("controls"),
+            p.x() + 12, below + 7, p.width() - 24, dense && this.error ? 0xFFB34545 : style.muted);
+        style.label(g, tr(this.model.isReady() ? "ready" : "collecting", this.model.sampleCount(), AimStyleModel.MIN_SAMPLES),
+            p.x() + 12, below + 24, p.width() - 24, this.model.isReady() ? 0xFF287F64 : style.accent);
         int trackY = below + 41;
-        ModernStyle.rounded(g, p.x() + 12, trackY, p.width() - 24, 3, 1, 0x30243746);
+        style.shape(g, p.x() + 12, trackY, p.width() - 24, 3, 1, 0x30243746);
         double total = Math.min(1.0, this.model.sampleCount() / (double) AimStyleModel.MIN_SAMPLES);
         for (int i = 0; i < 4; i++) total = Math.min(total,
             this.model.scenarioSamples(i) / (double) AimStyleModel.MIN_SAMPLES_PER_SCENARIO);
-        if (total > 0) ModernStyle.rounded(g, p.x() + 12, trackY, Math.max(1, (int) ((p.width() - 24) * total)), 3, 1, ModernStyle.BLUE);
-        if (!dense) label(g, this.message.isEmpty() ? tr("local_note") : this.message,
-            p.x() + 12, below + 50, p.width() - 24, this.error ? 0xFFB34545 : ModernStyle.INK_MUTED);
+        if (total > 0) style.shape(g, p.x() + 12, trackY, Math.max(1, (int) ((p.width() - 24) * total)), 3, 1, style.accent);
+        if (!dense) style.label(g, this.message.isEmpty() ? tr("local_note") : this.message,
+            p.x() + 12, below + 50, p.width() - 24, this.error ? 0xFFB34545 : style.muted);
         button(g, l.start(), tr(this.session.active() ? "pause" : "start"), x, y, this.session.active());
         button(g, l.save(), tr(this.dirty ? "save_dirty" : "save"), x, y, false);
         button(g, l.reset(), tr("reset"), x, y, false);
@@ -150,7 +141,7 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
     }
 
     private void drawArena(GuiGraphicsExtractor g, Box arena) {
-        ModernStyle.rounded(g, arena.x(), arena.y(), arena.width(), arena.height(), 7, 0xFF122D3E);
+        style.shape(g, arena.x(), arena.y(), arena.width(), arena.height(), 7, 0xFF122D3E);
         g.enableScissor(arena.x(), arena.y(), arena.x() + arena.width(), arena.y() + arena.height());
         try {
             int centerX = arena.x() + arena.width() / 2, centerY = arena.y() + arena.height() / 2;
@@ -166,9 +157,9 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
                 }
             }
             this.target(g, arena, this.session.targetYaw(), this.session.targetPitch(), true);
-            label(g, tr("arena"), arena.x() + 8, arena.y() + 7, arena.width() / 2, ModernStyle.MUTED);
+            style.label(g, tr("arena"), arena.x() + 8, arena.y() + 7, arena.width() / 2, ModernStyle.MUTED);
             String score = tr("score", this.session.hits(), this.session.misses());
-            label(g, score, arena.x() + arena.width() / 2, arena.y() + 7, arena.width() / 2 - 8, ModernStyle.ACCENT);
+            style.label(g, score, arena.x() + arena.width() / 2, arena.y() + 7, arena.width() / 2 - 8, ModernStyle.ACCENT);
             if (arena.contains(this.mouseX, this.mouseY)) {
                 int mx = (int) this.mouseX, my = (int) this.mouseY;
                 g.fill(mx - 7, my, mx - 2, my + 1, 0xFFFFFFFF);
@@ -189,8 +180,8 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
         int x = (int) (arena.x() + arena.width() / 2.0 + yaw * scale);
         int y = (int) (arena.y() + arena.height() / 2.0 + pitch * scale);
         int w = Math.max(3, (int) (4.0 * scale)), h = Math.max(5, (int) (6.0 * scale));
-        if (active) ModernStyle.rounded(g, x - w / 2 - 3, y - h / 2 - 3, w + 6, h + 6, 4, 0x405FDAF5);
-        ModernStyle.rounded(g, x - w / 2, y - h / 2, w, h, 3, active ? 0xFF79DCF4 : 0x405F94AB);
+        if (active) style.shape(g, x - w / 2 - 3, y - h / 2 - 3, w + 6, h + 6, 4, 0x405FDAF5);
+        style.shape(g, x - w / 2, y - h / 2, w, h, 3, active ? 0xFF79DCF4 : 0x405F94AB);
         if (active) g.fill(x - 1, y - 1, x + 2, y + 2, 0xFF173747);
     }
 
@@ -284,18 +275,11 @@ public final class AimAssistTrainingScreen extends Screen implements ModernBlurr
     private double pitch(Box arena, double y) { return (y - arena.y() - arena.height() / 2.0) / scale(arena); }
     private static String tr(String key, Object... args) { return Client.getInstance().getTranslations().get("aimassist.training." + key, args); }
 
-    private static void label(GuiGraphicsExtractor g, String text, int x, int y, int width, int color) {
-        ModernTypography.draw(g, ModernTypography.ellipsize(text, Math.max(1, width)), x, y, color, false);
+    private void centered(GuiGraphicsExtractor g, String text, Box box, int y, int color) {
+        style.centered(g, text, box.x(), y, box.width(), color);
     }
 
-    private static void centered(GuiGraphicsExtractor g, String text, Box box, int y, int color) {
-        String shown = ModernTypography.fit(text, Math.max(1, box.width() - 8));
-        ModernTypography.draw(g, shown, box.x() + (box.width() - ModernTypography.width(shown)) / 2, y, color, false);
-    }
-
-    private static void button(GuiGraphicsExtractor g, Box box, String text, int x, int y, boolean selected) {
-        ModernStyle.rounded(g, box.x(), box.y(), box.width(), box.height(), 5,
-            selected ? 0x603BAEE6 : box.contains(x, y) ? 0x453BAEE6 : 0x253BAEE6);
-        centered(g, text, box, box.y() + Math.round((box.height() - ModernTypography.size()) / 2), ModernStyle.INK);
+    private void button(GuiGraphicsExtractor g, Box box, String text, int x, int y, boolean selected) {
+        style.button(g, box.x(), box.y(), box.width(), box.height(), text, selected, box.contains(x, y), true);
     }
 }

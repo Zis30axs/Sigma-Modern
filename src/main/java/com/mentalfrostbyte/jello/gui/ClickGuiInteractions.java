@@ -6,8 +6,6 @@ import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.ColorSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
-import com.mentalfrostbyte.jello.setting.ItemListSetting;
-import com.mentalfrostbyte.jello.setting.InventoryLayoutSetting;
 import com.mentalfrostbyte.jello.setting.KeySetting;
 import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.setting.Setting;
@@ -16,7 +14,6 @@ import com.mojang.blaze3d.platform.InputConstants;
 import java.util.Locale;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -166,24 +163,14 @@ public final class ClickGuiInteractions {
     }
 
     public void handleSettingClick(final Setting<?> setting, final int mouseX, final int trackLeft, final int trackRight) {
-        if (AimAssistTrainingScreen.isTrainingSetting(setting)) {
+        SettingEditor editor = SettingEditor.forSetting(setting);
+        if (editor != null) {
             this.bindingSetting = null;
             this.bindingModule = null;
             this.editingSetting = null;
             this.draggingNumber = null;
             Minecraft minecraft = Minecraft.getInstance();
-            minecraft.gui.setScreen(AimAssistTrainingScreen.open(minecraft.gui.screen()));
-            return;
-        }
-        if (setting instanceof ItemListSetting || setting instanceof InventoryLayoutSetting) {
-            this.bindingSetting = null;
-            this.bindingModule = null;
-            this.editingSetting = null;
-            this.draggingNumber = null;
-            Minecraft minecraft = Minecraft.getInstance();
-            Screen parent = minecraft.gui.screen();
-            minecraft.gui.setScreen(setting instanceof ItemListSetting items ? new ProjectileWhitelistScreen(parent, items)
-                    : new InventoryLayoutScreen(parent, (InventoryLayoutSetting) setting));
+            minecraft.gui.setScreen(editor.open(minecraft.gui.screen(), setting));
             return;
         }
         if (setting instanceof KeySetting key) {
@@ -232,14 +219,17 @@ public final class ClickGuiInteractions {
         this.editingBuffer = shown;
     }
 
+    public boolean isEnteringInput() {
+        return this.editingSetting != null || this.bindingSetting != null || this.bindingModule != null;
+    }
+
     public boolean isEditing(final Setting<?> setting) {
         return this.editingSetting == setting;
     }
 
     public String displayValue(final Setting<?> setting) {
-        if (AimAssistTrainingScreen.isTrainingSetting(setting)) return AimAssistTrainingScreen.settingLabel();
-        if (setting instanceof ItemListSetting items) return items.displayLabel();
-        if (setting instanceof InventoryLayoutSetting layout) return layout.get().size() + " assigned";
+        SettingEditor editor = SettingEditor.forSetting(setting);
+        if (editor != null) return editor.summary(setting);
         if (setting instanceof KeySetting key) {
             return this.bindingSetting == key ? "Press a key..." : key.displayLabel();
         }
