@@ -5,10 +5,12 @@ import com.mentalfrostbyte.jello.event.EventTarget;
 import com.mentalfrostbyte.jello.event.impl.game.EventLoadWorld;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventReceivePacket;
 import com.mentalfrostbyte.jello.event.impl.game.network.EventSendPacket;
+import com.mentalfrostbyte.jello.event.impl.player.EventAttack;
 import com.mentalfrostbyte.jello.module.Module;
 import com.mentalfrostbyte.jello.module.ModuleCategory;
 import com.mentalfrostbyte.jello.setting.BooleanSetting;
 import com.mentalfrostbyte.jello.setting.EnumSetting;
+import com.mentalfrostbyte.jello.setting.NumberSetting;
 import com.mentalfrostbyte.jello.util.text.ChatUtil;
 import com.viaversion.viafabricplus.protocoltranslator.ProtocolTranslator;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
@@ -25,28 +27,39 @@ import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.network.protocol.game.ClientboundStartConfigurationPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Relative;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Splits vanilla server teleport confirmation from GrimAC's movement-packet teleport acceptance ("Model 1").
  *
- * <p>On {@code 1.9+} servers, cross-world transfers ({@link ClientboundRespawnPacket} followed by
+ * <p>On {@code 1.9+} servers (especially Paper {@code 1.20.6}, which disables the 20-tick
+ * {@code updateAwaitingTeleport} resend), cross-world transfers ({@link ClientboundRespawnPacket} followed by
  * {@link ClientboundPlayerPositionPacket}) set {@code ServerPlayer.isChangingDimension = true} (server-side PvP and
  * environmental invulnerability) and lock {@code ServerGamePacketListenerImpl.awaitingPositionFromClient = A}. Both
- * states are cleared <em>only</em> when {@link ServerboundAcceptTeleportationPacket} arrives; while unconfirmed,
- * incoming {@link ServerboundMovePlayerPacket}s update head rotation at {@code A} without moving the server entity.</p>
+ * states are cleared <em>only</em> when {@link ServerboundAcceptTeleportationPacket} arrives.</p>
  *
  * <p>Meanwhile, {@code ClientPacketListener#handleMovePlayer} still replies with {@code PosRot(A)}, which satisfies
  * GrimAC's {@code SetbackTeleportUtil#checkTeleportQueue} without needing {@code AcceptTeleportationPacket}, allowing
  * client movement and {@code <= 3.0}-block {@code Reach} checks from local position {@code B} within the server's
  * interaction radius around {@code A} ({@code 4.0} blocks on {@code 1.20.5/1.20.6}, {@code 6.0} blocks elsewhere).</p>
+ *
+ * <p>Important ViaFabricPlus detail: on {@code <= 1.21.1} targets, ViaVersion's {@code Protocol1_21To1_21_2}
+ * synthesizes an internal clientbound {@code PLAYER_POSITION} ({@code dx=dy=dz=0, yaw=-180, pitch=0, relatives=XYZ})
+ * right after {@code RESPAWN} and registers its random teleport ID in {@code TeleportAckCancelStorage}. Cancelling
+ * that synthetic {@code AcceptTeleportationPacket} above ViaVersion prevents {@code TeleportAckCancelStorage} from
+ * dropping the synthetic {@code PosRot}, leaking a bogus movement packet to GrimAC. {@link GodMode} detects and passes
+ * through that synthetic ViaVersion teleport so only real server teleports are latched.</p>
  */
 public class GodMode extends Module {
 
     static final int NO_TELEPORT_ID = Integer.MIN_VALUE;
 
+    private static final double STANDING_EYE_HEIGHT = 1.62;
+    private static final long RANGE_WARN_COOLDOWN_MS = 1500L;
     private static final Set<Relative> RELATIVE_POSITION_AXES = Set.of(Relative.X, Relative.Y, Relative.Z);
 
     public enum TriggerMode {
@@ -62,6 +75,10 @@ public class GodMode extends Module {
             "WorldChange arms on Respawn/Login transitions; RespawnOnly restricts to cross-world Respawn; AllTeleports latches on any teleport.",
             TriggerMode.WORLD_CHANGE));
 
+    private final NumberSetting skipTeleports = this.register(new NumberSetting("Skip Teleports",
+            "Real server teleports to confirm normally after arming before latching (useful if a duel plugin requires confirming initial spawn first).",
+            0.0F, 0.0F, 5.0F, 1.0F));
+
     private final BooleanSetting resyncOnDisable = this.register(new BooleanSetting("Resync On Disable",
             "Sends the latest suppressed TeleportConfirm when disabled so the server clears awaitingPositionFromClient cleanly.",
             true));
@@ -71,7 +88,7 @@ public class GodMode extends Module {
             false));
 
     private final BooleanSetting notify = this.register(new BooleanSetting("Notify",
-            "Prints local status lines when armed on world change and when the server anchor latches or moves.",
+            "Prints local status lines when armed/latched and warns when attacking a target outside server anchor range.",
             true));
 
     private final Object stateLock = new Object();
@@ -79,6 +96,11 @@ public class GodMode extends Module {
     private boolean armed;
     private boolean latched;
     private boolean dimensionInvulnerable;
+    private int remainingTeleportsToSkip;
+    private boolean expectingViaSyntheticRespawnTeleport;
+    private int passthroughTeleportId = NO_TELEPORT_ID;
+    private boolean ignoringViaSyntheticPosRot;
+
     private int lastTeleportId = NO_TELEPORT_ID;
     private int interceptedCount;
     private @Nullable Vec3 anchorPos;
@@ -88,6 +110,7 @@ public class GodMode extends Module {
     private boolean lastReportedOnGround;
     private boolean lastReportedHorizontalCollision;
     private int skippedIdleReminders;
+    private long lastRangeWarnMs;
 
     private volatile boolean releasing;
 
@@ -138,6 +161,21 @@ public class GodMode extends Module {
         }
     }
 
+    @EventTarget
+    public void onAttack(final EventAttack event) {
+        if (event.isCancelled() || !this.notify.get()) {
+            return;
+        }
+        Entity target = event.getTarget();
+        if (target == null) {
+            return;
+        }
+        String warning = this.evaluateAttackRangeWarning(target.getBoundingBox(), currentTargetVersion(), System.currentTimeMillis());
+        if (warning != null) {
+            this.notifyLocal(warning);
+        }
+    }
+
     @EventTarget(EventPriority.HIGHEST)
     public void onReceivePacket(final EventReceivePacket event) {
         if (event.isCancelled()) {
@@ -185,7 +223,7 @@ public class GodMode extends Module {
         if (packet instanceof ClientboundStartConfigurationPacket) {
             this.resetState();
         } else if (packet instanceof ClientboundRespawnPacket respawn) {
-            this.handleInboundRespawn(respawn);
+            this.handleInboundRespawn(respawn, version);
         } else if (packet instanceof ClientboundLoginPacket) {
             this.handleInboundLogin();
         } else if (packet instanceof ClientboundPlayerPositionPacket positionPacket) {
@@ -193,17 +231,26 @@ public class GodMode extends Module {
         }
     }
 
-    private void handleInboundRespawn(final ClientboundRespawnPacket respawn) {
+    private void handleInboundRespawn(
+            final ClientboundRespawnPacket respawn,
+            final @Nullable ProtocolVersion version
+    ) {
         TriggerMode mode = this.trigger.get();
         boolean keepsEntityState = respawn.shouldKeep(ClientboundRespawnPacket.KEEP_ENTITY_DATA);
+        int toSkip = Math.round(this.skipTeleports.get());
         synchronized (this.stateLock) {
             this.armed = true;
             this.latched = false;
             this.dimensionInvulnerable = keepsEntityState;
+            this.remainingTeleportsToSkip = Math.max(0, toSkip);
+            this.expectingViaSyntheticRespawnTeleport = requiresViaRespawnSyntheticFilter(version);
+            this.passthroughTeleportId = NO_TELEPORT_ID;
+            this.ignoringViaSyntheticPosRot = false;
             this.lastTeleportId = NO_TELEPORT_ID;
             this.interceptedCount = 0;
             this.anchorPos = null;
             this.awaitingRelativeReplyPosRot = false;
+            this.lastReportedPos = null;
             this.skippedIdleReminders = 0;
         }
         if (mode != TriggerMode.ALL_TELEPORTS) {
@@ -216,10 +263,15 @@ public class GodMode extends Module {
     private void handleInboundLogin() {
         TriggerMode mode = this.trigger.get();
         if (mode == TriggerMode.WORLD_CHANGE) {
+            int toSkip = Math.round(this.skipTeleports.get());
             synchronized (this.stateLock) {
                 this.armed = true;
                 this.latched = false;
                 this.dimensionInvulnerable = false;
+                this.remainingTeleportsToSkip = Math.max(0, toSkip);
+                this.expectingViaSyntheticRespawnTeleport = false;
+                this.passthroughTeleportId = NO_TELEPORT_ID;
+                this.ignoringViaSyntheticPosRot = false;
                 this.lastTeleportId = NO_TELEPORT_ID;
                 this.interceptedCount = 0;
                 this.anchorPos = null;
@@ -240,36 +292,55 @@ public class GodMode extends Module {
         TriggerMode mode = this.trigger.get();
         String notification = null;
         synchronized (this.stateLock) {
+            if (this.expectingViaSyntheticRespawnTeleport) {
+                this.expectingViaSyntheticRespawnTeleport = false;
+                if (isViaSyntheticRespawnTeleport(packet)) {
+                    this.passthroughTeleportId = packet.id();
+                    this.ignoringViaSyntheticPosRot = true;
+                    return;
+                }
+            }
+
             boolean shouldLatch = mode == TriggerMode.ALL_TELEPORTS || this.armed || this.latched;
             if (!shouldLatch) {
                 return;
             }
 
-            boolean wasLatched = this.latched;
-            Vec3 previousAnchor = this.anchorPos;
-            Vec3 reference = this.lastReportedPos != null ? this.lastReportedPos : previousAnchor;
-            Vec3 resolvedAnchor = resolveAnchorPosition(packet, reference);
-            boolean hasRelativeAxis = hasRelativePositionAxis(packet.relatives());
-
-            this.armed = false;
-            this.latched = true;
-            this.lastTeleportId = packet.id();
-            this.anchorPos = resolvedAnchor;
-            this.awaitingRelativeReplyPosRot = hasRelativeAxis;
-            this.skippedIdleReminders = 0;
-
-            boolean anchorMoved = previousAnchor == null || previousAnchor.distanceToSqr(resolvedAnchor) > 0.0625;
-            if (!wasLatched) {
+            if (!this.latched && this.remainingTeleportsToSkip > 0) {
+                this.remainingTeleportsToSkip--;
+                this.passthroughTeleportId = packet.id();
+                this.dimensionInvulnerable = false;
                 notification = String.format(Locale.ROOT,
-                        "[GodMode] Latched at (%.2f, %.2f, %.2f) [%s, server range %.1fm, Grim reach 3.0m].",
-                        resolvedAnchor.x, resolvedAnchor.y, resolvedAnchor.z,
-                        this.dimensionInvulnerable ? "Invulnerable + Anchor" : "Anchor Desync",
-                        serverAttackRange(version));
-            } else if (anchorMoved) {
-                notification = String.format(Locale.ROOT,
-                        "[GodMode] Anchor updated -> (%.2f, %.2f, %.2f) [id=%d].",
-                        resolvedAnchor.x, resolvedAnchor.y, resolvedAnchor.z,
-                        packet.id());
+                        "[GodMode] Confirmed & skipped teleport [id=%d] (%d remaining before latch).",
+                        packet.id(), this.remainingTeleportsToSkip);
+            } else {
+                boolean wasLatched = this.latched;
+                Vec3 previousAnchor = this.anchorPos;
+                Vec3 reference = this.lastReportedPos != null ? this.lastReportedPos : previousAnchor;
+                Vec3 resolvedAnchor = resolveAnchorPosition(packet, reference);
+                boolean hasRelativeAxis = hasRelativePositionAxis(packet.relatives());
+
+                this.armed = false;
+                this.latched = true;
+                this.lastTeleportId = packet.id();
+                this.anchorPos = resolvedAnchor;
+                this.awaitingRelativeReplyPosRot = hasRelativeAxis;
+                this.skippedIdleReminders = 0;
+
+                boolean anchorMoved = previousAnchor == null || previousAnchor.distanceToSqr(resolvedAnchor) > 0.0625;
+                if (!wasLatched) {
+                    notification = String.format(Locale.ROOT,
+                            "[GodMode] Latched at (%.2f, %.2f, %.2f) [id=%d, %s, server range %.1fm, Grim reach 3.0m].",
+                            resolvedAnchor.x, resolvedAnchor.y, resolvedAnchor.z,
+                            packet.id(),
+                            this.dimensionInvulnerable ? "Invulnerable + Anchor" : "Anchor Desync",
+                            serverAttackRange(version));
+                } else if (anchorMoved) {
+                    notification = String.format(Locale.ROOT,
+                            "[GodMode] Anchor updated -> (%.2f, %.2f, %.2f) [id=%d].",
+                            resolvedAnchor.x, resolvedAnchor.y, resolvedAnchor.z,
+                            packet.id());
+                }
             }
         }
 
@@ -283,7 +354,11 @@ public class GodMode extends Module {
             final ServerboundAcceptTeleportationPacket packet
     ) {
         synchronized (this.stateLock) {
-            if (!this.latched && !(this.trigger.is(TriggerMode.ALL_TELEPORTS))) {
+            if (this.passthroughTeleportId != NO_TELEPORT_ID && packet.getId() == this.passthroughTeleportId) {
+                this.passthroughTeleportId = NO_TELEPORT_ID;
+                return;
+            }
+            if (!this.latched && !(this.trigger.is(TriggerMode.ALL_TELEPORTS) && this.remainingTeleportsToSkip == 0)) {
                 return;
             }
             this.latched = true;
@@ -300,6 +375,11 @@ public class GodMode extends Module {
             final @Nullable ProtocolVersion version
     ) {
         synchronized (this.stateLock) {
+            if (this.ignoringViaSyntheticPosRot && move.hasPosition() && move.hasRotation()) {
+                this.ignoringViaSyntheticPosRot = false;
+                return;
+            }
+
             if (move.hasPosition()) {
                 Vec3 movePos = new Vec3(move.getX(0.0), move.getY(0.0), move.getZ(0.0));
                 if (this.latched && this.awaitingRelativeReplyPosRot && move.hasRotation()) {
@@ -327,6 +407,28 @@ public class GodMode extends Module {
             this.skippedIdleReminders = 0;
             this.lastReportedOnGround = move.isOnGround();
             this.lastReportedHorizontalCollision = move.horizontalCollision();
+        }
+    }
+
+    @Nullable String evaluateAttackRangeWarning(
+            final AABB targetBounds,
+            final @Nullable ProtocolVersion version,
+            final long nowMs
+    ) {
+        synchronized (this.stateLock) {
+            if (!this.latched || this.anchorPos == null) {
+                return null;
+            }
+            Vec3 anchorEye = this.anchorPos.add(0.0, STANDING_EYE_HEIGHT, 0.0);
+            double distance = Math.sqrt(targetBounds.distanceToSqr(anchorEye));
+            double maxRange = serverAttackRange(version);
+            if (distance <= maxRange || nowMs - this.lastRangeWarnMs < RANGE_WARN_COOLDOWN_MS) {
+                return null;
+            }
+            this.lastRangeWarnMs = nowMs;
+            return String.format(Locale.ROOT,
+                    "[GodMode] Target is %.2fm from server anchor A (%.1f, %.1f, %.1f) > %.1fm server limit!",
+                    distance, this.anchorPos.x, this.anchorPos.y, this.anchorPos.z, maxRange);
         }
     }
 
@@ -364,6 +466,10 @@ public class GodMode extends Module {
         this.armed = false;
         this.latched = false;
         this.dimensionInvulnerable = false;
+        this.remainingTeleportsToSkip = 0;
+        this.expectingViaSyntheticRespawnTeleport = false;
+        this.passthroughTeleportId = NO_TELEPORT_ID;
+        this.ignoringViaSyntheticPosRot = false;
         this.lastTeleportId = NO_TELEPORT_ID;
         this.interceptedCount = 0;
         this.anchorPos = null;
@@ -372,6 +478,7 @@ public class GodMode extends Module {
         this.lastReportedOnGround = false;
         this.lastReportedHorizontalCollision = false;
         this.skippedIdleReminders = 0;
+        this.lastRangeWarnMs = 0L;
     }
 
     private void notifyLocal(final String message) {
@@ -388,6 +495,25 @@ public class GodMode extends Module {
         } else {
             mc.execute(printTask);
         }
+    }
+
+    static boolean requiresViaRespawnSyntheticFilter(final @Nullable ProtocolVersion version) {
+        return version != null
+                && version.newerThanOrEqualTo(ProtocolVersion.v1_9)
+                && version.olderThan(ProtocolVersion.v1_21_2);
+    }
+
+    /**
+     * Matches the exact synthetic {@code PLAYER_POSITION} packet emitted by ViaVersion's
+     * {@code EntityPacketRewriter1_21_2} on {@code RESPAWN} for {@code <= 1.21.1} servers
+     * ({@code dx=dy=dz=0, deltaMovement=0, yaw=-180, pitch=0, relatives={X, Y, Z}}).
+     */
+    static boolean isViaSyntheticRespawnTeleport(final ClientboundPlayerPositionPacket packet) {
+        return packet.relatives().equals(RELATIVE_POSITION_AXES)
+                && packet.change().position().equals(Vec3.ZERO)
+                && packet.change().deltaMovement().equals(Vec3.ZERO)
+                && packet.change().yRot() == -180.0F
+                && packet.change().xRot() == 0.0F;
     }
 
     static Vec3 resolveAnchorPosition(
@@ -447,6 +573,14 @@ public class GodMode extends Module {
 
     void setTriggerMode(final TriggerMode mode) {
         this.trigger.set(mode);
+    }
+
+    int getSkipTeleports() {
+        return Math.round(this.skipTeleports.get());
+    }
+
+    void setSkipTeleports(final int count) {
+        this.skipTeleports.set((float) count);
     }
 
     boolean isResyncOnDisable() {

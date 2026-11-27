@@ -34,6 +34,7 @@ import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.PositionMoveRotation;
 import net.minecraft.world.entity.Relative;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
 
@@ -57,6 +58,7 @@ class GodModeTest {
         assertTrue(ModuleStyleFilter.CLASSIC.includes(godMode));
 
         assertSame(TriggerMode.WORLD_CHANGE, godMode.getTriggerMode());
+        assertEquals(0, godMode.getSkipTeleports());
         assertTrue(godMode.isResyncOnDisable());
         assertFalse(godMode.isSuppressIdleReminder());
         assertTrue(godMode.isNotify());
@@ -101,8 +103,7 @@ class GodModeTest {
             assertFalse(grimReply41.isCancelled());
             assertEquals(1, godMode.getInterceptedCount());
 
-            // 20 ticks later, ServerGamePacketListenerImpl#updateAwaitingTeleport resends A with id=42,
-            // followed by an arena start teleport to (120, 64, 205) with id=43 while isChangingDimension stays true.
+            // Subsequent resends or arena start teleports keep updating id & anchor while preserving invulnerability.
             EventBus.call(new EventReceivePacket(positionPacket(42, 100.0, 65.0, 200.0, Collections.emptySet())));
             assertTrue(EventBus.call(new EventSendPacket(new ServerboundAcceptTeleportationPacket(42))).isCancelled());
             assertEquals(42, godMode.getLastTeleportId());
@@ -116,6 +117,85 @@ class GodModeTest {
         } finally {
             godMode.setEnabled(false);
         }
+    }
+
+    @Test
+    void passesThroughViaVersionSyntheticRespawnTeleportOn1_20_6BeforeLatchingRealSpawn() {
+        GodMode godMode = new GodMode();
+        godMode.setNotify(false);
+
+        // Old lobby position (0.50, 65.00, -0.17) before Respawn.
+        godMode.processOutboundPacket(
+                new EventSendPacket(new ServerboundMovePlayerPacket.Pos(0.50, 65.00, -0.17, true, false)),
+                ProtocolVersion.v1_20_5);
+
+        // 1.20.6 Respawn arrives, followed immediately by ViaVersion Protocol1_21To1_21_2's synthetic rotation-reset
+        // teleport (random id, dx=dy=dz=0, yaw=-180, pitch=0, relatives={X, Y, Z}).
+        godMode.processInboundPacket(
+                new ClientboundRespawnPacket(null, ClientboundRespawnPacket.KEEP_ALL_DATA),
+                ProtocolVersion.v1_20_5);
+        int syntheticId = -84729104;
+        ClientboundPlayerPositionPacket viaSynthetic = ClientboundPlayerPositionPacket.of(
+                syntheticId,
+                new PositionMoveRotation(Vec3.ZERO, Vec3.ZERO, -180.0F, 0.0F),
+                EnumSet.of(Relative.X, Relative.Y, Relative.Z));
+        godMode.processInboundPacket(viaSynthetic, ProtocolVersion.v1_20_5);
+
+        // Must NOT latch onto ViaVersion's synthetic packet, and MUST let its AcceptTeleportation reach ViaVersion
+        // so TeleportAckCancelStorage cancels both the ack and the synthetic PosRot!
+        assertTrue(godMode.isArmed());
+        assertFalse(godMode.isLatched());
+        assertNull(godMode.getAnchorPos());
+
+        EventSendPacket syntheticConfirm = new EventSendPacket(new ServerboundAcceptTeleportationPacket(syntheticId));
+        godMode.processOutboundPacket(syntheticConfirm, ProtocolVersion.v1_20_5);
+        assertFalse(syntheticConfirm.isCancelled(), "ViaVersion synthetic TeleportConfirm must pass through to TeleportAckCancelStorage");
+
+        EventSendPacket syntheticPosRot = new EventSendPacket(
+                new ServerboundMovePlayerPacket.PosRot(0.0, 0.0, 0.0, -180.0F, 0.0F, false, false));
+        godMode.processOutboundPacket(syntheticPosRot, ProtocolVersion.v1_20_5);
+        assertFalse(syntheticPosRot.isCancelled());
+
+        // Real server Duel spawn teleport [id=7] at (46.50, 101.00, 47.50) arrives next -> latches cleanly!
+        godMode.processInboundPacket(
+                positionPacket(7, 46.50, 101.00, 47.50, Collections.emptySet()),
+                ProtocolVersion.v1_20_5);
+        assertFalse(godMode.isArmed());
+        assertTrue(godMode.isLatched());
+        assertTrue(godMode.isDimensionInvulnerable());
+        assertEquals(7, godMode.getLastTeleportId());
+        assertVecEquals(new Vec3(46.50, 101.00, 47.50), godMode.getAnchorPos());
+
+        EventSendPacket realConfirm = new EventSendPacket(new ServerboundAcceptTeleportationPacket(7));
+        godMode.processOutboundPacket(realConfirm, ProtocolVersion.v1_20_5);
+        assertTrue(realConfirm.isCancelled());
+    }
+
+    @Test
+    void skipTeleportsSettingConfirmsInitialSpawnAndLatchesNextTeleport() {
+        GodMode godMode = new GodMode();
+        godMode.setSkipTeleports(1);
+        godMode.setNotify(false);
+
+        godMode.processInboundPacket(
+                new ClientboundRespawnPacket(null, ClientboundRespawnPacket.KEEP_ALL_DATA),
+                ProtocolVersion.v1_20_5);
+
+        // First real teleport (id=7) is confirmed normally because skipTeleports == 1.
+        godMode.processInboundPacket(positionPacket(7, 46.50, 101.00, 47.50, Collections.emptySet()), ProtocolVersion.v1_20_5);
+        assertTrue(godMode.isArmed());
+        assertFalse(godMode.isLatched());
+        EventSendPacket confirm7 = new EventSendPacket(new ServerboundAcceptTeleportationPacket(7));
+        godMode.processOutboundPacket(confirm7, ProtocolVersion.v1_20_5);
+        assertFalse(confirm7.isCancelled());
+
+        // Second real teleport (id=8, arena pedestal) latches and cancels TeleportConfirm(8).
+        godMode.processInboundPacket(positionPacket(8, 50.50, 65.00, 47.50, Collections.emptySet()), ProtocolVersion.v1_20_5);
+        assertTrue(godMode.isLatched());
+        assertEquals(8, godMode.getLastTeleportId());
+        EventSendPacket confirm8 = new EventSendPacket(new ServerboundAcceptTeleportationPacket(8));
+        godMode.processOutboundPacket(confirm8, ProtocolVersion.v1_20_5);
+        assertTrue(confirm8.isCancelled());
     }
 
     @Test
@@ -230,7 +310,7 @@ class GodModeTest {
     }
 
     @Test
-    void protocolThresholdsAndIdleReminderSuppressionStayWithinGrimBounds() {
+    void protocolThresholdsAttackRangeWarningsAndIdleSuppressionStayWithinGrimBounds() {
         assertFalse(GodMode.supportsTeleportConfirm(ProtocolVersion.v1_8));
         assertTrue(GodMode.supportsTeleportConfirm(ProtocolVersion.v1_9));
         assertTrue(GodMode.supportsTeleportConfirm(ProtocolVersion.v1_20_5));
@@ -254,6 +334,15 @@ class GodModeTest {
         godMode.processOutboundPacket(
                 new EventSendPacket(new ServerboundMovePlayerPacket.PosRot(0.0, 64.0, 0.0, 0.0F, 0.0F, false, false)),
                 ProtocolVersion.v1_20_5);
+
+        // Within 4.0m of anchor eye (0, 65.62, 0): no warning; at 5.0m on 1.20.6: warns with cooldown; on 1.21 (6.0m): no warning.
+        AABB closeTarget = new AABB(3.2, 64.0, -0.3, 3.8, 65.8, 0.3);
+        AABB mediumTarget = new AABB(5.0, 64.0, -0.3, 5.6, 65.8, 0.3);
+        assertNull(godMode.evaluateAttackRangeWarning(closeTarget, ProtocolVersion.v1_20_5, 2000L));
+        assertNull(godMode.evaluateAttackRangeWarning(mediumTarget, ProtocolVersion.v1_21, 2000L));
+        assertNotNull(godMode.evaluateAttackRangeWarning(mediumTarget, ProtocolVersion.v1_20_5, 2000L));
+        assertNull(godMode.evaluateAttackRangeWarning(mediumTarget, ProtocolVersion.v1_20_5, 2500L), "Must throttle within 1500ms");
+        assertNotNull(godMode.evaluateAttackRangeWarning(mediumTarget, ProtocolVersion.v1_20_5, 3600L));
 
         // Player walks to B = (2.5, 64, 0) and stands still.
         EventSendPacket walkToB = new EventSendPacket(new ServerboundMovePlayerPacket.Pos(2.5, 64.0, 0.0, true, false));
